@@ -21,15 +21,19 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@arcjet/node": "^1.4.0",
-    "@neondatabase/serverless": "^1.1.0",
-    "better-auth": "^1.6.11",
+    "@arcjet/inspect": "^1.1.0",
+    "@arcjet/node": "^1.1.0",
+    "@neondatabase/serverless": "^1.0.2",
+    "better-auth": "^1.4.19",
+    "cloudinary": "^2.9.0",
     "cors": "^2.8.6",
-    "drizzle-orm": "^0.45.2",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
     "express": "^5.2.1",
-    "nodemailer": "^8.0.8",
-    "zod": "^4.4.3"
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -38,7 +42,6 @@
     "@types/nodemailer": "^8.0.0",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
-    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }

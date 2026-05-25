@@ -1,10 +1,12 @@
 import arcjet, { shield, detectBot, slidingWindow } from "@arcjet/node";
 
-if(!process.env.ARCJET_KEY && process.env.NODE_ENV !== "test") {
-  throw new Error("ARCJET_KEY is not set in the environment variables");
-};
+const isProduction = process.env.NODE_ENV === "production";
 
-const aj = process.env.NODE_ENV === "test" ? null : arcjet({
+if (!process.env.ARCJET_KEY && isProduction) {
+  throw new Error("ARCJET_KEY is not set in the environment variables");
+}
+
+const aj = !process.env.ARCJET_KEY ? null : arcjet({
   key: process.env.ARCJET_KEY!,
   rules: [
     shield({ mode: "LIVE" }),
