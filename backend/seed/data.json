@@ -1,0 +1,150 @@
+{
+  "staff": [
+    {
+      "firstName": "Konlaa",
+      "lastName": "Tikpokua",
+      "email": "konlaa.tikpokua@seed.local",
+      "phone": "0502334995",
+      "employeeId": "EMP-001",
+      "department": "Finance",
+      "position": "Payment Officer",
+      "momoNumber": "233501111111",
+      "momoName": "Konlaa Tikpokua",
+      "status": "active"
+    },
+    {
+      "firstName": "Cecelia",
+      "lastName": "Sulemana",
+      "email": "cecelia.sulemana@seed.local",
+      "phone": "0550319104",
+      "employeeId": "EMP-002",
+      "department": "Teaching",
+      "position": "Teacher",
+      "momoNumber": "233501111112",
+      "momoName": "Cecelia Sulemana",
+      "status": "active"
+    },
+    {
+      "firstName": "Martha",
+      "lastName": "Iddrisu",
+      "email": "martha.iddrisu@seed.local",
+      "phone": "0242237668",
+      "employeeId": "EMP-003",
+      "department": "Administration",
+      "position": "Assistant",
+      "momoNumber": "233501111113",
+      "momoName": "Martha Iddrisu",
+      "status": "active"
+    },
+    {
+      "firstName": "Peace",
+      "lastName": "Atanga",
+      "email": "peace.atanga@seed.local",
+      "phone": "0256622642",
+      "employeeId": "EMP-004",
+      "department": "Outreach",
+      "position": "Coordinator",
+      "momoNumber": "233501111114",
+      "momoName": "Peace Atanga",
+      "status": "active"
+    }
+  ],
+  "categories": [
+    {
+      "name": "Staff Allowance",
+      "description": "Recurring staff support payments",
+      "isActive": true
+    },
+    {
+      "name": "Travel Reimbursement",
+      "description": "Field travel and transport refunds",
+      "isActive": true
+    },
+    {
+      "name": "Project Bonus",
+      "description": "Ad-hoc reward or bonus payments",
+      "isActive": true
+    }
+  ],
+  "payments": [
+    {
+      "title": "July Staff Allowance",
+      "description": "Draft allowance batch for July",
+      "categoryName": "Staff Allowance",
+      "status": "draft",
+      "createdBy": "seed-officer-1"
+    },
+    {
+      "title": "Field Travel Reimbursement",
+      "description": "Submitted for approval after staff review",
+      "categoryName": "Travel Reimbursement",
+      "status": "pending_approval",
+      "createdBy": "seed-officer-1",
+      "approvingOfficer": "seed-approver-1",
+      "submittedAt": "2026-05-21T10:00:00.000Z"
+    },
+    {
+      "title": "Community Outreach Bonus",
+      "description": "Approved batch ready for processing",
+      "categoryName": "Project Bonus",
+      "status": "approved",
+      "createdBy": "seed-officer-1",
+      "approvingOfficer": "seed-approver-2",
+      "submittedAt": "2026-05-20T10:00:00.000Z",
+      "approvedBy": "seed-approver-2",
+      "approvedAt": "2026-05-20T12:30:00.000Z"
+    }
+  ],
+  "recipients": [
+    {
+      "paymentTitle": "July Staff Allowance",
+      "staffEmail": "cecelia.sulemana@seed.local",
+      "amount": "350.00",
+      "status": "pending",
+      "addedBy": "seed-officer-1"
+    },
+    {
+      "paymentTitle": "July Staff Allowance",
+      "staffEmail": "martha.iddrisu@seed.local",
+      "amount": "275.00",
+      "status": "pending",
+      "addedBy": "seed-officer-1"
+    },
+    {
+      "paymentTitle": "Field Travel Reimbursement",
+      "staffEmail": "peace.atanga@seed.local",
+      "amount": "125.00",
+      "status": "approved",
+      "note": "Verified travel report",
+      "verifiedBy": "seed-approver-1",
+      "verifiedAt": "2026-05-21T12:00:00.000Z",
+      "addedBy": "seed-officer-1"
+    },
+    {
+      "paymentTitle": "Field Travel Reimbursement",
+      "staffEmail": "konlaa.tikpokua@seed.local",
+      "amount": "200.00",
+      "status": "pending",
+      "addedBy": "seed-officer-1"
+    },
+    {
+      "paymentTitle": "Community Outreach Bonus",
+      "staffEmail": "cecelia.sulemana@seed.local",
+      "amount": "500.00",
+      "status": "approved",
+      "verifiedBy": "seed-approver-2",
+      "verifiedAt": "2026-05-20T12:00:00.000Z",
+      "addedBy": "seed-officer-1"
+    },
+    {
+      "paymentTitle": "Community Outreach Bonus",
+      "staffEmail": "peace.atanga@seed.local",
+      "amount": "500.00",
+      "status": "disapproved",
+      "note": "Duplicate payout already received",
+      "verifiedBy": "seed-approver-2",
+      "verifiedAt": "2026-05-20T12:10:00.000Z",
+      "addedBy": "seed-officer-1"
+    }
+  ]
+}

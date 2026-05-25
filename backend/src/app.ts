@@ -1,0 +1,95 @@
+import express from "express";
+import cors from "cors";
+import { toNodeHandler } from "better-auth/node";
+import securityMiddleware from "./middleware/security.js";
+import requireAuth from "./middleware/requireAuth.js";
+import { auth } from "./lib/auth.js";
+import staffRoutes from "./routes/staff.js";
+import categoryRoutes from "./routes/categories.js";
+import paymentRoutes from "./routes/payments.js";
+import paymentRecipientRoutes from "./routes/paymentRecipients.js";
+
+const app = express();
+
+const normalizeOrigin = (value: string) => {
+  const trimmed = value.trim().replace(/^['"]|['"]$/g, "").replace(/\/+$/, "");
+  if (!trimmed) return "";
+
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed;
+  }
+};
+
+const configuredFrontendUrls = (process.env.FRONTEND_URL ?? "")
+  .split(",")
+  .map((origin) => normalizeOrigin(origin))
+  .filter((origin) => Boolean(origin));
+
+const allowedOrigins = new Set<string>([
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+  "http://localhost:4173",
+  "http://localhost:4174",
+  "http://127.0.0.1:4173",
+  "http://127.0.0.1:4174",
+]);
+
+allowedOrigins.forEach((origin) => {
+  const normalized = normalizeOrigin(origin);
+  if (normalized !== origin) {
+    allowedOrigins.delete(origin);
+    allowedOrigins.add(normalized);
+  }
+});
+
+configuredFrontendUrls.forEach((origin) => {
+  allowedOrigins.add(origin);
+});
+
+app.use(
+  cors({
+    origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const normalizedRequestOrigin = normalizeOrigin(origin);
+
+      if (allowedOrigins.has(normalizedRequestOrigin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS blocked for origin: ${normalizedRequestOrigin}`));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    credentials: true,
+  }),
+);
+
+app.all("/api/auth/*splat", toNodeHandler(auth));
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use("/api", requireAuth);
+app.use("/api", securityMiddleware);
+
+// API Routes
+app.use("/api/staff", staffRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/payments/:paymentId/recipients", paymentRecipientRoutes);
+
+// Routes
+app.get("/", (req, res) => {
+  res.send("BMC Payment Backend server is running!");
+});
+
+export default app;
