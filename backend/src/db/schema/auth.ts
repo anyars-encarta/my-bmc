@@ -10,7 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Enum for user role
-export const roleEnum = pgEnum("role", ["staff", "teacher", "parent", "admin"]);
+export const roleEnum = pgEnum("role", ["accounts", "admin"]);
 export const userStatusEnum = pgEnum("status", ["active", "inactive"]);
 
 const timestamps = {
@@ -31,7 +31,7 @@ export const user = pgTable(
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
     // Custom fields
-    role: roleEnum("role").notNull().default("staff"),
+    role: roleEnum("role").notNull().default("accounts"),
     status: userStatusEnum("status").notNull().default("active"),
     imageCldPubId: text("image_cld_pub_id"),
     ...timestamps,

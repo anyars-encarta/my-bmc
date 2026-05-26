@@ -1,6 +1,6 @@
 {
-  "id": "54fa1345-df3a-4ce8-946b-4fc87179ac9c",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "798e3d7b-954d-40f4-99f9-6cb526351810",
+  "prevId": "14bfa152-d251-4f61-bca8-f0dbc1d5767d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -729,7 +729,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'accounts'"
+          "default": "'staff'"
         },
         "status": {
           "name": "status",
@@ -894,7 +894,9 @@
       "name": "role",
       "schema": "public",
       "values": [
-        "accounts",
+        "staff",
+        "teacher",
+        "parent",
         "admin"
       ]
     },
