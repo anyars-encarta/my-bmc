@@ -4,6 +4,7 @@ import {
   Coins,
   LayoutDashboard,
   Layers3,
+  Settings2,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -54,6 +55,16 @@ export const appResources: AppResource[] = [
     show: "/payments/show/:id",
     label: "Payments",
     icon: Coins,
+    canDelete: true,
+  },
+  {
+    name: "setup",
+    list: "/setup",
+    create: "/setup/create",
+    edit: "/setup/edit/:id",
+    show: "/setup/show/:id",
+    label: "Setup",
+    icon: Settings2,
     canDelete: true,
   },
   {

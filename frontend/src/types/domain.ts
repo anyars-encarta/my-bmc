@@ -65,3 +65,15 @@ export interface DisbursementRecord {
   status: "queued" | "sent" | "successful" | "failed";
   processedAt: string;
 }
+
+export interface SetupRecord {
+  id: string;
+  facilityName: string;
+  facilityCode: string;
+  telephone?: string;
+  email?: string;
+  address?: string;
+  logoUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

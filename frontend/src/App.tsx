@@ -30,6 +30,7 @@ import {
   PaymentList,
   PaymentShow,
 } from "./pages/payments";
+import { SetupCreate, SetupEdit, SetupShow } from "./pages/setup";
 import { StaffCreate, StaffEdit, StaffList, StaffShow } from "./pages/staff";
 import { dataProvider } from "./providers/data";
 
@@ -91,6 +92,12 @@ function App() {
                     <Route path="create" element={<PaymentCreate />} />
                     <Route path="edit/:id" element={<PaymentEdit />} />
                     <Route path="show/:id" element={<PaymentShow />} />
+                  </Route>
+                  <Route path="/setup">
+                    <Route index element={<SetupShow />} />
+                    <Route path="create" element={<SetupCreate />} />
+                    <Route path="edit/:id" element={<SetupEdit />} />
+                    <Route path="show/:id" element={<SetupShow />} />
                   </Route>
                   <Route path="/approvals" element={<ApprovalQueueList />} />
                   <Route
