@@ -112,6 +112,18 @@ export const paymentRecipients = pgTable("payment_recipients", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const facilitySetup = pgTable("facility_setup", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  facilityName: varchar("facility_name", { length: 255 }).notNull(),
+  facilityCode: varchar("facility_code", { length: 50 }).notNull(),
+  telephone: varchar("telephone", { length: 20 }),
+  email: varchar("email", { length: 255 }),
+  address: text("address"),
+  logoUrl: varchar("logo_url", { length: 255 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const staffRelations = relations(staff, ({ many }) => ({
