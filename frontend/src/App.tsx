@@ -1,4 +1,4 @@
-import { GitHubBanner, Refine } from "@refinedev/core";
+import { Refine } from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 
@@ -7,10 +7,8 @@ import routerProvider, {
   NavigateToResource,
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
-import { BadgeDollarSign } from "lucide-react";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 import "./App.css";
-import { APP_NAME } from "./constants/app";
 import { appResources } from "./constants/resources";
 import { ErrorComponent } from "./components/refine-ui/layout/error-component";
 import { Layout } from "./components/refine-ui/layout/layout";
@@ -38,7 +36,6 @@ import { dataProvider } from "./providers/data";
 function App() {
   return (
     <BrowserRouter>
-      <GitHubBanner />
       <RefineKbarProvider>
         <ThemeProvider>
           <DevtoolsProvider>
@@ -58,10 +55,6 @@ function App() {
                   canDelete: resource.canDelete,
                 },
               }))}
-              title={{
-                text: APP_NAME,
-                icon: <BadgeDollarSign className="h-4 w-4 text-cyan-500" />,
-              }}
               options={{
                 syncWithLocation: true,
                 warnWhenUnsavedChanges: true,

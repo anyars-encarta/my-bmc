@@ -7,13 +7,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { APP_NAME } from "@/constants/app";
 import { cn } from "@/lib/utils";
 import {
   useActiveAuthProvider,
   useLogout,
   useRefineOptions,
 } from "@refinedev/core";
-import { LogOutIcon } from "lucide-react";
+import { BadgeDollarSign, LogOutIcon } from "lucide-react";
 
 export const Header = () => {
   const { isMobile } = useSidebar();
@@ -50,6 +51,8 @@ function MobileHeader() {
   const { open, isMobile } = useSidebar();
 
   const { title } = useRefineOptions();
+  const appTitle = title?.text ?? APP_NAME;
+  const appIcon = title?.icon ?? <BadgeDollarSign className="h-4 w-4 text-cyan-500" />;
 
   return (
     <header
@@ -95,7 +98,7 @@ function MobileHeader() {
           }
         )}
       >
-        <div>{title.icon}</div>
+        <div>{appIcon}</div>
         <h2
           className={cn(
             "text-sm",
@@ -108,7 +111,7 @@ function MobileHeader() {
             }
           )}
         >
-          {title.text}
+          {appTitle}
         </h2>
       </div>
 

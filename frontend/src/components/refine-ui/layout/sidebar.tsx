@@ -27,7 +27,8 @@ import {
   useRefineOptions,
   type TreeMenuItem,
 } from "@refinedev/core";
-import { ChevronRight, ListIcon } from "lucide-react";
+import { APP_NAME } from "@/constants/app";
+import { BadgeDollarSign, ChevronRight, ListIcon } from "lucide-react";
 import React from "react";
 
 export function Sidebar() {
@@ -215,6 +216,8 @@ function SidebarItemLink({ item, selectedKey }: MenuItemProps) {
 function SidebarHeader() {
   const { title } = useRefineOptions();
   const { open, isMobile } = useShadcnSidebar();
+  const appTitle = title?.text ?? APP_NAME;
+  const appIcon = title?.icon ?? <BadgeDollarSign className="h-4 w-4 text-cyan-500" />;
 
   return (
     <ShadcnSidebarHeader
@@ -246,7 +249,7 @@ function SidebarHeader() {
           }
         )}
       >
-        <div>{title.icon}</div>
+        <div>{appIcon}</div>
         <h2
           className={cn(
             "text-sm",
@@ -259,7 +262,7 @@ function SidebarHeader() {
             }
           )}
         >
-          {title.text}
+          {appTitle}
         </h2>
       </div>
 
