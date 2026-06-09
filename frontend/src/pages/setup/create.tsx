@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { LogoUploader } from "@/components/setup/LogoUploader";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -15,15 +17,22 @@ import {
 } from "@/components/refine-ui/views/create-view";
 import type { SetupRecord } from "@/types/domain";
 import { useForm } from "@refinedev/react-hook-form";
+import { useController } from "react-hook-form";
 import { useNavigate } from "react-router";
 
 export const SetupCreate = () => {
   const navigate = useNavigate();
+  const form = useForm<SetupRecord>({
+    refineCoreProps: {},
+  });
+
   const {
     refineCore: { onFinish },
-    ...form
-  } = useForm<SetupRecord>({
-    refineCoreProps: {},
+  } = form;
+
+  const { field: logoField } = useController({
+    control: form.control as any,
+    name: "logoUrl",
   });
 
   const onSubmit = (values: SetupRecord) => {
@@ -33,59 +42,68 @@ export const SetupCreate = () => {
   return (
     <CreateView className="space-y-4">
       <CreateViewHeader title="Create Facility Setup" />
-      <Form {...form}>
-        <form
-          onSubmit={form.handleSubmit(onSubmit)}
-          className="grid gap-4 rounded-lg border border-border bg-card p-6 md:grid-cols-2"
-        >
-          <Field form={form} name="facilityName" label="Facility Name" required />
-          <Field form={form} name="facilityCode" label="Facility Code" required />
-          <Field form={form} name="telephone" label="Telephone" />
-          <Field form={form} name="email" label="Email" type="email" />
-          <Field form={form} name="logoUrl" label="Logo URL" />
+      <Form {...(form as any)}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit as any)}
+        className="grid gap-4 rounded-lg border border-border bg-card p-6 md:grid-cols-2"
+      >
+        <Field control={form.control} name="facilityName" label="Facility Name" required />
+        <Field control={form.control} name="facilityCode" label="Facility Code" required />
+        <Field control={form.control} name="telephone" label="Telephone" />
+        <Field control={form.control} name="email" label="Email" type="email" />
 
-          <FormField
-            control={form.control}
-            name="address"
-            render={({ field }) => (
-              <FormItem className="md:col-span-2">
-                <FormLabel>Address</FormLabel>
-                <FormControl>
-                  <Textarea
-                    {...field}
-                    value={field.value || ""}
-                    placeholder="Enter facility address"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+        <FormField
+          control={form.control as any}
+          name="address"
+          render={({ field }) => (
+            <FormItem className="md:col-span-2">
+              <FormLabel>Address</FormLabel>
+              <FormControl>
+                <Textarea
+                  {...field}
+                  value={(field.value as string) || ""}
+                  placeholder="Enter facility address"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-          <div className="md:col-span-2 flex gap-2">
-            <Button type="submit" {...form.saveButtonProps}>Save Setup</Button>
-            <Button type="button" variant="outline" onClick={() => navigate(-1)}>
-              Cancel
-            </Button>
+        <div className="md:col-span-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium leading-none">Facility Logo</label>
+            <LogoUploader
+              value={(logoField.value as string) || ""}
+              onChange={logoField.onChange}
+            />
           </div>
-        </form>
+        </div>
+
+        <div className="md:col-span-2 flex gap-2">
+          <Button type="submit" {...form.saveButtonProps}>Save Setup</Button>
+          <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+            Cancel
+          </Button>
+        </div>
+      </form>
       </Form>
     </CreateView>
   );
 };
 
 type FieldProps = {
-  form: ReturnType<typeof useForm<SetupRecord>>;
+  control: any;
   name: keyof SetupRecord;
   label: string;
   type?: string;
   required?: boolean;
 };
 
-function Field({ form, name, label, type = "text", required = false }: FieldProps) {
+function Field({ control, name, label, type = "text", required = false }: FieldProps) {
   return (
     <FormField
-      control={form.control}
+      control={control}
       name={name as string}
       rules={required ? { required: `${label} is required` } : undefined}
       render={({ field }) => (
