@@ -220,6 +220,17 @@ export const reviewRecipientSchema = z.object({
   note: z.string().optional(),
 });
 
+export const insertFacilitySetupSchema = createInsertSchema(facilitySetup, {
+  facilityName: z.string().min(1).max(255),
+  facilityCode: z.string().min(1).max(50),
+  telephone: z.string().max(20).optional(),
+  email: z.string().email().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+export const updateFacilitySetupSchema = insertFacilitySetupSchema.partial();
+
+export const selectFacilitySetupSchema = createSelectSchema(facilitySetup);
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Staff = typeof staff.$inferSelect;
@@ -230,3 +241,5 @@ export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
 export type PaymentRecipient = typeof paymentRecipients.$inferSelect;
 export type NewPaymentRecipient = typeof paymentRecipients.$inferInsert;
+export type FacilitySetup = typeof facilitySetup.$inferSelect;
+export type NewFacilitySetup = typeof facilitySetup.$inferInsert;
