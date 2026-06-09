@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap");
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -42,7 +44,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Sora", "Segoe UI", sans-serif;
 }
 
 :root {
@@ -70,7 +72,7 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.975 0.01 205);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -121,6 +123,11 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 15% -5%, rgba(7, 166, 202, 0.15), transparent 38%),
+      radial-gradient(circle at 85% 0%, rgba(22, 163, 74, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 252, 0.96));
+    min-height: 100vh;
   }
 }
 
@@ -130,5 +137,21 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .shell-float {
+    animation: shell-float 6s ease-in-out infinite;
+  }
+}
+
+@keyframes shell-float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
   }
 }

@@ -1,51 +1,45 @@
-import { useTable } from "@refinedev/react-table";
-import { createColumnHelper } from "@tanstack/react-table";
-import React from "react";
 import { Badge } from "@/components/ui/badge";
-
 import { DeleteButton } from "@/components/refine-ui/buttons/delete";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { DataTable } from "@/components/refine-ui/data-table/data-table";
 import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import { useTable } from "@refinedev/react-table";
+import { createColumnHelper } from "@tanstack/react-table";
+import { useMemo } from "react";
+import type { StaffRecord } from "@/types/domain";
 
-type Category = {
-  id: string;
-  name: string;
-  description?: string;
-  isActive: boolean;
-};
-
-export const CategoryList = () => {
-  const columns = React.useMemo(() => {
-    const columnHelper = createColumnHelper<Category>();
+export const StaffList = () => {
+  const columns = useMemo(() => {
+    const helper = createColumnHelper<StaffRecord>();
 
     return [
-      columnHelper.accessor("id", {
-        id: "id",
-        header: "ID",
-        enableSorting: false,
+      helper.accessor("employeeId", {
+        id: "employeeId",
+        header: "Employee ID",
       }),
-      columnHelper.accessor("name", {
-        id: "name",
-        header: "Category",
-        enableSorting: true,
+      helper.accessor((row) => `${row.firstName} ${row.lastName}`, {
+        id: "fullName",
+        header: "Full Name",
       }),
-      columnHelper.accessor("description", {
-        id: "description",
-        header: "Description",
-        cell: ({ row }) => row.original.description || "-",
+      helper.accessor("email", {
+        id: "email",
+        header: "Email",
       }),
-      columnHelper.accessor("isActive", {
-        id: "isActive",
+      helper.accessor("momoNumber", {
+        id: "momoNumber",
+        header: "MoMo Number",
+      }),
+      helper.accessor("status", {
+        id: "status",
         header: "Status",
         cell: ({ row }) => (
-          <Badge variant={row.original.isActive ? "default" : "outline"}>
-            {row.original.isActive ? "Active" : "Inactive"}
+          <Badge variant={row.original.status === "active" ? "default" : "outline"}>
+            {row.original.status}
           </Badge>
         ),
       }),
-      columnHelper.display({
+      helper.display({
         id: "actions",
         header: "Actions",
         cell: ({ row }) => (
@@ -55,8 +49,7 @@ export const CategoryList = () => {
             <DeleteButton recordItemId={row.original.id} size="sm" />
           </div>
         ),
-        enableSorting: false,
-        size: 290,
+        size: 280,
       }),
     ];
   }, []);
@@ -69,8 +62,8 @@ export const CategoryList = () => {
   });
 
   return (
-    <ListView>
-      <ListViewHeader title="Payment Categories" />
+    <ListView className="space-y-4">
+      <ListViewHeader title="Staff Directory" />
       <DataTable table={table} />
     </ListView>
   );

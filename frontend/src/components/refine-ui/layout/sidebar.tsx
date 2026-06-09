@@ -35,7 +35,10 @@ export function Sidebar() {
   const { menuItems, selectedKey } = useMenu();
 
   return (
-    <ShadcnSidebar collapsible="icon" className={cn("border-none")}>
+    <ShadcnSidebar
+      collapsible="icon"
+      className={cn("border-none bg-linear-to-b from-cyan-500/10 via-transparent to-emerald-500/10")}
+    >
       <ShadcnSidebarRail />
       <SidebarHeader />
       <ShadcnSidebarContent
@@ -47,8 +50,8 @@ export function Sidebar() {
           "gap-2",
           "pt-2",
           "pb-2",
-          "border-r",
-          "border-border",
+          "border-r border-border/60",
+          "backdrop-blur-sm",
           {
             "px-3": open,
             "px-1": !open,
@@ -340,12 +343,14 @@ function SidebarButton({
       variant="ghost"
       size="lg"
       className={cn(
-        "flex w-full items-center justify-start gap-2 py-2 !px-3 text-sm",
+        "flex w-full items-center justify-start gap-2 py-2 px-3! text-sm",
+        "transition-all duration-200 hover:-translate-y-px",
         {
           "bg-sidebar-primary": isSelected,
-          "hover:!bg-sidebar-primary/90": isSelected,
+          "hover:bg-sidebar-primary/90!": isSelected,
           "text-sidebar-primary-foreground": isSelected,
           "hover:text-sidebar-primary-foreground": isSelected,
+          "hover:bg-cyan-500/10": !isSelected,
         },
         className
       )}

@@ -7,25 +7,32 @@ import routerProvider, {
   NavigateToResource,
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
+import { BadgeDollarSign } from "lucide-react";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 import "./App.css";
+import { APP_NAME } from "./constants/app";
+import { appResources } from "./constants/resources";
 import { ErrorComponent } from "./components/refine-ui/layout/error-component";
 import { Layout } from "./components/refine-ui/layout/layout";
 import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
-import {
-  BlogPostCreate,
-  BlogPostEdit,
-  BlogPostList,
-  BlogPostShow,
-} from "./pages/blog-posts";
+import { ApprovalQueueList } from "./pages/approvals";
 import {
   CategoryCreate,
   CategoryEdit,
   CategoryList,
   CategoryShow,
 } from "./pages/categories";
+import { DashboardPage } from "./pages/dashboard";
+import { DisbursementList } from "./pages/disbursements";
+import {
+  PaymentCreate,
+  PaymentEdit,
+  PaymentList,
+  PaymentShow,
+} from "./pages/payments";
+import { StaffCreate, StaffEdit, StaffList, StaffShow } from "./pages/staff";
 import { dataProvider } from "./providers/data";
 
 function App() {
@@ -39,28 +46,22 @@ function App() {
               dataProvider={dataProvider}
               notificationProvider={useNotificationProvider()}
               routerProvider={routerProvider}
-              resources={[
-                {
-                  name: "blog_posts",
-                  list: "/blog-posts",
-                  create: "/blog-posts/create",
-                  edit: "/blog-posts/edit/:id",
-                  show: "/blog-posts/show/:id",
-                  meta: {
-                    canDelete: true,
-                  },
+              resources={appResources.map((resource) => ({
+                name: resource.name,
+                list: resource.list,
+                create: resource.create,
+                edit: resource.edit,
+                show: resource.show,
+                meta: {
+                  label: resource.label,
+                  icon: <resource.icon className="h-4 w-4" />,
+                  canDelete: resource.canDelete,
                 },
-                {
-                  name: "categories",
-                  list: "/categories",
-                  create: "/categories/create",
-                  edit: "/categories/edit/:id",
-                  show: "/categories/show/:id",
-                  meta: {
-                    canDelete: true,
-                  },
-                },
-              ]}
+              }))}
+              title={{
+                text: APP_NAME,
+                icon: <BadgeDollarSign className="h-4 w-4 text-cyan-500" />,
+              }}
               options={{
                 syncWithLocation: true,
                 warnWhenUnsavedChanges: true,
@@ -77,13 +78,14 @@ function App() {
                 >
                   <Route
                     index
-                    element={<NavigateToResource resource="blog_posts" />}
+                    element={<NavigateToResource resource="dashboard" />}
                   />
-                  <Route path="/blog-posts">
-                    <Route index element={<BlogPostList />} />
-                    <Route path="create" element={<BlogPostCreate />} />
-                    <Route path="edit/:id" element={<BlogPostEdit />} />
-                    <Route path="show/:id" element={<BlogPostShow />} />
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/staff">
+                    <Route index element={<StaffList />} />
+                    <Route path="create" element={<StaffCreate />} />
+                    <Route path="edit/:id" element={<StaffEdit />} />
+                    <Route path="show/:id" element={<StaffShow />} />
                   </Route>
                   <Route path="/categories">
                     <Route index element={<CategoryList />} />
@@ -91,6 +93,17 @@ function App() {
                     <Route path="edit/:id" element={<CategoryEdit />} />
                     <Route path="show/:id" element={<CategoryShow />} />
                   </Route>
+                  <Route path="/payments">
+                    <Route index element={<PaymentList />} />
+                    <Route path="create" element={<PaymentCreate />} />
+                    <Route path="edit/:id" element={<PaymentEdit />} />
+                    <Route path="show/:id" element={<PaymentShow />} />
+                  </Route>
+                  <Route path="/approvals" element={<ApprovalQueueList />} />
+                  <Route
+                    path="/disbursements"
+                    element={<DisbursementList />}
+                  />
                   <Route path="*" element={<ErrorComponent />} />
                 </Route>
               </Routes>
