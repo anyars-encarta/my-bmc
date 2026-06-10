@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import type { NextFunction, Request, Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import securityMiddleware from "./middleware/security.js";
 import requireAuth from "./middleware/requireAuth.js";
@@ -96,6 +97,12 @@ app.use("/api/payments/:paymentId/recipients", paymentRecipientRoutes);
 // Routes
 app.get("/", (req, res) => {
   res.send("BMC Payment Backend server is running!");
+});
+
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const message = error instanceof Error ? error.message : "Internal server error";
+  console.error("Unhandled API error:", error);
+  res.status(500).json({ error: message });
 });
 
 export default app;
