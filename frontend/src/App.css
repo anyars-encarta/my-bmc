@@ -260,15 +260,61 @@
 }
 
 .sign-in-panel {
-  @apply flex w-full items-center justify-center px-6 py-12 md:px-10;
+  @apply flex w-full flex-col items-center justify-center gap-6 px-6 py-12 md:px-10;
 }
 
 .sign-in-card-surface {
   @apply mt-0 w-full max-w-120 border-white/70 bg-white/88 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.14)] backdrop-blur-xl md:p-10;
 }
 
+.sign-in-mobile-hero {
+  @apply relative w-full max-w-120 overflow-hidden rounded-4xl border border-white/70 bg-white/72 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.12)] backdrop-blur-xl;
+}
+
+.sign-in-mobile-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(34, 197, 94, 0.18), transparent 30%),
+    radial-gradient(circle at 10% 15%, rgba(8, 145, 178, 0.14), transparent 26%);
+  pointer-events: none;
+}
+
+.sign-in-mobile-copy {
+  @apply relative z-10 mb-4 space-y-3;
+}
+
+.sign-in-mobile-title {
+  @apply text-2xl font-semibold tracking-tight text-slate-900;
+}
+
+.sign-in-mobile-description {
+  @apply max-w-xl text-sm leading-6 text-slate-600;
+}
+
+.sign-in-mobile-media {
+  @apply relative z-10 overflow-hidden rounded-3xl border border-cyan-100 bg-linear-to-br from-cyan-50 to-emerald-50 p-2;
+}
+
+.sign-in-mobile-image {
+  @apply h-52 w-full rounded-[1.15rem] object-cover object-center;
+}
+
 .sign-in-title {
   @apply text-3xl font-semibold tracking-tight text-sky-700;
+}
+
+.sign-in-field-label {
+  @apply text-sm font-semibold text-slate-800;
+}
+
+.sign-in-field-input {
+  @apply border-slate-200 bg-white/92 text-slate-900 placeholder:text-slate-400 shadow-sm;
+}
+
+.sign-in-field-input:focus-visible {
+  @apply border-cyan-400 ring-cyan-200/70;
 }
 
 .sign-in-link {
@@ -297,15 +343,61 @@
 }
 
 .sign-in-hero-copy {
-  @apply absolute left-10 top-10 z-10 max-w-sm text-white;
+  @apply absolute left-10 top-10 z-20 max-w-sm text-white;
+}
+
+.sign-in-hero-pills {
+  @apply mt-6 flex flex-wrap gap-2;
+}
+
+.sign-in-hero-pill {
+  @apply inline-flex rounded-full border border-white/20 bg-white/12 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur;
 }
 
 .sign-in-hero-kicker {
   @apply mb-3 inline-flex rounded-full border border-white/30 bg-white/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/90 backdrop-blur;
 }
 
+.sign-in-hero-media {
+  @apply relative z-10 mx-auto mb-0 mt-auto flex h-[min(78vh,calc(100vh-7rem))] w-[min(88%,44rem)] items-center justify-center overflow-hidden rounded-4xl border border-white/12 bg-white/8 p-4 shadow-2xl backdrop-blur-sm;
+}
+
+.sign-in-hero-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  background: linear-gradient(
+    180deg,
+    rgba(10, 38, 55, 0.4) 0%,
+    rgba(10, 38, 55, 0.14) 28%,
+    rgba(10, 38, 55, 0.08) 100%
+  );
+  pointer-events: none;
+}
+
+.sign-in-hero-orb {
+  @apply absolute rounded-full blur-3xl;
+}
+
+.sign-in-hero-orb-one {
+  top: 8%;
+  left: 10%;
+  width: 12rem;
+  height: 12rem;
+  background: rgba(34, 211, 238, 0.22);
+}
+
+.sign-in-hero-orb-two {
+  right: 12%;
+  bottom: 12%;
+  width: 14rem;
+  height: 14rem;
+  background: rgba(16, 185, 129, 0.2);
+}
+
 .sign-in-hero-image {
-  @apply relative z-10 mx-auto mb-0 mt-auto h-[78vh] w-[88%] rounded-4xl object-cover object-top shadow-2xl;
+  @apply relative z-10 h-full w-full max-h-full max-w-full rounded-[1.75rem] object-contain object-center opacity-55 shadow-[0_18px_50px_rgba(15,23,42,0.28)];
 }
 
 @keyframes sign-in-card-enter {
