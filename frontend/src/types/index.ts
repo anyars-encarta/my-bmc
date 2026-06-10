@@ -6,3 +6,8 @@ export type MetricCardProps = {
   description: string;
   icon: ReactNode;
 };
+
+export type UploadWidgetValue = {
+  url: string;
+  publicId?: string | null;
+};

@@ -123,10 +123,21 @@
   }
   body {
     @apply bg-background text-foreground;
-    background-image:
-      radial-gradient(circle at 15% -5%, rgba(7, 166, 202, 0.15), transparent 38%),
-      radial-gradient(circle at 85% 0%, rgba(22, 163, 74, 0.12), transparent 34%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 252, 0.96));
+    background-image: radial-gradient(
+        circle at 15% -5%,
+        rgba(7, 166, 202, 0.15),
+        transparent 38%
+      ),
+      radial-gradient(
+        circle at 85% 0%,
+        rgba(22, 163, 74, 0.12),
+        transparent 34%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.95),
+        rgba(248, 251, 252, 0.96)
+      );
     min-height: 100vh;
   }
 }
@@ -153,5 +164,45 @@
   }
   50% {
     transform: translateY(-4px);
+  }
+}
+
+.upload-dropzone {
+  @apply flex flex-col items-center justify-center gap-4 min-h-40 border-2 border-dashed border-foreground/20 bg-primary/5 w-full mt-3 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed rounded-md;
+
+  .upload-prompt {
+    @apply flex flex-col sm:flex-row items-center justify-center gap-4 p-5;
+
+    .icon {
+      @apply size-10 text-orange-600;
+    }
+
+    div {
+      @apply text-center sm:text-left;
+
+      :first-child {
+        @apply text-sm font-bold text-orange-600 mb-1;
+      }
+
+      :last-child {
+        @apply text-xs text-foreground/60;
+      }
+    }
+  }
+}
+
+.upload-preview {
+  @apply relative w-full;
+
+  img {
+    @apply size-full object-cover rounded-md;
+  }
+
+  button {
+    @apply absolute top-2 right-3 z-10 cursor-pointer text-red-500 hover:text-red-700;
+  }
+
+  span {
+    @apply absolute top-2 right-3 z-10 text-red-500 text-sm font-semibold bg-primary-foreground px-2 py-1 rounded-md;
   }
 }

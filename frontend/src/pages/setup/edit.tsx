@@ -1,4 +1,4 @@
-import { LogoUploader } from "@/components/setup/LogoUploader";
+import UploadWidget from "@/components/upload-widget";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -11,6 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EditView, EditViewHeader } from "@/components/refine-ui/views/edit-view";
+import type { UploadWidgetValue } from "@/types/index";
 import type { SetupRecord } from "@/types/domain";
 import { useForm } from "@refinedev/react-hook-form";
 import { useController } from "react-hook-form";
@@ -69,9 +70,12 @@ export const SetupEdit = () => {
         <div className="md:col-span-2">
           <div className="space-y-2">
             <label className="text-sm font-medium leading-none">Facility Logo</label>
-            <LogoUploader
-              value={(logoField.value as string) || ""}
-              onChange={logoField.onChange}
+            <UploadWidget
+              value={logoField.value ? { url: String(logoField.value) } : null}
+              onChange={(nextValue: UploadWidgetValue | null) => {
+                logoField.onChange(nextValue?.url ?? "");
+              }}
+              folder="bmc/logos"
             />
           </div>
         </div>
