@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import PageLoader from "@/components/PageLoader";
 import UploadWidget from "@/components/upload-widget";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,7 @@ export const SetupCreate = () => {
 
   const {
     refineCore: { onFinish },
+    formState: { isSubmitting },
   } = form;
 
   const { field: logoField } = useController({
@@ -85,7 +87,16 @@ export const SetupCreate = () => {
         </div>
 
         <div className="md:col-span-2 flex gap-2">
-          <Button type="submit" {...form.saveButtonProps}>Save Setup</Button>
+          <Button type="submit" {...form.saveButtonProps}>
+            {isSubmitting ? (
+              <span className="inline-flex items-center gap-2">
+                <PageLoader inline />
+                Saving...
+              </span>
+            ) : (
+              "Save Setup"
+            )}
+          </Button>
           <Button type="button" variant="outline" onClick={() => navigate(-1)}>
             Cancel
           </Button>

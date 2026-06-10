@@ -1,5 +1,8 @@
 import { EditButton } from "@/components/refine-ui/buttons/edit";
-import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import {
+  ListView,
+  ListViewHeader,
+} from "@/components/refine-ui/views/list-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,10 +37,7 @@ export const SetupShow = () => {
 
   return (
     <ListView className="space-y-4">
-      <ListViewHeader
-        title="Facility Setup"
-        canCreate={!hasRecord}
-      />
+      <ListViewHeader title="Facility Setup" canCreate={!hasRecord} />
 
       {!hasRecord ? (
         <Card className="border-dashed">
@@ -61,7 +61,7 @@ export const SetupShow = () => {
                 <img
                   src={record.logoUrl}
                   alt={record.facilityName}
-                  className="h-14 w-14 rounded-md object-contain border border-border bg-white p-1"
+                  className="h-40 w-40 rounded-md object-contain border border-border bg-white p-1"
                 />
               ) : (
                 <div className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-border bg-muted">
@@ -73,22 +73,22 @@ export const SetupShow = () => {
                 <Badge variant="outline" className="mt-1 font-mono text-xs">
                   {record.facilityCode}
                 </Badge>
+
+                <CardContent className="grid gap-5 sm:grid-cols-2 pt-2">
+                  <DataLine label="Telephone" value={record.telephone} />
+                  <DataLine label="Email" value={record.email} />
+                  <div className="sm:col-span-2">
+                    <DataLine label="Address" value={record.address} />
+                  </div>
+                </CardContent>
               </div>
             </div>
-            <EditButton recordItemId={record.id} resource="setup" variant="outline" />
+            <EditButton
+              recordItemId={record.id}
+              resource="setup"
+              variant="outline"
+            />
           </CardHeader>
-          <CardContent className="grid gap-5 sm:grid-cols-2 pt-2">
-            <DataLine label="Telephone" value={record.telephone} />
-            <DataLine label="Email" value={record.email} />
-            <div className="sm:col-span-2">
-              <DataLine label="Address" value={record.address} />
-            </div>
-            {record.logoUrl && (
-              <div className="sm:col-span-2">
-                <DataLine label="Logo URL" value={record.logoUrl} />
-              </div>
-            )}
-          </CardContent>
         </Card>
       )}
     </ListView>
@@ -98,7 +98,9 @@ export const SetupShow = () => {
 function DataLine({ label, value }: { label: string; value?: string }) {
   return (
     <div className="space-y-1">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
       <p className="text-sm font-medium wrap-break-word">{value || "-"}</p>
     </div>
   );
