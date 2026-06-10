@@ -14,6 +14,7 @@ export interface StaffRecord {
   id: string;
   firstName: string;
   lastName: string;
+  imageUrl?: string;
   email: string;
   employeeId: string;
   momoNumber: string;

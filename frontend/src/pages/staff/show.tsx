@@ -1,4 +1,5 @@
 import { ShowView, ShowViewHeader } from "@/components/refine-ui/views/show-view";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useShow } from "@refinedev/core";
@@ -7,14 +8,24 @@ import type { StaffRecord } from "@/types/domain";
 export const StaffShow = () => {
   const { result: record } = useShow<StaffRecord>({});
 
+  const initials = `${record?.firstName?.[0] ?? ""}${record?.lastName?.[0] ?? ""}`
+    .trim()
+    .toUpperCase() || "S";
+
   return (
     <ShowView className="space-y-4">
       <ShowViewHeader title="Staff Profile" />
       <Card>
         <CardHeader>
-          <CardTitle>
-            {record?.firstName} {record?.lastName}
-          </CardTitle>
+          <div className="flex items-center gap-3">
+            <Avatar className="size-12 border">
+              <AvatarImage src={record?.imageUrl ?? ""} alt={`${record?.firstName ?? ""} ${record?.lastName ?? ""}`.trim()} />
+              <AvatarFallback>{initials}</AvatarFallback>
+            </Avatar>
+            <CardTitle>
+              {record?.firstName} {record?.lastName}
+            </CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <DataItem label="Employee ID" value={record?.employeeId} />

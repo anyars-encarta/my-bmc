@@ -16,23 +16,58 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CreateView, CreateViewHeader } from "@/components/refine-ui/views/create-view";
+import {
+  CreateView,
+  CreateViewHeader,
+} from "@/components/refine-ui/views/create-view";
+import { BaseRecord, HttpError } from "@refinedev/core";
 import { useForm } from "@refinedev/react-hook-form";
+import { SubmitHandler } from "react-hook-form";
 import { useNavigate } from "react-router";
+import PageLoader from "@/components/PageLoader";
+import UploadWidget from "@/components/upload-widget";
+import type { UploadWidgetValue } from "@/types";
+
+type StaffCreateValues = {
+  firstName: string;
+  lastName: string;
+  imageUrl?: string;
+  email: string;
+  employeeId: string;
+  momoNumber: string;
+  momoName?: string;
+  department?: string;
+  position?: string;
+  phone?: string;
+  status: string;
+};
 
 export const StaffCreate = () => {
   const navigate = useNavigate();
-  const {
-    refineCore: { onFinish },
-    ...form
-  } = useForm({
+
+  const form = useForm<BaseRecord, HttpError, StaffCreateValues>({
     refineCoreProps: {},
     defaultValues: {
+      firstName: "",
+      lastName: "",
+      imageUrl: "",
+      email: "",
+      employeeId: "",
+      momoNumber: "",
+      momoName: "",
+      department: "",
+      position: "",
+      phone: "",
       status: "active",
     },
   });
 
-  const onSubmit = (values: Record<string, string>) => {
+  const {
+    refineCore: { onFinish },
+    formState: { isSubmitting },
+  } = form;
+
+  const onSubmit: SubmitHandler<StaffCreateValues> = (values) => {
     onFinish(values);
   };
 
@@ -46,6 +81,25 @@ export const StaffCreate = () => {
         >
           <TextField form={form} name="firstName" label="First Name" />
           <TextField form={form} name="lastName" label="Last Name" />
+
+          <FormField
+            control={form.control}
+            name="imageUrl"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Profile Photo</FormLabel>
+                <FormControl>
+                  <UploadWidget
+                    value={field.value ? ({ url: field.value } as UploadWidgetValue) : null}
+                    onChange={(nextValue) => field.onChange(nextValue?.url ?? "")}
+                    folder="staff"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
           <TextField form={form} name="email" label="Email" type="email" />
           <TextField form={form} name="employeeId" label="Employee ID" />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
@@ -60,7 +114,10 @@ export const StaffCreate = () => {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Status</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value || "active"}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value || "active"}
+                >
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
@@ -80,10 +137,21 @@ export const StaffCreate = () => {
           />
 
           <div className="md:col-span-2 flex gap-2">
-            <Button type="submit" {...form.saveButtonProps}>
-              Save Staff
+            <Button type="submit" className="cursor-pointer" {...form.saveButtonProps}>
+              {isSubmitting ? (
+                <span className="inline-flex items-center gap-2">
+                  <PageLoader inline />
+                  Saving...
+                </span>
+              ) : (
+                "Save Staff"
+              )}
             </Button>
-            <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate(-1)}
+            >
               Cancel
             </Button>
           </div>
@@ -94,8 +162,8 @@ export const StaffCreate = () => {
 };
 
 type FieldProps = {
-  form: ReturnType<typeof useForm>;
-  name: string;
+  form: ReturnType<typeof useForm<BaseRecord, HttpError, StaffCreateValues>>;
+  name: keyof StaffCreateValues;
   label: string;
   type?: string;
 };
@@ -110,7 +178,12 @@ function TextField({ form, name, label, type = "text" }: FieldProps) {
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <FormControl>
-            <Input {...field} value={field.value || ""} type={type} placeholder={`Enter ${label.toLowerCase()}`} />
+            <Input
+              {...field}
+              value={field.value || ""}
+              type={type}
+              placeholder={`Enter ${label.toLowerCase()}`}
+            />
           </FormControl>
           <FormMessage />
         </FormItem>
