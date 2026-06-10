@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { InputPassword } from "@/components/refine-ui/form/input-password";
+import UploadWidget from "@/components/upload-widget";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -29,6 +30,7 @@ import {
   useRefineOptions,
   useRegister,
 } from "@refinedev/core";
+import type { UploadWidgetValue } from "@/types";
 
 type SignUpFormProps = {
   embedded?: boolean;
@@ -43,6 +45,7 @@ export const SignUpForm = ({
 }: SignUpFormProps) => {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "accounts">("accounts");
+  const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -72,6 +75,8 @@ export const SignUpForm = ({
       email,
       password,
       role,
+      image: imageUpload?.url ?? null,
+      imageCldPubId: imageUpload?.publicId ?? null,
     });
   };
 
@@ -139,21 +144,24 @@ export const SignUpForm = ({
           <form onSubmit={handleSignUp}>
             <div className={cn("grid", "gap-6", embedded && "md:grid-cols-2")}>
               <div className={cn("flex", "flex-col", "gap-2")}>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder=""
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder=""
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </div>
 
               {embedded && (
                 <div className={cn("flex", "flex-col", "gap-2")}>
                   <Label htmlFor="role">Role</Label>
-                  <Select value={role} onValueChange={(value) => setRole(value as "admin" | "accounts")}> 
+                  <Select
+                    value={role}
+                    onValueChange={(value) => setRole(value as "admin" | "accounts")}
+                  >
                     <SelectTrigger id="role">
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
@@ -165,6 +173,16 @@ export const SignUpForm = ({
                 </div>
               )}
             </div>
+
+            {embedded && (
+              <div className={cn("mt-6", "space-y-2")}>
+                <Label>Profile Photo</Label>
+                <p className="text-xs text-muted-foreground">
+                  Uploaded images show a preview. Use the remove button on the image to clear it.
+                </p>
+                <UploadWidget value={imageUpload} onChange={setImageUpload} folder="users" />
+              </div>
+            )}
 
             <div
               className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}

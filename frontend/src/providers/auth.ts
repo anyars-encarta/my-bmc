@@ -18,6 +18,14 @@ type AuthSessionData = {
   } | null;
 };
 
+type RegisterParams = {
+  email: string;
+  password: string;
+  role?: string;
+  image?: string | null;
+  imageCldPubId?: string | null;
+};
+
 const getSessionData = async (): Promise<AuthSessionData | null> => {
   const response = await authClient.getSession();
   return (response?.data as AuthSessionData | null) ?? null;
@@ -134,13 +142,15 @@ export const authProvider: AuthProvider = {
       success: true,
     };
   },
-  register: async ({ email, password, role }) => {
+  register: async ({ email, password, role, image, imageCldPubId }: RegisterParams) => {
     const response = await authClient.signUp.email(
       {
         email,
         password,
         name: email,
         role: role === "admin" ? "admin" : "accounts",
+        image: typeof image === "string" ? image : undefined,
+        imageCldPubId: typeof imageCldPubId === "string" ? imageCldPubId : undefined,
       },
       {
         onError: (ctx) => ctx,
