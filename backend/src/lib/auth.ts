@@ -41,7 +41,7 @@ const authBaseUrl =
     ?.trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
-const RoleEnum = z.enum(["staff", "teacher", "parent", "admin"]);
+const RoleEnum = z.enum(["accounts", "admin"]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
@@ -173,7 +173,7 @@ export const auth = betterAuth({
       role: {
         type: "string",
         required: true,
-        defaultValue: "staff",
+        defaultValue: "accounts",
         validator: { input: RoleEnum },
       },
       status: {

@@ -14,10 +14,10 @@ const parsePositiveInt = (value: unknown) => {
 
 const isValidRole = (
   value: unknown,
-): value is "accounts" | "admin" => {
+): value is "admin" | "accounts" => {
   return (
-    value === "accounts" ||
-    value === "admin"
+    value === "admin" ||
+    value === "accounts"
   );
 };
 

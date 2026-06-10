@@ -38,11 +38,9 @@ const requireAuth = async (
 
     const role =
       session.user.role === "admin" ||
-      session.user.role === "teacher" ||
-      session.user.role === "parent" ||
-      session.user.role === "staff"
+      session.user.role === "accounts"
         ? session.user.role
-        : "staff";
+        : "accounts";
 
     req.user = {
       id: session.user.id,
