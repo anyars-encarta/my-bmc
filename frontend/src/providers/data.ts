@@ -183,7 +183,20 @@ const requestJson = async <T>(
   });
 
   const text = await response.text();
-  const payload = text ? (JSON.parse(text) as T) : ({} as T);
+  const contentType = response.headers.get("content-type") || "";
+
+  let payload: T;
+  if (!text) {
+    payload = {} as T;
+  } else if (contentType.includes("application/json")) {
+    payload = JSON.parse(text) as T;
+  } else {
+    // Some server/proxy failures return HTML instead of JSON.
+    // Preserve a readable error payload rather than crashing on JSON.parse.
+    payload = ({
+      message: text.slice(0, 200),
+    } as unknown) as T;
+  }
 
   if (!response.ok) {
     throw toError(response, payload);
