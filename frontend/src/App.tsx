@@ -1,4 +1,4 @@
-import { Refine } from "@refinedev/core";
+import { Authenticated, Refine } from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 
@@ -24,6 +24,8 @@ import {
 } from "./pages/categories";
 import { DashboardPage } from "./pages/dashboard";
 import { DisbursementList } from "./pages/disbursements";
+import { ForgotPassword } from "./pages/forgot-password";
+import { Login } from "./pages/login";
 import {
   PaymentCreate,
   PaymentEdit,
@@ -32,6 +34,7 @@ import {
 } from "./pages/payments";
 import { SetupCreate, SetupEdit, SetupShow } from "./pages/setup";
 import { StaffCreate, StaffEdit, StaffList, StaffShow } from "./pages/staff";
+import { authProvider } from "./providers/auth";
 import { dataProvider } from "./providers/data";
 
 function App() {
@@ -42,6 +45,7 @@ function App() {
           <DevtoolsProvider>
             <Refine
               dataProvider={dataProvider}
+              authProvider={authProvider}
               notificationProvider={useNotificationProvider()}
               routerProvider={routerProvider}
               resources={appResources.map((resource) => ({
@@ -65,9 +69,21 @@ function App() {
               <Routes>
                 <Route
                   element={
-                    <Layout>
-                      <Outlet />
-                    </Layout>
+                    <Authenticated key="guest-routes" fallback={<Outlet />}>
+                      <NavigateToResource resource="dashboard" />
+                    </Authenticated>
+                  }
+                >
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
+                </Route>
+                <Route
+                  element={
+                    <Authenticated key="protected-routes" redirectOnFail="/login">
+                      <Layout>
+                        <Outlet />
+                      </Layout>
+                    </Authenticated>
                   }
                 >
                   <Route
