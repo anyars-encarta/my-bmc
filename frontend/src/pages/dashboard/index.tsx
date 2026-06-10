@@ -1,12 +1,16 @@
 import { APP_TAGLINE } from "@/constants/app";
 import { formatCurrency } from "@/lib/currency";
-import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import {
+  ListView,
+  ListViewHeader,
+} from "@/components/refine-ui/views/list-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Activity, CircleCheck, Clock3, Wallet } from "lucide-react";
 import MetricCard from "@/components/MetricCard";
+import MonthlyPaymentsTrendChart from "@/components/MonthlyPaymentsTrendChart";
 
 const summary = {
   totalDraft: 8,
@@ -54,6 +58,10 @@ export const DashboardPage = () => {
         />
       </section>
 
+      <section>
+        <MonthlyPaymentsTrendChart />
+      </section>
+
       <section className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
         <Card className="overflow-hidden border-0 shadow-sm ring-1 ring-border">
           <CardHeader>
@@ -72,7 +80,9 @@ export const DashboardPage = () => {
               >
                 <div className="flex items-center justify-between text-sm">
                   <p className="font-medium">{stage.label}</p>
-                  <span className="text-muted-foreground">{stage.percent}%</span>
+                  <span className="text-muted-foreground">
+                    {stage.percent}%
+                  </span>
                 </div>
                 <Progress value={stage.percent} className="h-2" />
               </div>
@@ -99,7 +109,8 @@ export const DashboardPage = () => {
               </TabsContent>
               <TabsContent value="approver" className="space-y-3 pt-3">
                 <p className="text-sm text-muted-foreground">
-                  Review each recipient, adjust amounts, and gate payment release.
+                  Review each recipient, adjust amounts, and gate payment
+                  release.
                 </p>
                 <Badge className="bg-emerald-600 text-white">
                   Focus: Compliance

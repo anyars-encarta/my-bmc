@@ -27,12 +27,14 @@ import {
   useLink,
   useLogout,
   useMenu,
-  useRefineOptions,
   type TreeMenuItem,
 } from "@refinedev/core";
 import { APP_NAME } from "@/constants/app";
-import { BadgeDollarSign, ChevronRight, ListIcon, LogOut } from "lucide-react";
+import { Building2, ChevronRight, ListIcon, LogOut } from "lucide-react";
 import React from "react";
+import { useList } from "@refinedev/core";
+import PageLoader from "@/components/PageLoader";
+import { SetupRecord } from "@/types/domain";
 
 export function Sidebar() {
   const { open } = useShadcnSidebar();
@@ -41,7 +43,9 @@ export function Sidebar() {
   return (
     <ShadcnSidebar
       collapsible="icon"
-      className={cn("border-none bg-linear-to-b from-cyan-500/10 via-transparent to-emerald-500/10")}
+      className={cn(
+        "border-none bg-linear-to-b from-cyan-500/10 via-transparent to-emerald-500/10",
+      )}
     >
       <ShadcnSidebarRail />
       <SidebarHeader />
@@ -59,7 +63,7 @@ export function Sidebar() {
           {
             "px-3": open,
             "px-1": !open,
-          }
+          },
         )}
       >
         {menuItems.map((item: TreeMenuItem) => (
@@ -141,7 +145,7 @@ function SidebarItemGroup({ item, selectedKey }: MenuItemProps) {
             "opacity-100": open,
             "pointer-events-none": !open,
             "pointer-events-auto": open,
-          }
+          },
         )}
       >
         {getDisplayName(item)}
@@ -173,7 +177,7 @@ function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
         "text-muted-foreground",
         "transition-transform",
         "duration-200",
-        "group-data-[state=open]:rotate-90"
+        "group-data-[state=open]:rotate-90",
       )}
     />
   );
@@ -239,10 +243,32 @@ function SidebarItemLink({ item, selectedKey }: MenuItemProps) {
 }
 
 function SidebarHeader() {
-  const { title } = useRefineOptions();
   const { open, isMobile } = useShadcnSidebar();
-  const appTitle = title?.text ?? APP_NAME;
-  const appIcon = title?.icon ?? <BadgeDollarSign className="h-4 w-4 text-cyan-500" />;
+  const appTitle = APP_NAME;
+
+  const { result, query } = useList<SetupRecord>({
+    resource: "setup",
+    pagination: { pageSize: 1 },
+  });
+
+  const isLoading = query.isLoading;
+  const record = result?.data?.[0];
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  const appIcon = record.logoUrl ? (
+    <img
+      src={record.logoUrl}
+      alt={record.facilityName}
+      className="h-8 w-8 rounded-md object-contain border border-border bg-white p-1"
+    />
+  ) : (
+    <div className="flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-border bg-muted">
+      <Building2 className="h-6 w-6 text-muted-foreground" />
+    </div>
+  );
 
   return (
     <ShadcnSidebarHeader
@@ -254,7 +280,7 @@ function SidebarHeader() {
         "flex-row",
         "items-center",
         "justify-between",
-        "overflow-hidden"
+        "overflow-hidden",
       )}
     >
       <div
@@ -271,7 +297,7 @@ function SidebarHeader() {
           {
             "pl-3": !open,
             "pl-5": open,
-          }
+          },
         )}
       >
         <div>{appIcon}</div>
@@ -284,7 +310,7 @@ function SidebarHeader() {
             {
               "opacity-0": !open,
               "opacity-100": open,
-            }
+            },
           )}
         >
           {appTitle}
@@ -380,7 +406,7 @@ function SidebarButton({
           "hover:text-sidebar-primary-foreground": isSelected,
           "hover:bg-cyan-500/10": !isSelected,
         },
-        className
+        className,
       )}
       onClick={onClick}
       {...props}

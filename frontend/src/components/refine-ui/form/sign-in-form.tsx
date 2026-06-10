@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { AlertCircle, CircleHelp, Loader2 } from "lucide-react";
+import { AlertCircle, CircleHelp } from "lucide-react";
 
 import { InputPassword } from "@/components/refine-ui/form/input-password";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useLink, useLogin, useNotification } from "@refinedev/core";
+import PageLoader from "@/components/PageLoader";
 
 export const SignInForm = () => {
   const [rememberMe, setRememberMe] = useState(false);
@@ -227,7 +228,7 @@ export const SignInForm = () => {
                 >
                   {signingIn ? (
                     <div className="flex gap-1 items-center">
-                      <Loader2 className="inline-block ml-2 animate-spin" />
+                      <PageLoader />
                       <span>Signing In...</span>
                     </div>
                   ) : (
