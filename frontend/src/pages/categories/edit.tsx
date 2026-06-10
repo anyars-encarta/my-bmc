@@ -1,7 +1,12 @@
 import { useForm } from "@refinedev/react-hook-form";
+import { BaseRecord, HttpError } from "@refinedev/core";
+import { SubmitHandler } from "react-hook-form";
 import { useNavigate } from "react-router";
 
-import { EditView, EditViewHeader } from "@/components/refine-ui/views/edit-view";
+import {
+  EditView,
+  EditViewHeader,
+} from "@/components/refine-ui/views/edit-view";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -14,20 +19,34 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import PageLoader from "@/components/PageLoader";
+
+type CategoryEditValues = {
+  name: string;
+  description?: string;
+  isActive: boolean;
+};
 
 export const CategoryEdit = () => {
   const navigate = useNavigate();
 
-  const {
-    refineCore: { onFinish },
-    ...form
-  } = useForm({
+  const form = useForm<BaseRecord, HttpError, CategoryEditValues>({
     refineCoreProps: {},
+    defaultValues: {
+      name: "",
+      description: "",
+      isActive: true,
+    },
   });
 
-  function onSubmit(values: Record<string, string>) {
+  const {
+    refineCore: { onFinish },
+    formState: { isSubmitting },
+  } = form;
+
+  const onSubmit: SubmitHandler<CategoryEditValues> = (values) => {
     onFinish(values);
-  }
+  };
 
   return (
     <EditView className="space-y-4">
@@ -80,7 +99,10 @@ export const CategoryEdit = () => {
                   <FormLabel>Active Category</FormLabel>
                 </div>
                 <FormControl>
-                  <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                  <Switch
+                    checked={!!field.value}
+                    onCheckedChange={field.onChange}
+                  />
                 </FormControl>
               </FormItem>
             )}
@@ -89,14 +111,23 @@ export const CategoryEdit = () => {
           <div className="flex gap-2">
             <Button
               type="submit"
+              className="cursor-pointer"
               {...form.saveButtonProps}
-              disabled={form.formState.isSubmitting}
+              disabled={isSubmitting}
             >
-              {form.formState.isSubmitting ? "Updating..." : "Update"}
+              {isSubmitting ? (
+                <span className="inline-flex items-center gap-2">
+                  <PageLoader inline />
+                  Updating...
+                </span>
+              ) : (
+                "Update Category"
+              )}
             </Button>
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={() => navigate(-1)}
             >
               Cancel

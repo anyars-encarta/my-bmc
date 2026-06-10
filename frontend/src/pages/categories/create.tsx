@@ -1,4 +1,6 @@
 import { useForm } from "@refinedev/react-hook-form";
+import { BaseRecord, HttpError } from "@refinedev/core";
+import { SubmitHandler } from "react-hook-form";
 import { useNavigate } from "react-router";
 
 import {
@@ -17,23 +19,34 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import PageLoader from "@/components/PageLoader";
+
+type CategoryCreateValues = {
+  name: string;
+  description?: string;
+  isActive: boolean;
+};
 
 export const CategoryCreate = () => {
   const navigate = useNavigate();
 
-  const {
-    refineCore: { onFinish },
-    ...form
-  } = useForm({
+  const form = useForm<BaseRecord, HttpError, CategoryCreateValues>({
     refineCoreProps: {},
     defaultValues: {
+      name: "",
+      description: "",
       isActive: true,
     },
   });
 
-  function onSubmit(values: Record<string, string>) {
+  const {
+    refineCore: { onFinish },
+    formState: { isSubmitting },
+  } = form;
+
+  const onSubmit: SubmitHandler<CategoryCreateValues> = (values) => {
     onFinish(values);
-  }
+  };
 
   return (
     <CreateView className="space-y-4">
@@ -95,14 +108,23 @@ export const CategoryCreate = () => {
           <div className="flex gap-2">
             <Button
               type="submit"
+              className="cursor-pointer"
               {...form.saveButtonProps}
-              disabled={form.formState.isSubmitting}
+              disabled={isSubmitting}
             >
-              {form.formState.isSubmitting ? "Creating..." : "Create"}
+              {isSubmitting ? (
+                <span className="inline-flex items-center gap-2">
+                  <PageLoader inline />
+                  Creating...
+                </span>
+              ) : (
+                "Create Category"
+              )}
             </Button>
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={() => navigate(-1)}
             >
               Cancel
