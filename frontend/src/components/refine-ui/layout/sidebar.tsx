@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -22,13 +23,15 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import {
+  useActiveAuthProvider,
   useLink,
+  useLogout,
   useMenu,
   useRefineOptions,
   type TreeMenuItem,
 } from "@refinedev/core";
 import { APP_NAME } from "@/constants/app";
-import { BadgeDollarSign, ChevronRight, ListIcon } from "lucide-react";
+import { BadgeDollarSign, ChevronRight, ListIcon, LogOut } from "lucide-react";
 import React from "react";
 
 export function Sidebar() {
@@ -66,8 +69,30 @@ export function Sidebar() {
             selectedKey={selectedKey}
           />
         ))}
+
+        {/* Logout button pinned to bottom of sidebar */}
+        <LogoutButton />
       </ShadcnSidebarContent>
     </ShadcnSidebar>
+  );
+}
+
+function LogoutButton() {
+  const { mutate: logout } = useLogout();
+  const authProvider = useActiveAuthProvider();
+
+  if (!authProvider?.getIdentity) return null;
+
+  const item: any = {
+    name: "logout",
+    label: "Logout",
+    meta: { icon: <LogOut /> },
+  };
+
+  return (
+    <div className={cn("mt-auto", "pt-2", "border-t", "border-sidebar-border")}>
+      <SidebarButton item={item} onClick={() => logout()} />
+    </div>
   );
 }
 
