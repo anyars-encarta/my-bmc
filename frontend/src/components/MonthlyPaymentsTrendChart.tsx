@@ -50,7 +50,7 @@ const MonthlyPaymentsTrendChart = () => {
   const monthlyTrend = buildMonthlyTrend(payments);
 
   return (
-    <Card className="overflow-hidden border-0 shadow-sm ring-1 ring-border">
+    <Card className="overflow-hidden border-0 shadow-md ring-1 ring-border">
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           Monthly Payments Trend

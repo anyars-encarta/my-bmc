@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 const MetricCard = ({ title, value, description, icon }: MetricCardProps) => {
   return (
-    <Card className="group border-0 shadow-sm ring-1 ring-border transition-transform duration-200 hover:-translate-y-1">
+    <Card className="group border-0 shadow-md ring-1 ring-border transition-transform duration-200 hover:-translate-y-1">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {title}
