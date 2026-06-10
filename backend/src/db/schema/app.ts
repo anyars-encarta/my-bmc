@@ -46,6 +46,7 @@ export const staff = pgTable("staff", {
   momoNumber: varchar("momo_number", { length: 20 }).notNull(), // MTN MoMo number
   momoName: varchar("momo_name", { length: 200 }),             // registered name on MoMo
   status: staffStatusEnum("status").notNull().default("active"),
+  imageUrl: varchar("image_url", { length: 255 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
