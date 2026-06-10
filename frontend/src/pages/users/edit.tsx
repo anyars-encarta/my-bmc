@@ -43,7 +43,6 @@ import {
   useOne,
 } from "@refinedev/core";
 import { useForm } from "@refinedev/react-hook-form";
-import { Loader2 } from "lucide-react";
 import { SubmitHandler } from "react-hook-form";
 
 const EditUser = () => {
@@ -328,7 +327,7 @@ const EditUser = () => {
                 >
                   {isSubmitting ? (
                     <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <PageLoader />
                       Saving...
                     </span>
                   ) : (

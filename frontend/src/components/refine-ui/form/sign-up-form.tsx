@@ -43,11 +43,15 @@ export const SignUpForm = ({
   title = "Sign up",
   description = "Welcome to BMC Finance Desk.",
 }: SignUpFormProps) => {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "accounts">("accounts");
-  const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(null);
+  const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(
+    null,
+  );
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const { open } = useNotification();
 
@@ -59,6 +63,7 @@ export const SignUpForm = ({
 
   const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setCreating(true);
 
     if (password !== confirmPassword) {
       open?.({
@@ -68,16 +73,19 @@ export const SignUpForm = ({
           "Please make sure both password fields contain the same value.",
       });
 
+      setCreating(false);
       return;
     }
 
     register({
+      name,
       email,
       password,
       role,
       image: imageUpload?.url ?? null,
       imageCldPubId: imageUpload?.publicId ?? null,
     });
+    setCreating(false);
   };
 
   const handleSignUpWithGoogle = () => {
@@ -99,7 +107,7 @@ export const SignUpForm = ({
         "flex-col",
         "items-center",
         embedded ? "w-full" : "justify-center",
-        embedded ? "px-0 py-0" : "px-6 py-8 min-h-svh"
+        embedded ? "px-0 py-0" : "px-6 py-8 min-h-svh",
       )}
     >
       {!embedded && (
@@ -117,7 +125,7 @@ export const SignUpForm = ({
       <Card
         className={cn(
           embedded ? "w-full max-w-3xl" : "sm:w-114 mt-6 p-12",
-          embedded && "border-dashed shadow-none"
+          embedded && "border-dashed shadow-none",
         )}
       >
         <CardHeader className={cn(embedded ? "px-6 pt-6" : "px-0")}>
@@ -126,7 +134,7 @@ export const SignUpForm = ({
               embedded
                 ? "text-foreground text-2xl"
                 : "text-green-600 dark:text-green-400 text-3xl",
-              "font-semibold"
+              "font-semibold",
             )}
           >
             {title}
@@ -144,11 +152,23 @@ export const SignUpForm = ({
           <form onSubmit={handleSignUp}>
             <div className={cn("grid", "gap-6", embedded && "md:grid-cols-2")}>
               <div className={cn("flex", "flex-col", "gap-2")}>
+                <Label htmlFor="name">Name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  placeholder="Full name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+
+              <div className={cn("flex", "flex-col", "gap-2")}>
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder=""
+                  placeholder="Email address"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -160,7 +180,9 @@ export const SignUpForm = ({
                   <Label htmlFor="role">Role</Label>
                   <Select
                     value={role}
-                    onValueChange={(value) => setRole(value as "admin" | "accounts")}
+                    onValueChange={(value) =>
+                      setRole(value as "admin" | "accounts")
+                    }
                   >
                     <SelectTrigger id="role">
                       <SelectValue placeholder="Select role" />
@@ -178,9 +200,14 @@ export const SignUpForm = ({
               <div className={cn("mt-6", "space-y-2")}>
                 <Label>Profile Photo</Label>
                 <p className="text-xs text-muted-foreground">
-                  Uploaded images show a preview. Use the remove button on the image to clear it.
+                  Uploaded images show a preview. Use the remove button on the
+                  image to clear it.
                 </p>
-                <UploadWidget value={imageUpload} onChange={setImageUpload} folder="users" />
+                <UploadWidget
+                  value={imageUpload}
+                  onChange={setImageUpload}
+                  folder="users"
+                />
               </div>
             )}
 
@@ -216,17 +243,23 @@ export const SignUpForm = ({
                 "mt-6",
                 embedded
                   ? "bg-primary hover:bg-primary/90 text-primary-foreground"
-                  : "bg-green-600 hover:bg-green-700 text-white"
+                  : "bg-green-600 hover:bg-green-700 text-white",
               )}
             >
-              {embedded ? "Create User" : "Sign up"}
+              {embedded
+                ? creating
+                  ? "Creating User..."
+                  : "Create User"
+                : "Sign up"}
             </Button>
 
             {!embedded && (
               <>
                 <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
                   <Separator className={cn("flex-1")} />
-                  <span className={cn("text-sm", "text-muted-foreground")}>or</span>
+                  <span className={cn("text-sm", "text-muted-foreground")}>
+                    or
+                  </span>
                   <Separator className={cn("flex-1")} />
                 </div>
 
@@ -296,7 +329,7 @@ export const SignUpForm = ({
                     "text-blue-600",
                     "dark:text-blue-400",
                     "font-semibold",
-                    "underline"
+                    "underline",
                   )}
                 >
                   Sign in

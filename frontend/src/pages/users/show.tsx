@@ -151,6 +151,14 @@ const ShowUser = () => {
           <CardContent className="space-y-4 pt-6">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Name</p>
+                <p className="mt-1 flex items-center gap-2 text-sm font-medium">
+                  <UserRound className="size-4" />
+                  {user.name}
+                </p>
+              </div>
+
+              <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Email</p>
                 <p className="mt-1 flex items-center gap-2 text-sm font-medium">
                   <Mail className="size-4" />
@@ -189,7 +197,7 @@ const ShowUser = () => {
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Last Updated</p>
                 <p className="mt-1 flex items-center gap-2 text-sm font-medium">
-                  <UserRound className="size-4" />
+                  <CalendarDays className="size-4" />
                   {formatDate(user.updatedAt)}
                 </p>
               </div>
