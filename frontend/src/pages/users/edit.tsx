@@ -2,10 +2,20 @@ import { useEffect } from "react";
 import { useParams } from "react-router";
 
 import PageLoader from "@/components/PageLoader";
-import { Breadcrumb } from "@/components/refine-ui/layout/breadcrumb";
-import { EditView } from "@/components/refine-ui/views/edit-view";
+import { InputPassword } from "@/components/refine-ui/form/input-password";
+import {
+  EditView,
+  EditViewHeader,
+} from "@/components/refine-ui/views/edit-view";
+import UploadWidget from "@/components/upload-widget";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Form,
   FormControl,
@@ -15,7 +25,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -23,8 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { InputPassword } from "@/components/refine-ui/form/input-password";
-import UploadWidget from "@/components/upload-widget";
 import { User } from "@/types";
 import { editUserSchema, EditUserValues } from "@/validations";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -64,7 +71,7 @@ const EditUser = () => {
     defaultValues: {
       name: "",
       email: "",
-      role: "staff",
+      role: "accounts",
       status: "active",
       image: null,
       imageCldPubId: null,
@@ -75,10 +82,10 @@ const EditUser = () => {
 
   const {
     refineCore: { onFinish },
-    handleSubmit,
-    formState: { isSubmitting },
     control,
+    formState: { isSubmitting },
     getValues,
+    handleSubmit,
     reset,
     setValue,
   } = form;
@@ -86,10 +93,11 @@ const EditUser = () => {
   useEffect(() => {
     const record = userQuery.data?.data;
     if (!record) return;
+
     reset({
       name: record.name,
       email: record.email,
-      role: record.role as "admin" | "teacher" | "parent" | "staff",
+      role: record.role as "admin" | "accounts",
       status: record.status,
       image: record.image ?? null,
       imageCldPubId: record.imageCldPubId ?? null,
@@ -100,6 +108,7 @@ const EditUser = () => {
 
   const onSubmit: SubmitHandler<EditUserValues> = async (values) => {
     const password = values.password?.trim() || undefined;
+
     await onFinish({
       name: values.name.trim(),
       email: values.email.trim().toLowerCase(),
@@ -113,8 +122,8 @@ const EditUser = () => {
 
   if (userQuery.isLoading) {
     return (
-      <EditView className="class-view">
-        <Breadcrumb />
+      <EditView className="space-y-4">
+        <EditViewHeader title="Edit User" />
         <PageLoader />
       </EditView>
     );
@@ -122,8 +131,8 @@ const EditUser = () => {
 
   if (!userQuery.data?.data) {
     return (
-      <EditView className="class-view">
-        <Breadcrumb />
+      <EditView className="space-y-4">
+        <EditViewHeader title="Edit User" />
         <p className="text-sm text-destructive">Failed to load user details.</p>
         <Button onClick={back} variant="outline" type="button">
           Go Back
@@ -133,33 +142,21 @@ const EditUser = () => {
   }
 
   return (
-    <EditView className="class-view">
-      <Breadcrumb />
+    <EditView className="space-y-4">
+      <EditViewHeader title="Edit User" />
 
-      <h1 className="page-title">Edit User</h1>
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Account details</CardTitle>
+          <CardDescription>
+            Update identity, permissions, profile image, and password settings.
+          </CardDescription>
+        </CardHeader>
 
-      <div className="intro-row">
-        <p>Update user account details below.</p>
-        <Button onClick={back} className="cursor-pointer" type="button">
-          Go Back
-        </Button>
-      </div>
-
-      <Separator />
-
-      <div className="my-4 flex items-center">
-        <Card className="class-form-card w-full">
-          <CardHeader className="relative z-10">
-            <CardTitle className="text-2xl pb-0 font-bold">
-              Update user details
-            </CardTitle>
-          </CardHeader>
-
-          <Separator />
-
-          <CardContent className="mt-7">
-            <Form {...form}>
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        <CardContent className="pt-6">
+          <Form {...form}>
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+              <div className="grid gap-5 md:grid-cols-2">
                 <FormField
                   control={control}
                   name="name"
@@ -179,6 +176,7 @@ const EditUser = () => {
                     </FormItem>
                   )}
                 />
+
                 <FormField
                   control={control}
                   name="email"
@@ -199,7 +197,10 @@ const EditUser = () => {
                     </FormItem>
                   )}
                 />
-                {loggedInUser?.id !== userId && (
+              </div>
+
+              {loggedInUser?.id !== userId && (
+                <div className="grid gap-5 md:grid-cols-2">
                   <FormField
                     control={control}
                     name="role"
@@ -208,10 +209,7 @@ const EditUser = () => {
                         <FormLabel>
                           Role <span className="text-orange-600">*</span>
                         </FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
+                        <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl>
                             <SelectTrigger>
                               <SelectValue placeholder="Select role" />
@@ -219,18 +217,14 @@ const EditUser = () => {
                           </FormControl>
                           <SelectContent>
                             <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="teacher">Teacher</SelectItem>
-                            <SelectItem value="parent">Parent</SelectItem>
-                            <SelectItem value="staff">Staff</SelectItem>
+                            <SelectItem value="accounts">Accounts</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                )}
 
-                {loggedInUser?.id !== userId && (
                   <FormField
                     control={control}
                     name="status"
@@ -239,10 +233,7 @@ const EditUser = () => {
                         <FormLabel>
                           Account Status <span className="text-orange-600">*</span>
                         </FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
+                        <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl>
                             <SelectTrigger>
                               <SelectValue placeholder="Select account status" />
@@ -257,39 +248,41 @@ const EditUser = () => {
                       </FormItem>
                     )}
                   />
+                </div>
+              )}
+
+              <FormField
+                control={control}
+                name="image"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Profile Photo</FormLabel>
+                    <FormControl>
+                      <UploadWidget
+                        value={
+                          field.value
+                            ? {
+                                url: field.value,
+                                publicId: getValues("imageCldPubId") ?? "",
+                              }
+                            : null
+                        }
+                        onChange={(value) => {
+                          field.onChange(value?.url ?? null);
+                          setValue("imageCldPubId", value?.publicId ?? null, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          });
+                        }}
+                        disabled={isSubmitting}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
+              />
 
-                <FormField
-                  control={control}
-                  name="image"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Profile Photo</FormLabel>
-                      <FormControl>
-                        <UploadWidget
-                          value={
-                            field.value
-                              ? {
-                                  url: field.value,
-                                  publicId: getValues("imageCldPubId") ?? "",
-                                }
-                              : null
-                          }
-                          onChange={(value) => {
-                            field.onChange(value?.url ?? null);
-                            setValue("imageCldPubId", value?.publicId ?? null, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            });
-                          }}
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
+              <div className="grid gap-5 md:grid-cols-2">
                 <FormField
                   control={control}
                   name="password"
@@ -325,28 +318,28 @@ const EditUser = () => {
                     </FormItem>
                   )}
                 />
+              </div>
 
-                <div className="flex justify-end pt-2">
-                  <Button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="cursor-pointer"
-                  >
-                    {isSubmitting ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Saving...
-                      </span>
-                    ) : (
-                      "Save Changes"
-                    )}
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
-      </div>
+              <div className="flex justify-end pt-2">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
     </EditView>
   );
 };

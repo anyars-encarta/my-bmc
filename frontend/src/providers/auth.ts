@@ -134,6 +134,31 @@ export const authProvider: AuthProvider = {
       success: true,
     };
   },
+  register: async ({ email, password, role }) => {
+    const response = await authClient.signUp.email(
+      {
+        email,
+        password,
+        name: email,
+        role: role === "admin" ? "admin" : "accounts",
+      },
+      {
+        onError: (ctx) => ctx,
+      },
+    );
+
+    if (response.error) {
+      return {
+        success: false,
+        error: new Error(response.error.message || "Unable to create user."),
+      };
+    }
+
+    return {
+      success: true,
+      redirectTo: "/users",
+    };
+  },
   getIdentity: async () => {
     const session = await getSessionData();
     const currentUser = session?.user;

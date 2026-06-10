@@ -1,82 +1,39 @@
-import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
 
 import PageLoader from "@/components/PageLoader";
 import { SignUpForm } from "@/components/refine-ui/form/sign-up-form";
-import { ADMIN_PASSKEY } from "@/constants";
-import { decryptKey } from "@/lib/utils";
-
-const hasValidStoredPasskey = (consumeOnSuccess = false) => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const encryptedKey = window.localStorage.getItem("accessKey");
-  if (!encryptedKey) {
-    return false;
-  }
-
-  try {
-    const isValid = decryptKey(encryptedKey) === ADMIN_PASSKEY;
-
-    if (isValid && consumeOnSuccess) {
-      window.localStorage.removeItem("accessKey");
-    }
-
-    return isValid;
-  } catch {
-    window.localStorage.removeItem("accessKey");
-    return false;
-  }
-};
-
-const hasStoredUser = () => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  return Boolean(window.sessionStorage.getItem("user"));
-};
+import {
+  CreateView,
+  CreateViewHeader,
+} from "@/components/refine-ui/views/create-view";
+import { useGetIdentity } from "@refinedev/core";
 
 const CreateUser = () => {
-  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
-  const [hasAccess, setHasAccess] = useState(false);
-  const hasCheckedAccessRef = useRef(false);
+  const { data: identity, isLoading: isIdentityLoading } = useGetIdentity<{
+    id: string;
+    role?: string;
+  }>();
 
-  useEffect(() => {
-    if (hasCheckedAccessRef.current) {
-      return;
-    }
-    hasCheckedAccessRef.current = true;
-
-    let isMounted = true;
-
-    const checkAccess = () => {
-      const hasPasskeyAccess = hasValidStoredPasskey(true);
-      const isAuthenticated = hasStoredUser();
-
-      if (isMounted) {
-        setHasAccess(hasPasskeyAccess || isAuthenticated);
-        setIsCheckingAccess(false);
-      }
-    };
-
-    checkAccess();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  if (isCheckingAccess) {
+  if (isIdentityLoading) {
     return <PageLoader />;
   }
 
-  if (!hasAccess) {
-    return <Navigate to="/login" replace />;
+  const isAdmin = identity?.role === "admin";
+
+  if (!isAdmin) {
+    return <Navigate to="/users" replace />;
   }
 
-  return <SignUpForm />;
+  return (
+    <CreateView className="space-y-4">
+      <CreateViewHeader title="Create User" />
+      <SignUpForm
+        embedded
+        title="Create user account"
+        description="Add a new system user with the appropriate account role."
+      />
+    </CreateView>
+  );
 };
 
 export default CreateUser;

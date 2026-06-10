@@ -5,8 +5,7 @@ import { CreateButton } from "@/components/refine-ui/buttons/create";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { DataTable } from "@/components/refine-ui/data-table/data-table";
-import { Breadcrumb } from "@/components/refine-ui/layout/breadcrumb";
-import { ListView } from "@/components/refine-ui/views/list-view";
+import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +18,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
@@ -51,8 +57,7 @@ const roleBadgeVariant = (
   role: string,
 ): "default" | "secondary" | "outline" => {
   if (role === "admin") return "default";
-  if (role === "teacher") return "secondary";
-  if (role === "parent") return "secondary";
+  if (role === "accounts") return "secondary";
   return "outline";
 };
 
@@ -308,7 +313,7 @@ const ListUsers = () => {
           ),
         },
       ],
-      [selectedUserIds],
+      [developer, selectedUserIds],
     ),
     refineCoreProps: {
       resource: "users",
@@ -452,104 +457,109 @@ const ListUsers = () => {
     Boolean(selectedStatus);
 
   return (
-    <ListView>
-      <Breadcrumb />
+    <ListView className="space-y-4">
+      <ListViewHeader title="Users" canCreate={false} />
 
-      <h1 className="page-title">Users</h1>
-
-      <div className="intro-row">
-        <p>Manage system user accounts and roles.</p>
-
-        <div className="actions-row">
-          <div className="search-field">
-            <Search className="search-icon" />
-            <Input
-              type="text"
-              placeholder="Search by name or email"
-              className="pl-10 w-full"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      <Card>
+        <CardHeader className="gap-4">
+          <div className="space-y-1">
+            <CardTitle>User Directory</CardTitle>
+            <CardDescription>
+              Manage system user accounts, access roles, and activation status.
+            </CardDescription>
           </div>
 
-          <div className="w-full sm:w-40">
-            <Select
-              value={selectedRole || "all"}
-              onValueChange={(value) =>
-                setSelectedRole(value === "all" ? "" : value)
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="All roles" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All roles</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="teacher">Teacher</SelectItem>
-                <SelectItem value="parent">Parent</SelectItem>
-                <SelectItem value="staff">Staff</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_180px_180px] xl:flex-1">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search by name or email"
+                  className="pl-10"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              <Select
+                value={selectedRole || "all"}
+                onValueChange={(value) =>
+                  setSelectedRole(value === "all" ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All roles" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All roles</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="accounts">Accounts</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={selectedStatus || "all"}
+                onValueChange={(value) =>
+                  setSelectedStatus(value === "all" ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <CreateButton resource="users" />
+
+              <Button
+                type="button"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => handleBulkStatusUpdate("active")}
+                disabled={isBulkUpdating || selectedUsers.length === 0}
+              >
+                {isBulkUpdating ? "Updating..." : "Activate Selected"}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => handleBulkStatusUpdate("inactive")}
+                disabled={isBulkUpdating || selectedUsers.length === 0}
+              >
+                {isBulkUpdating ? "Updating..." : "Deactivate Selected"}
+              </Button>
+
+              {hasActiveFilters && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="cursor-pointer"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSelectedRole("");
+                    setSelectedStatus("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
           </div>
+        </CardHeader>
 
-          <div className="w-full sm:w-40">
-            <Select
-              value={selectedStatus || "all"}
-              onValueChange={(value) =>
-                setSelectedStatus(value === "all" ? "" : value)
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <CreateButton resource="users" />
-
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => handleBulkStatusUpdate("active")}
-            disabled={isBulkUpdating || selectedUsers.length === 0}
-          >
-            {isBulkUpdating ? "Updating..." : "Activate Selected"}
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => handleBulkStatusUpdate("inactive")}
-            disabled={isBulkUpdating || selectedUsers.length === 0}
-          >
-            {isBulkUpdating ? "Updating..." : "Deactivate Selected"}
-          </Button>
-
-          {hasActiveFilters && (
-            <Button
-              type="button"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => {
-                setSearchQuery("");
-                setSelectedRole("");
-                setSelectedStatus("");
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <DataTable table={usersTable} />
+        <CardContent>
+          <DataTable table={usersTable} />
+        </CardContent>
+      </Card>
 
       <AlertDialog
         open={Boolean(userPendingDelete)}

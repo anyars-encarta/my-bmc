@@ -34,6 +34,10 @@ import {
 } from "./pages/payments";
 import { SetupCreate, SetupEdit, SetupShow } from "./pages/setup";
 import { StaffCreate, StaffEdit, StaffList, StaffShow } from "./pages/staff";
+import CreateUser from "./pages/users/create";
+import EditUser from "./pages/users/edit";
+import ListUsers from "./pages/users/list";
+import ShowUser from "./pages/users/show";
 import { authProvider } from "./providers/auth";
 import { dataProvider } from "./providers/data";
 
@@ -114,6 +118,12 @@ function App() {
                     <Route path="create" element={<SetupCreate />} />
                     <Route path="edit/:id" element={<SetupEdit />} />
                     <Route path="show/:id" element={<SetupShow />} />
+                  </Route>
+                  <Route path="/users">
+                    <Route index element={<ListUsers />} />
+                    <Route path="create" element={<CreateUser />} />
+                    <Route path="edit/:id" element={<EditUser />} />
+                    <Route path="show/:id" element={<ShowUser />} />
                   </Route>
                   <Route path="/approvals" element={<ApprovalQueueList />} />
                   <Route
