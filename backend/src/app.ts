@@ -10,6 +10,7 @@ import cloudinaryRoutes from "./routes/cloudinary.js";
 import paymentRoutes from "./routes/payments.js";
 import paymentRecipientRoutes from "./routes/paymentRecipients.js";
 import setupRoutes from "./routes/setup.js";
+import userRoutes from "./routes/users.js";
 
 const app = express();
 
@@ -88,6 +89,7 @@ app.use("/api/staff", staffRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/setup", setupRoutes);
 app.use("/api/cloudinary", cloudinaryRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payments/:paymentId/recipients", paymentRecipientRoutes);
 
