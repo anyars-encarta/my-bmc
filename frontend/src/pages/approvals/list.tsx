@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -105,6 +106,7 @@ export const ApprovalQueueList = () => {
   const [staffPickerOpen, setStaffPickerOpen] = useState(false);
   const [staff, setStaff] = useState<StaffRecord[]>([]);
   const [selectedRecipientStaff, setSelectedRecipientStaff] = useState<StaffRecord | null>(null);
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [newAmount, setNewAmount] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -206,6 +208,9 @@ export const ApprovalQueueList = () => {
 
   const allRecipientsReviewed = recipients.length > 0 && recipients.every((recipient) => recipient.status !== "pending");
 
+  const selectedRecipients = recipients.filter((recipient) => selectedRecipientIds.includes(recipient.id));
+  const selectedPendingCount = selectedRecipients.filter((recipient) => recipient.status === "pending").length;
+
   const approvalBlockReason = !selectedPayment
     ? ""
     : selectedPayment.status !== "pending_approval"
@@ -296,6 +301,58 @@ export const ApprovalQueueList = () => {
       notify?.({
         type: "error",
         message: error instanceof Error ? error.message : "Failed to review beneficiary.",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const toggleRecipientSelection = (recipientId: string) => {
+    setSelectedRecipientIds((current) =>
+      current.includes(recipientId)
+        ? current.filter((id) => id !== recipientId)
+        : [...current, recipientId],
+    );
+  };
+
+  const selectAllRecipients = () => {
+    setSelectedRecipientIds(recipients.map((recipient) => recipient.id));
+  };
+
+  const clearRecipientSelection = () => {
+    setSelectedRecipientIds([]);
+  };
+
+  const handleBulkReviewRecipients = async (status: "approved" | "disapproved") => {
+    if (!selectedPayment || selectedRecipientIds.length === 0) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      for (const recipientId of selectedRecipientIds) {
+        await requestRecipients(
+          `${apiBase}/payments/${selectedPayment.id}/recipients/${recipientId}/review`,
+          {
+            method: "POST",
+            body: JSON.stringify({ status }),
+          },
+        );
+      }
+
+      await refreshRecipients(selectedPayment.id);
+      await paymentsQuery.refetch();
+      setSelectedRecipientIds([]);
+      notify?.({
+        type: "success",
+        message: `${selectedRecipientIds.length} beneficiary${selectedRecipientIds.length === 1 ? "" : "ies"} ${
+          status === "approved" ? "reviewed" : "disapproved"
+        }.`,
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to process selected beneficiaries.",
       });
     } finally {
       setIsBusy(false);
@@ -459,75 +516,130 @@ export const ApprovalQueueList = () => {
               Total beneficiaries: {recipients.length}
             </div>
 
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+              <div className="text-muted-foreground">
+                {selectedRecipientIds.length === 0
+                  ? "Select beneficiaries to review them in bulk."
+                  : `${selectedRecipientIds.length} selected${selectedPendingCount > 0 ? `, ${selectedPendingCount} still pending` : ""}`}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={selectAllRecipients}
+                  disabled={recipients.length === 0 || isBusy}
+                >
+                  Select All
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={clearRecipientSelection}
+                  disabled={selectedRecipientIds.length === 0 || isBusy}
+                >
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleBulkReviewRecipients("approved")}
+                  disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
+                >
+                  Bulk Reviewed
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => handleBulkReviewRecipients("disapproved")}
+                  disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
+                >
+                  Bulk Disapproved
+                </Button>
+              </div>
+            </div>
+
             <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
               {recipients.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No beneficiaries added yet.</p>
               ) : (
                 recipients.map((recipient) => (
                   <div key={recipient.id} className="rounded-md border p-3">
-                    <button
-                      type="button"
-                      onClick={() => openStaffDetails(recipient)}
-                      className="mb-2 text-sm font-medium text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                    >
-                      {(recipient.staff?.firstName || "") + " " + (recipient.staff?.lastName || "") || "Unknown Staff"}
-                      {recipient.staff?.employeeId ? ` (${recipient.staff.employeeId})` : ""}
-                    </button>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <div className="min-w-40 flex-1 space-y-1">
-                        <Label htmlFor={`amount-${recipient.id}`}>Amount</Label>
-                        <Input
-                          id={`amount-${recipient.id}`}
-                          value={recipientAmounts[recipient.id] ?? recipient.amount}
-                          onChange={(event) => {
-                            setRecipientAmounts((prev) => ({
-                              ...prev,
-                              [recipient.id]: event.target.value,
-                            }));
-                          }}
-                          disabled={!canManageRecipients(selectedPayment) || isBusy}
-                        />
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        checked={selectedRecipientIds.includes(recipient.id)}
+                        onCheckedChange={() => toggleRecipientSelection(recipient.id)}
+                        disabled={!canManageRecipients(selectedPayment) || isBusy}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => openStaffDetails(recipient)}
+                          className="mb-2 text-sm font-medium text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+                        >
+                          {(recipient.staff?.firstName || "") + " " + (recipient.staff?.lastName || "") || "Unknown Staff"}
+                          {recipient.staff?.employeeId ? ` (${recipient.staff.employeeId})` : ""}
+                        </button>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="min-w-40 flex-1 space-y-1">
+                            <Label htmlFor={`amount-${recipient.id}`}>Amount</Label>
+                            <Input
+                              id={`amount-${recipient.id}`}
+                              value={recipientAmounts[recipient.id] ?? recipient.amount}
+                              onChange={(event) => {
+                                setRecipientAmounts((prev) => ({
+                                  ...prev,
+                                  [recipient.id]: event.target.value,
+                                }));
+                              }}
+                              disabled={!canManageRecipients(selectedPayment) || isBusy}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleUpdateAmount(recipient)}
+                            disabled={!canManageRecipients(selectedPayment) || isBusy}
+                          >
+                            Save Amount
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleRemoveRecipient(recipient.id)}
+                            disabled={!canManageRecipients(selectedPayment) || isBusy}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className={recipient.status === "approved" ? "border-emerald-500 text-emerald-700" : recipient.status === "disapproved" ? "border-rose-500 text-rose-700" : "border-amber-500 text-amber-700"}>
+                            {toTitleCase(recipient.status)}
+                          </Badge>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleReviewRecipient(recipient, "approved")}
+                            disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "approved"}
+                          >
+                            Mark Reviewed
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleReviewRecipient(recipient, "disapproved")}
+                            disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "disapproved"}
+                          >
+                            Mark Disapproved
+                          </Button>
+                        </div>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => handleUpdateAmount(recipient)}
-                        disabled={!canManageRecipients(selectedPayment) || isBusy}
-                      >
-                        Save Amount
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => handleRemoveRecipient(recipient.id)}
-                        disabled={!canManageRecipients(selectedPayment) || isBusy}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={recipient.status === "approved" ? "border-emerald-500 text-emerald-700" : recipient.status === "disapproved" ? "border-rose-500 text-rose-700" : "border-amber-500 text-amber-700"}>
-                        {toTitleCase(recipient.status)}
-                      </Badge>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleReviewRecipient(recipient, "approved")}
-                        disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "approved"}
-                      >
-                        Mark Reviewed
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleReviewRecipient(recipient, "disapproved")}
-                        disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "disapproved"}
-                      >
-                        Mark Disapproved
-                      </Button>
                     </div>
                   </div>
                 ))
