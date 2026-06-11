@@ -205,6 +205,7 @@ export const insertRecipientSchema = createInsertSchema(paymentRecipients, {
 }).omit({
   id: true,
   paymentId: true,
+  addedBy: true,
   status: true,
   verifiedBy: true,
   verifiedAt: true,
