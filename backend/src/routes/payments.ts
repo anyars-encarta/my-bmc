@@ -257,6 +257,39 @@ router.post("/:id/approve", async (req, res, next) => {
   }
 });
 
+router.post("/process-eligible", async (req, res, next) => {
+  try {
+    if (!req.user?.id) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const updated = await db
+      .update(payments)
+      .set({
+        status: "processing",
+        processedBy: req.user.id,
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.status, "approved"))
+      .returning({ id: payments.id });
+
+    res.json({
+      data: {
+        processedCount: updated.length,
+        ids: updated.map((item) => item.id),
+      },
+      message:
+        updated.length > 0
+          ? `Queued ${updated.length} batch${updated.length === 1 ? "" : "es"} for processing`
+          : "No eligible approved batches found",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/:id/process", async (req, res, next) => {
   try {
     const { id: paymentId } = req.params as { id: string };
