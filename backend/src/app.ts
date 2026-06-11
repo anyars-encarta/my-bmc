@@ -11,6 +11,7 @@ import cloudinaryRoutes from "./routes/cloudinary.js";
 import paymentRoutes from "./routes/payments.js";
 import paymentRecipientRoutes from "./routes/paymentRecipients.js";
 import setupRoutes from "./routes/setup.js";
+import momoRoutes from "./routes/momo.js";
 import userRoutes from "./routes/users.js";
 
 const app = express();
@@ -93,6 +94,7 @@ app.use("/api/cloudinary", cloudinaryRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payments/:paymentId/recipients", paymentRecipientRoutes);
+app.use("/api/momo", momoRoutes);
 
 // Routes
 app.get("/", (req, res) => {
