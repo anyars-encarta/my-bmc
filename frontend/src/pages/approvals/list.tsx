@@ -204,6 +204,20 @@ export const ApprovalQueueList = () => {
   const canManageRecipients = (payment: ApprovalPayment | null) =>
     payment ? ["draft", "pending_approval"].includes(payment.status) : false;
 
+  const allRecipientsReviewed = recipients.length > 0 && recipients.every((recipient) => recipient.status !== "pending");
+
+  const approvalBlockReason = !selectedPayment
+    ? ""
+    : selectedPayment.status !== "pending_approval"
+      ? "This batch can only be approved after submission."
+      : recipients.length === 0
+        ? "Add at least one beneficiary before approving."
+        : recipients.some((recipient) => recipient.status === "pending")
+          ? `${recipients.filter((recipient) => recipient.status === "pending").length} beneficiary${
+              recipients.filter((recipient) => recipient.status === "pending").length === 1 ? " is" : "s are"
+            } still awaiting review.`
+          : "";
+
   const availableStaff = useMemo(() => {
     return staff
       .filter((member) => !recipients.some((recipient) => recipient.staffId === member.id));
@@ -251,6 +265,37 @@ export const ApprovalQueueList = () => {
       notify?.({
         type: "error",
         message: error instanceof Error ? error.message : "Failed to update beneficiary.",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleReviewRecipient = async (
+    recipient: ApprovalRecipient,
+    status: "approved" | "disapproved",
+  ) => {
+    if (!selectedPayment) return;
+
+    try {
+      setIsBusy(true);
+      await requestRecipients(
+        `${apiBase}/payments/${selectedPayment.id}/recipients/${recipient.id}/review`,
+        {
+          method: "POST",
+          body: JSON.stringify({ status }),
+        },
+      );
+      await refreshRecipients(selectedPayment.id);
+      await paymentsQuery.refetch();
+      notify?.({
+        type: "success",
+        message: `Beneficiary ${status === "approved" ? "approved" : "disapproved"}.`,
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to review beneficiary.",
       });
     } finally {
       setIsBusy(false);
@@ -307,6 +352,35 @@ export const ApprovalQueueList = () => {
       notify?.({
         type: "error",
         message: error instanceof Error ? error.message : "Failed to add beneficiary.",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleApproveBatch = async () => {
+    if (!selectedPayment || !allRecipientsReviewed) {
+      return;
+    }
+
+    try {
+      setIsBusy(true);
+      await requestRecipients(`${apiBase}/payments/${selectedPayment.id}/approve`, {
+        method: "POST",
+      });
+      await paymentsQuery.refetch();
+      setSelectedPayment(null);
+      setRecipients([]);
+      setRecipientAmounts({});
+      setSelectedStaffId("");
+      setStaffPickerOpen(false);
+      setSelectedRecipientStaff(null);
+      setNewAmount("");
+      notify?.({ type: "success", message: "Payment batch approved." });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to approve batch.",
       });
     } finally {
       setIsBusy(false);
@@ -432,6 +506,29 @@ export const ApprovalQueueList = () => {
                         Remove
                       </Button>
                     </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={recipient.status === "approved" ? "border-emerald-500 text-emerald-700" : recipient.status === "disapproved" ? "border-rose-500 text-rose-700" : "border-amber-500 text-amber-700"}>
+                        {toTitleCase(recipient.status)}
+                      </Badge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleReviewRecipient(recipient, "approved")}
+                        disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "approved"}
+                      >
+                        Mark Reviewed
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleReviewRecipient(recipient, "disapproved")}
+                        disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "disapproved"}
+                      >
+                        Mark Disapproved
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
@@ -512,13 +609,27 @@ export const ApprovalQueueList = () => {
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setSelectedPayment(null)}
-            >
-              Close
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                {approvalBlockReason || "All beneficiaries are reviewed and the batch is ready for approval."}
+              </p>
+              <div className="flex gap-2 sm:justify-end">
+                <Button
+                  type="button"
+                  onClick={handleApproveBatch}
+                  disabled={!selectedPayment || !allRecipientsReviewed || isBusy || selectedPayment?.status !== "pending_approval"}
+                >
+                  Approve Batch
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedPayment(null)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
