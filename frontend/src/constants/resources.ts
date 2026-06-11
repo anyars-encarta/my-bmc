@@ -66,7 +66,7 @@ export const appResources: AppResource[] = [
   {
     name: "disbursements",
     list: "/disbursements",
-    label: "MTN Bulk Disbursement",
+    label: "Bulk Disbursement",
     icon: BanknoteArrowDown,
   },
   {
