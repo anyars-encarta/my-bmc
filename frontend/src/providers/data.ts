@@ -23,6 +23,7 @@ type ApiEnvelope<T> = {
 };
 
 const apiUrl = BACKEND_BASE_URL.replace(/\/+$/, "");
+const listCache = new Map<string, BaseRecord[]>();
 
 const isUsersResource = (resource: string) => resource === "users";
 
@@ -60,12 +61,52 @@ const normalizeValue = (value: unknown) => {
   return String(value).toLowerCase();
 };
 
+const collectSearchableValues = (value: unknown, depth = 0): string[] => {
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [String(value)];
+  }
+
+  if (depth >= 2) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectSearchableValues(entry, depth + 1));
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap((entry) =>
+      collectSearchableValues(entry, depth + 1),
+    );
+  }
+
+  return [];
+};
+
 const applyFilter = <T extends BaseRecord>(records: T[], filter: CrudFilter) => {
   if (!("field" in filter)) {
     return records;
   }
 
   const { field, operator, value } = filter;
+
+  if (field === "search" && operator === "contains") {
+    const normalizedSearch = normalizeValue(value).trim();
+
+    if (!normalizedSearch) {
+      return records;
+    }
+
+    return records.filter((record) =>
+      collectSearchableValues(record).some((entry) =>
+        normalizeValue(entry).includes(normalizedSearch),
+      ),
+    );
+  }
 
   return records.filter((record) => {
     const rawValue = record[field];
@@ -226,8 +267,14 @@ export const dataProvider: DataProvider = {
       };
     }
 
-    const { payload } = await requestJson<ApiEnvelope<BaseRecord[]>>(buildUrl(resource));
-    const allData = unwrapData<BaseRecord[]>(payload) ?? [];
+    let allData = listCache.get(resource);
+
+    if (!allData) {
+      const { payload } = await requestJson<ApiEnvelope<BaseRecord[]>>(buildUrl(resource));
+      allData = unwrapData<BaseRecord[]>(payload) ?? [];
+      listCache.set(resource, allData);
+    }
+
     const filtered = applyClientFilters(allData, filters);
     const sorted = applyClientSorters(filtered, sorters);
     const paged = applyClientPagination(sorted, currentPage, pageSize);
@@ -263,6 +310,8 @@ export const dataProvider: DataProvider = {
       body: JSON.stringify(variables),
     });
 
+    listCache.delete(resource);
+
     return {
       data: unwrapData<BaseRecord>(payload),
     };
@@ -275,6 +324,8 @@ export const dataProvider: DataProvider = {
       body: JSON.stringify(variables),
     });
 
+    listCache.delete(resource);
+
     return {
       data: unwrapData<BaseRecord>(payload),
     };
@@ -285,6 +336,8 @@ export const dataProvider: DataProvider = {
       method: "DELETE",
       body: variables ? JSON.stringify(variables) : undefined,
     });
+
+    listCache.delete(resource);
 
     return {
       data: unwrapData<BaseRecord | undefined>(payload) ?? ({ id } as BaseRecord),

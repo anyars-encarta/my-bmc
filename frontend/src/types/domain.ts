@@ -37,6 +37,9 @@ export interface PaymentRecord {
   title: string;
   description?: string;
   categoryId: string;
+  category?: {
+    name?: string;
+  };
   status: PaymentStatus;
   totalAmount: string;
   createdBy: string;

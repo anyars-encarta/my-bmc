@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { paymentStatusTone, toTitleCase } from "@/lib/payment";
 import type { PaymentStatus, StaffRecord } from "@/types/domain";
 import { useGetIdentity, useList, useNotification } from "@refinedev/core";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type ApprovalPayment = {
@@ -91,6 +91,7 @@ const requestRecipients = async <T,>(
 export const ApprovalQueueList = () => {
   const { open: notify } = useNotification();
   const { data: identity } = useGetIdentity<Identity>();
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { result: paymentsResult, query: paymentsQuery } = useList<ApprovalPayment>({
     resource: "payments",
@@ -116,6 +117,7 @@ export const ApprovalQueueList = () => {
     const identityTokens = [identity?.id, identity?.email, identity?.fullName]
       .filter(Boolean)
       .map((value) => String(value).toLowerCase().trim());
+    const normalizedSearch = searchQuery.trim().toLowerCase();
 
     return payments
       .filter((payment) => {
@@ -129,6 +131,23 @@ export const ApprovalQueueList = () => {
 
         const approver = payment.approvingOfficer.toLowerCase().trim();
         return identityTokens.includes(approver);
+      })
+      .filter((payment) => {
+        if (!normalizedSearch) {
+          return true;
+        }
+
+        const searchableText = [
+          payment.title,
+          payment.category?.name,
+          payment.status,
+          payment.approvingOfficer,
+        ]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase())
+          .join(" ");
+
+        return searchableText.includes(normalizedSearch);
       })
       .map((payment) => {
         const pendingReviewCount = (payment.recipients ?? []).filter(
@@ -147,7 +166,7 @@ export const ApprovalQueueList = () => {
           raw: payment,
         };
       });
-  }, [identity?.email, identity?.fullName, identity?.id, identity?.role, paymentsResult?.data]);
+  }, [identity?.email, identity?.fullName, identity?.id, identity?.role, paymentsResult?.data, searchQuery]);
 
   const refreshRecipients = async (paymentId: string) => {
     const nextRecipients = await requestRecipients<ApprovalRecipient[]>(
@@ -447,6 +466,16 @@ export const ApprovalQueueList = () => {
   return (
     <ListView className="space-y-4">
       <ListViewHeader title="Approval Queue" canCreate={false} />
+      <div className="relative w-full max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="text"
+          placeholder="Search approvals by payment, category, status, or approver"
+          className="pl-10"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+      </div>
       {paymentsQuery.isLoading && <p className="text-sm text-muted-foreground">Loading approvals...</p>}
       <div className="grid gap-4 xl:grid-cols-2">
         {queueItems.map((item, index) => (
