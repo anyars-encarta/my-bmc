@@ -200,6 +200,58 @@ router.post("/:id/submit", async (req, res, next) => {
   }
 });
 
+router.post("/:id/approve", async (req, res, next) => {
+  try {
+    const { id: paymentId } = req.params as { id: string };
+
+    if (!req.user?.id) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const [current] = await db.select().from(payments).where(eq(payments.id, paymentId));
+    if (!current) {
+      res.status(404).json({ error: "Payment not found" });
+      return;
+    }
+
+    if (current.status !== "pending_approval") {
+      res.status(409).json({ error: "Only pending approval payments can be approved" });
+      return;
+    }
+
+    const pendingRecipients = await db
+      .select({ status: paymentRecipients.status })
+      .from(paymentRecipients)
+      .where(eq(paymentRecipients.paymentId, paymentId));
+
+    if (pendingRecipients.length === 0) {
+      res.status(422).json({ error: "Payment must have at least one recipient" });
+      return;
+    }
+
+    if (pendingRecipients.some((recipient) => recipient.status === "pending")) {
+      res.status(422).json({ error: "All beneficiaries must be reviewed before approval" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(payments)
+      .set({
+        status: "approved",
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, paymentId))
+      .returning();
+
+    res.json({ data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/:id/process", async (req, res, next) => {
   try {
     const { id: paymentId } = req.params as { id: string };
