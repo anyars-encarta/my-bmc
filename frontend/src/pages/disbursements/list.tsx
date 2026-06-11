@@ -22,6 +22,31 @@ type DisbursementPayment = {
   recipients?: Array<{ id: string }>;
 };
 
+type DirectDisbursementResponse = {
+  paymentId: string;
+  batchReferenceId: string;
+  attemptedCount: number;
+  successCount: number;
+  failureCount: number;
+  pendingCount?: number;
+};
+
+type SyncStatusResponse = {
+  paymentsChecked: number;
+  recipientsPolled: number;
+  paymentsCompleted: number;
+  paymentsStillProcessing: number;
+  paymentResults?: Array<{
+    paymentId: string;
+    paymentTitle: string;
+    polledRecipients: number;
+    successCount: number;
+    failureCount: number;
+    pendingCount: number;
+    finalized: boolean;
+  }>;
+};
+
 const toDisbursementStatus = (
   status: PaymentStatus,
 ): DisbursementRecord["status"] => {
@@ -32,10 +57,40 @@ const toDisbursementStatus = (
 };
 
 export const DisbursementList = () => {
+  const LAST_SYNC_STORAGE_KEY = "disbursements:lastSyncResult";
   const [momoBalance, setMomoBalance] = useState(0);
   const [momoCurrency, setMomoCurrency] = useState("GHS");
   const [isLoadingMomoBalance, setIsLoadingMomoBalance] = useState(true);
   const [momoBalanceError, setMomoBalanceError] = useState<string | null>(null);
+  const [lastSyncResult, setLastSyncResult] = useState<{
+    syncedAt: string;
+    data: SyncStatusResponse;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const storedValue = localStorage.getItem(LAST_SYNC_STORAGE_KEY);
+      if (!storedValue) {
+        return;
+      }
+
+      const parsed = JSON.parse(storedValue) as {
+        syncedAt?: string;
+        data?: SyncStatusResponse;
+      };
+
+      if (!parsed?.syncedAt || !parsed?.data) {
+        return;
+      }
+
+      setLastSyncResult({
+        syncedAt: parsed.syncedAt,
+        data: parsed.data,
+      });
+    } catch {
+      localStorage.removeItem(LAST_SYNC_STORAGE_KEY);
+    }
+  }, []);
 
   const { open: notify } = useNotification();
   const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
@@ -50,6 +105,12 @@ export const DisbursementList = () => {
     processedCount?: number;
     ids?: string[];
   }>();
+  const { mutateAsync: disbursePayment, mutation: disbursementMutation } =
+    useCustomMutation<DirectDisbursementResponse>();
+  const { mutateAsync: syncDisbursementStatuses, mutation: syncStatusMutation } =
+    useCustomMutation<SyncStatusResponse>();
+
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const isRunningEligible = mutation.status === "pending";
 
   const disbursements = useMemo<DisbursementRecord[]>(() => {
@@ -78,6 +139,14 @@ export const DisbursementList = () => {
     () =>
       (paymentsResult?.data ?? []).filter(
         (payment) => payment.status === "approved",
+      ).length,
+    [paymentsResult?.data],
+  );
+
+  const processingCount = useMemo(
+    () =>
+      (paymentsResult?.data ?? []).filter(
+        (payment) => payment.status === "processing",
       ).length,
     [paymentsResult?.data],
   );
@@ -111,6 +180,101 @@ export const DisbursementList = () => {
       });
     }
   };
+
+  const handleDisburseSelectedPayment = async (
+    paymentId: string,
+    paymentTitle: string,
+  ) => {
+    setActivePaymentId(paymentId);
+
+    try {
+      const response = await disbursePayment({
+        url: `${apiBase}/payments/${paymentId}/disburse`,
+        method: "post",
+        values: {},
+      });
+
+      const attemptedCount = Number(response?.data?.attemptedCount ?? 0);
+      const successCount = Number(response?.data?.successCount ?? 0);
+      const failureCount = Number(response?.data?.failureCount ?? 0);
+      const pendingCount = Number(response?.data?.pendingCount ?? 0);
+
+      await paymentsQuery.refetch();
+
+      notify?.({
+        type: failureCount > 0 || pendingCount > 0 ? "warning" : "success",
+        message:
+          failureCount > 0 || pendingCount > 0
+            ? `${paymentTitle}: ${successCount}/${attemptedCount} successful, ${failureCount} failed, ${pendingCount} pending final MTN confirmation.`
+            : `${paymentTitle}: all ${successCount} beneficiary transfer(s) confirmed successful.`,
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to disburse selected payment.",
+      });
+    } finally {
+      setActivePaymentId(null);
+    }
+  };
+
+  const handleSyncStatuses = async () => {
+    try {
+      const response = await syncDisbursementStatuses({
+        url: `${apiBase}/payments/sync-status`,
+        method: "post",
+        values: {},
+      });
+
+      const paymentsChecked = Number(response?.data?.paymentsChecked ?? 0);
+      const recipientsPolled = Number(response?.data?.recipientsPolled ?? 0);
+      const paymentsCompleted = Number(response?.data?.paymentsCompleted ?? 0);
+      const paymentsStillProcessing = Number(
+        response?.data?.paymentsStillProcessing ?? 0,
+      );
+
+      if (response?.data) {
+        const nextSyncResult = {
+          syncedAt: new Date().toLocaleString(),
+          data: response.data,
+        };
+        setLastSyncResult(nextSyncResult);
+        localStorage.setItem(
+          LAST_SYNC_STORAGE_KEY,
+          JSON.stringify(nextSyncResult),
+        );
+      }
+
+      await paymentsQuery.refetch();
+
+      notify?.({
+        type: paymentsCompleted > 0 ? "success" : "info",
+        message:
+          paymentsChecked === 0
+            ? "No processing payments found to sync."
+            : `Sync complete: ${recipientsPolled} transfers polled, ${paymentsCompleted} payment(s) finalized, ${paymentsStillProcessing} still processing.`,
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to sync disbursement statuses.",
+      });
+    }
+  };
+
+  const finalizedInLastSync = useMemo(
+    () =>
+      (lastSyncResult?.data.paymentResults ?? []).filter(
+        (payment) => payment.finalized,
+      ),
+    [lastSyncResult],
+  );
 
     useEffect(() => {
       const controller = new AbortController();
@@ -211,14 +375,77 @@ export const DisbursementList = () => {
                   eligibleCount > 0 ? ` (${eligibleCount})` : ""
                 }`}
           </Button>
-          <Button variant="outline" className="cursor-pointer" disabled>
-            Sync Status
+          <Button
+            variant="outline"
+            className="cursor-pointer"
+            onClick={handleSyncStatuses}
+            disabled={
+              syncStatusMutation.status === "pending" ||
+              paymentsQuery.isLoading ||
+              processingCount === 0
+            }
+          >
+            {syncStatusMutation.status === "pending"
+              ? "Syncing..."
+              : `Sync Status${processingCount > 0 ? ` (${processingCount})` : ""}`}
           </Button>
           <Button variant="outline" className="cursor-pointer" disabled>
             Download Settlement Report
           </Button>
         </CardContent>
       </Card>
+
+      {lastSyncResult && (
+        <Card className="border-0 shadow-sm ring-1 ring-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Last Sync Result</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Synced at {lastSyncResult.syncedAt}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">
+                Checked {lastSyncResult.data.paymentsChecked}
+              </Badge>
+              <Badge variant="outline">
+                Polled {lastSyncResult.data.recipientsPolled}
+              </Badge>
+              <Badge className="bg-emerald-600 text-white">
+                Finalized {lastSyncResult.data.paymentsCompleted}
+              </Badge>
+              <Badge variant="secondary">
+                Still Processing {lastSyncResult.data.paymentsStillProcessing}
+              </Badge>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Payments Finalized In This Sync
+              </p>
+              {finalizedInLastSync.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No payments were finalized in the most recent sync.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {finalizedInLastSync.map((payment) => (
+                    <div
+                      key={payment.paymentId}
+                      className="rounded-md border border-border p-2"
+                    >
+                      <p className="font-medium">{payment.paymentTitle}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {payment.successCount} successful of {payment.polledRecipients} polled
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {paymentsQuery.isLoading && (
         <p className="text-sm text-muted-foreground">
@@ -258,6 +485,26 @@ export const DisbursementList = () => {
               />
               <DataLine label="Processed At" value={item.processedAt} />
               <DataLine label="Batch Reference" value={item.id} />
+
+              <div className="sm:col-span-2 pt-1">
+                <Button
+                  className="cursor-pointer"
+                  onClick={() =>
+                    handleDisburseSelectedPayment(item.id, item.paymentTitle)
+                  }
+                  disabled={
+                    item.status !== "queued" ||
+                    disbursementMutation.status === "pending"
+                  }
+                >
+                  {disbursementMutation.status === "pending" &&
+                  activePaymentId === item.id
+                    ? "Disbursing..."
+                    : item.status === "queued"
+                    ? "Disburse Selected Payment"
+                    : "Disbursement Not Available"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
