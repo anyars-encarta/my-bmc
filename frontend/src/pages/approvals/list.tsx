@@ -121,7 +121,7 @@ export const ApprovalQueueList = () => {
 
     return payments
       .filter((payment) => {
-        if (identity?.role === "admin") {
+        if (identity?.role === "admin" || identity?.role === "accounts") {
           return true;
         }
 
@@ -221,6 +221,8 @@ export const ApprovalQueueList = () => {
   const openReview = async (payment: ApprovalPayment) => {
     setSelectedPayment(payment);
   };
+
+  const isAccountsUser = identity?.role === "accounts";
 
   const canManageRecipients = (payment: ApprovalPayment | null) =>
     payment ? ["draft", "pending_approval"].includes(payment.status) : false;
@@ -504,12 +506,15 @@ export const ApprovalQueueList = () => {
                 <DataLine label="Approver" value={item.approvingOfficer} />
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => openReview(item.raw)}>
-                  Open Review
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => openReview(item.raw)}>
-                  Manage Beneficiaries
-                </Button>
+                {identity?.role === "accounts" ? (
+                  <Button size="sm" variant="outline" onClick={() => openReview(item.raw)}>
+                    Manage Beneficiaries
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={() => openReview(item.raw)}>
+                    Open Review
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -545,50 +550,52 @@ export const ApprovalQueueList = () => {
               Total beneficiaries: {recipients.length}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3 text-sm">
-              <div className="text-muted-foreground">
-                {selectedRecipientIds.length === 0
-                  ? "Select beneficiaries to review them in bulk."
-                  : `${selectedRecipientIds.length} selected${selectedPendingCount > 0 ? `, ${selectedPendingCount} still pending` : ""}`}
+            {!isAccountsUser && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="text-muted-foreground">
+                  {selectedRecipientIds.length === 0
+                    ? "Select beneficiaries to review them in bulk."
+                    : `${selectedRecipientIds.length} selected${selectedPendingCount > 0 ? `, ${selectedPendingCount} still pending` : ""}`}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={selectAllRecipients}
+                    disabled={recipients.length === 0 || isBusy}
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={clearRecipientSelection}
+                    disabled={selectedRecipientIds.length === 0 || isBusy}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => handleBulkReviewRecipients("approved")}
+                    disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
+                  >
+                    Bulk Reviewed
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleBulkReviewRecipients("disapproved")}
+                    disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
+                  >
+                    Bulk Disapproved
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={selectAllRecipients}
-                  disabled={recipients.length === 0 || isBusy}
-                >
-                  Select All
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={clearRecipientSelection}
-                  disabled={selectedRecipientIds.length === 0 || isBusy}
-                >
-                  Clear
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => handleBulkReviewRecipients("approved")}
-                  disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
-                >
-                  Bulk Reviewed
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => handleBulkReviewRecipients("disapproved")}
-                  disabled={selectedRecipientIds.length === 0 || isBusy || !canManageRecipients(selectedPayment)}
-                >
-                  Bulk Disapproved
-                </Button>
-              </div>
-            </div>
+            )}
 
             <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
               {recipients.length === 0 ? (
@@ -597,12 +604,14 @@ export const ApprovalQueueList = () => {
                 recipients.map((recipient) => (
                   <div key={recipient.id} className="rounded-md border p-3">
                     <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={selectedRecipientIds.includes(recipient.id)}
-                        onCheckedChange={() => toggleRecipientSelection(recipient.id)}
-                        disabled={!canManageRecipients(selectedPayment) || isBusy}
-                        className="mt-1"
-                      />
+                      {!isAccountsUser && (
+                        <Checkbox
+                          checked={selectedRecipientIds.includes(recipient.id)}
+                          onCheckedChange={() => toggleRecipientSelection(recipient.id)}
+                          disabled={!canManageRecipients(selectedPayment) || isBusy}
+                          className="mt-1"
+                        />
+                      )}
                       <div className="min-w-0 flex-1">
                         <button
                           type="button"
@@ -624,49 +633,57 @@ export const ApprovalQueueList = () => {
                                   [recipient.id]: event.target.value,
                                 }));
                               }}
-                              disabled={!canManageRecipients(selectedPayment) || isBusy}
+                              disabled={isAccountsUser || !canManageRecipients(selectedPayment) || isBusy}
                             />
                           </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => handleUpdateAmount(recipient)}
-                            disabled={!canManageRecipients(selectedPayment) || isBusy}
-                          >
-                            Save Amount
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleRemoveRecipient(recipient.id)}
-                            disabled={!canManageRecipients(selectedPayment) || isBusy}
-                          >
-                            Remove
-                          </Button>
+                          {!isAccountsUser && (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => handleUpdateAmount(recipient)}
+                                disabled={!canManageRecipients(selectedPayment) || isBusy}
+                              >
+                                Save Amount
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => handleRemoveRecipient(recipient.id)}
+                                disabled={!canManageRecipients(selectedPayment) || isBusy}
+                              >
+                                Remove
+                              </Button>
+                            </>
+                          )}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className={recipient.status === "approved" ? "border-emerald-500 text-emerald-700" : recipient.status === "disapproved" ? "border-rose-500 text-rose-700" : "border-amber-500 text-amber-700"}>
                             {toTitleCase(recipient.status)}
                           </Badge>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleReviewRecipient(recipient, "approved")}
-                            disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "approved"}
-                          >
-                            Mark Reviewed
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleReviewRecipient(recipient, "disapproved")}
-                            disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "disapproved"}
-                          >
-                            Mark Disapproved
-                          </Button>
+                          {!isAccountsUser && (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleReviewRecipient(recipient, "approved")}
+                                disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "approved"}
+                              >
+                                Mark Reviewed
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleReviewRecipient(recipient, "disapproved")}
+                                disabled={!canManageRecipients(selectedPayment) || isBusy || recipient.status === "disapproved"}
+                              >
+                                Mark Disapproved
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -751,24 +768,30 @@ export const ApprovalQueueList = () => {
 
           <DialogFooter>
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">
-                {approvalBlockReason || "All beneficiaries are reviewed and the batch is ready for approval."}
-              </p>
+              {!isAccountsUser && (
+                <p className="text-xs text-muted-foreground">
+                  {approvalBlockReason || "All beneficiaries are reviewed and the batch is ready for approval."}
+                </p>
+              )}
               <div className="flex gap-2 sm:justify-end">
-                <Button
-                  type="button"
-                  onClick={handleApproveBatch}
-                  disabled={!selectedPayment || !allRecipientsReviewed || isBusy || selectedPayment?.status !== "pending_approval"}
-                >
-                  Approve Batch
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setSelectedPayment(null)}
-                >
-                  Close
-                </Button>
+                {!isAccountsUser && (
+                  <>
+                    <Button
+                      type="button"
+                      onClick={handleApproveBatch}
+                      disabled={!selectedPayment || !allRecipientsReviewed || isBusy || selectedPayment?.status !== "pending_approval"}
+                    >
+                      Approve Batch
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSelectedPayment(null)}
+                    >
+                      Close
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </DialogFooter>
