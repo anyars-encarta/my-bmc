@@ -128,7 +128,7 @@ export const ApprovalQueueList = () => {
   );
   const [staffLoading, setStaffLoading] = useState(false);
   const [newAmount, setNewAmount] = useState("");
-  const [isBusy, setIsBusy] = useState(false);
+  const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 
   const [momoBalance, setMomoBalance] = useState(0);
   const [momoCurrency, setMomoCurrency] = useState("GHS");
@@ -367,6 +367,9 @@ export const ApprovalQueueList = () => {
     (member) => member.id === selectedStaffId,
   );
 
+  const isBusy = busyActionKey !== null;
+  const isActionBusy = (actionKey: string) => busyActionKey === actionKey;
+
   const openStaffDetails = (recipient: ApprovalRecipient) => {
     const matched = staff.find((member) => member.id === recipient.staffId);
     if (matched) {
@@ -391,8 +394,10 @@ export const ApprovalQueueList = () => {
   const handleUpdateAmount = async (recipient: ApprovalRecipient) => {
     if (!selectedPayment) return;
 
+    const actionKey = `update-${recipient.id}`;
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       await requestRecipients(
         `${apiBase}/payments/${selectedPayment.id}/recipients/${recipient.id}`,
         {
@@ -414,7 +419,7 @@ export const ApprovalQueueList = () => {
             : "Failed to update beneficiary.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
@@ -424,8 +429,10 @@ export const ApprovalQueueList = () => {
   ) => {
     if (!selectedPayment) return;
 
+    const actionKey = `review-${status}-${recipient.id}`;
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       await requestRecipients(
         `${apiBase}/payments/${selectedPayment.id}/recipients/${recipient.id}/review`,
         {
@@ -450,7 +457,7 @@ export const ApprovalQueueList = () => {
             : "Failed to review beneficiary.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
@@ -477,8 +484,10 @@ export const ApprovalQueueList = () => {
       return;
     }
 
+    const actionKey = `bulk-${status}`;
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       for (const recipientId of selectedRecipientIds) {
         await requestRecipients(
           `${apiBase}/payments/${selectedPayment.id}/recipients/${recipientId}/review`,
@@ -507,15 +516,17 @@ export const ApprovalQueueList = () => {
             : "Failed to process selected beneficiaries.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
   const handleRemoveRecipient = async (recipientId: string) => {
     if (!selectedPayment) return;
 
+    const actionKey = `remove-${recipientId}`;
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       await requestRecipients(
         `${apiBase}/payments/${selectedPayment.id}/recipients/${recipientId}`,
         {
@@ -534,7 +545,7 @@ export const ApprovalQueueList = () => {
             : "Failed to remove beneficiary.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
@@ -543,8 +554,10 @@ export const ApprovalQueueList = () => {
       return;
     }
 
+    const actionKey = "add-recipient";
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       await requestRecipients(
         `${apiBase}/payments/${selectedPayment.id}/recipients`,
         {
@@ -567,7 +580,7 @@ export const ApprovalQueueList = () => {
           error instanceof Error ? error.message : "Failed to add beneficiary.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
@@ -576,8 +589,10 @@ export const ApprovalQueueList = () => {
       return;
     }
 
+    const actionKey = "approve-batch";
+
     try {
-      setIsBusy(true);
+      setBusyActionKey(actionKey);
       await requestRecipients(
         `${apiBase}/payments/${selectedPayment.id}/approve`,
         {
@@ -600,7 +615,7 @@ export const ApprovalQueueList = () => {
           error instanceof Error ? error.message : "Failed to approve batch.",
       });
     } finally {
-      setIsBusy(false);
+      setBusyActionKey(null);
     }
   };
 
@@ -768,7 +783,7 @@ export const ApprovalQueueList = () => {
                       !canManageRecipients(selectedPayment)
                     }
                   >
-                    {isBusy ? (
+                    {isActionBusy("bulk-approved") ? (
                       <>
                         <PageLoader inline />
                         <span>Approving...</span>
@@ -789,7 +804,7 @@ export const ApprovalQueueList = () => {
                       !canManageRecipients(selectedPayment)
                     }
                   >
-                    {isBusy ? (
+                    {isActionBusy("bulk-disapproved") ? (
                       <>
                         <PageLoader inline />
                         <span>Disapproving...</span>
@@ -873,7 +888,7 @@ export const ApprovalQueueList = () => {
                                   isBusy
                                 }
                               >
-                                {isBusy ? (
+                                {isActionBusy(`update-${recipient.id}`) ? (
                                   <>
                                     <PageLoader inline />
                                     <span>Saving...</span>
@@ -895,7 +910,7 @@ export const ApprovalQueueList = () => {
                                   isBusy
                                 }
                               >
-                                {isBusy ? (
+                                {isActionBusy(`remove-${recipient.id}`) ? (
                                   <>
                                     <PageLoader inline />
                                     <span>Removing...</span>
@@ -935,7 +950,9 @@ export const ApprovalQueueList = () => {
                                   recipient.status === "approved"
                                 }
                               >
-                                {isBusy ? (
+                                {isActionBusy(
+                                  `review-approved-${recipient.id}`,
+                                ) ? (
                                   <>
                                     <PageLoader inline />
                                     <span>Approving...</span>
@@ -961,7 +978,9 @@ export const ApprovalQueueList = () => {
                                   recipient.status === "disapproved"
                                 }
                               >
-                                {isBusy ? (
+                                {isActionBusy(
+                                  `review-disapproved-${recipient.id}`,
+                                ) ? (
                                   <>
                                     <PageLoader inline />
                                     <span>Disapproving...</span>
@@ -1065,7 +1084,7 @@ export const ApprovalQueueList = () => {
                   !newAmount
                 }
               >
-                {isBusy ? (
+                {isActionBusy("add-recipient") ? (
                   <>
                     <PageLoader inline />
                     <span>Adding...</span>
@@ -1099,7 +1118,7 @@ export const ApprovalQueueList = () => {
                         selectedPayment?.status !== "pending_approval"
                       }
                     >
-                      {isBusy ? (
+                      {isActionBusy("approve-batch") ? (
                         <>
                           <PageLoader inline />
                           <span>Approving...</span>
