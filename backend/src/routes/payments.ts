@@ -83,9 +83,14 @@ router.post("/", async (req, res, next) => {
       return;
     }
 
+    const createdBy =
+      typeof parsed.data.createdBy === "string" && parsed.data.createdBy.trim()
+        ? parsed.data.createdBy.trim()
+        : req.user.id;
+
     const [created] = await db
       .insert(payments)
-      .values({ ...parsed.data, createdBy: req.user.id })
+      .values({ ...parsed.data, createdBy })
       .returning();
 
     res.status(201).json({ data: created });

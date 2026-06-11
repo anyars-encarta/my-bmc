@@ -189,7 +189,6 @@ export const insertPaymentSchema = createInsertSchema(payments, {
   approvedAt: true,
   processedBy: true,
   processedAt: true,
-  momoReferenceId: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -205,10 +204,8 @@ export const updatePaymentSchema = createInsertSchema(payments, {
   approvedAt: true,
   processedBy: true,
   processedAt: true,
-  momoReferenceId: true,
   createdAt: true,
   updatedAt: true,
-  createdBy: true,
 }).partial();
 
 export const selectPaymentSchema = createSelectSchema(payments);
