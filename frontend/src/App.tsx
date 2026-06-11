@@ -8,6 +8,7 @@ import routerProvider, {
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
+import { useEffect, useState } from "react";
 import "./App.css";
 import { appResources } from "./constants/resources";
 import { ErrorComponent } from "./components/refine-ui/layout/error-component";
@@ -81,6 +82,34 @@ const brandedTitle = ({
 };
 
 function App() {
+  const [showSplash, setShowSplash] = useState(true);
+  const notificationProvider = useNotificationProvider();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShowSplash(false);
+    }, 1800);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (showSplash) {
+    return (
+      <div className="startup-splash" role="status" aria-live="polite">
+        <div className="startup-splash-inner">
+          <div className="startup-loader-ring" aria-hidden="true" />
+          <div className="startup-logo-wrap">
+            <img
+              src="/bmc.png"
+              alt="BMC"
+              className="startup-logo"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <RefineKbarProvider>
@@ -89,7 +118,7 @@ function App() {
             <Refine
               dataProvider={dataProvider}
               authProvider={authProvider}
-              notificationProvider={useNotificationProvider()}
+              notificationProvider={notificationProvider}
               routerProvider={routerProvider}
               resources={appResources.map((resource) => ({
                 name: resource.name,
