@@ -25,6 +25,11 @@ export const PaymentList = () => {
         id: "title",
         header: "Payment",
       }),
+      helper.accessor("period", {
+        id: "period",
+        header: "Period",
+        cell: ({ row }) => row.original.period || "-",
+      }),
       helper.accessor("categoryId", {
         id: "category",
         header: "Category",
@@ -103,7 +108,7 @@ export const PaymentList = () => {
           <Input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search payments by title, category, status, or officer"
+            placeholder="Search payments by title, period, category, status, or officer"
             className="pl-9"
           />
         </div>

@@ -36,6 +36,7 @@ export interface PaymentRecord {
   id: string;
   title: string;
   description?: string;
+  period?: string;
   categoryId: string;
   category?: {
     name?: string;

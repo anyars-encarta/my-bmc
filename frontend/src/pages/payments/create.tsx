@@ -27,6 +27,7 @@ import { useNavigate } from "react-router";
 
 type PaymentFormValues = {
   title: string;
+  period?: string;
   categoryId: string;
   createdBy: string;
   approvingOfficer?: string;
@@ -67,6 +68,7 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
     },
     defaultValues: {
       title: "",
+      period: "",
       categoryId: "",
       createdBy: "",
       approvingOfficer: "",
@@ -91,6 +93,7 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
 
     reset({
       title: record.title ?? "",
+      period: record.period ?? "",
       categoryId: record.categoryId ?? "",
       createdBy: record.createdBy ?? "",
       approvingOfficer: record.approvingOfficer ?? "",
@@ -104,6 +107,7 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
   const onSubmit = (values: PaymentFormValues) => {
     onFinish({
       ...values,
+      period: values.period || undefined,
       approvingOfficer: values.approvingOfficer || undefined,
       momoReferenceId: values.momoReferenceId || undefined,
       description: values.description || undefined,
@@ -119,6 +123,7 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
           className="grid gap-4 rounded-lg border border-border bg-card p-6 md:grid-cols-2"
         >
           <TextField form={form} name="title" label="Payment Title" />
+          <TextField form={form} name="period" label="Period" />
           <TextField form={form} name="createdBy" label="Payment Officer" />
           <TextField form={form} name="approvingOfficer" label="Approving Officer" />
           <TextField form={form} name="totalAmount" label="Total Amount" type="number" />
