@@ -13,17 +13,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BACKEND_BASE_URL } from "@/constants";
 import { formatCurrency } from "@/lib/currency";
+import { cn } from "@/lib/utils";
 import { paymentStatusTone, toTitleCase } from "@/lib/payment";
 import type { PaymentStatus, StaffRecord } from "@/types/domain";
 import { useGetIdentity, useList, useNotification } from "@refinedev/core";
+import { Check, ChevronsUpDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type ApprovalPayment = {
@@ -93,21 +96,15 @@ export const ApprovalQueueList = () => {
     },
   });
 
-  const { result: staffResult } = useList<StaffRecord>({
-    resource: "staff",
-    pagination: {
-      pageSize: 500,
-    },
-  });
-
   const [selectedPayment, setSelectedPayment] = useState<ApprovalPayment | null>(null);
   const [recipients, setRecipients] = useState<ApprovalRecipient[]>([]);
   const [recipientAmounts, setRecipientAmounts] = useState<Record<string, string>>({});
   const [selectedStaffId, setSelectedStaffId] = useState("");
+  const [staffPickerOpen, setStaffPickerOpen] = useState(false);
+  const [staff, setStaff] = useState<StaffRecord[]>([]);
+  const [staffLoading, setStaffLoading] = useState(false);
   const [newAmount, setNewAmount] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-
-  const staff = staffResult?.data ?? [];
 
   const queueItems = useMemo(() => {
     const payments = paymentsResult?.data ?? [];
@@ -161,6 +158,25 @@ export const ApprovalQueueList = () => {
   };
 
   useEffect(() => {
+    const run = async () => {
+      try {
+        setStaffLoading(true);
+        const allStaff = await requestRecipients<StaffRecord[]>(`${apiBase}/staff`);
+        setStaff(allStaff);
+      } catch (error) {
+        notify?.({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to load staff list.",
+        });
+      } finally {
+        setStaffLoading(false);
+      }
+    };
+
+    run();
+  }, [notify]);
+
+  useEffect(() => {
     const paymentId = selectedPayment?.id;
     if (!paymentId) return;
 
@@ -185,9 +201,12 @@ export const ApprovalQueueList = () => {
   const canManageRecipients = (payment: ApprovalPayment | null) =>
     payment ? ["draft", "pending_approval"].includes(payment.status) : false;
 
-  const availableStaff = staff.filter(
-    (member) => !recipients.some((recipient) => recipient.staffId === member.id),
-  );
+  const availableStaff = useMemo(() => {
+    return staff
+      .filter((member) => !recipients.some((recipient) => recipient.staffId === member.id));
+  }, [recipients, staff]);
+
+  const selectedStaff = availableStaff.find((member) => member.id === selectedStaffId);
 
   const handleUpdateAmount = async (recipient: ApprovalRecipient) => {
     if (!selectedPayment) return;
@@ -321,6 +340,7 @@ export const ApprovalQueueList = () => {
             setRecipients([]);
             setRecipientAmounts({});
             setSelectedStaffId("");
+            setStaffPickerOpen(false);
             setNewAmount("");
           }
         }}
@@ -393,18 +413,54 @@ export const ApprovalQueueList = () => {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-1 md:col-span-2">
                   <Label>Staff</Label>
-                  <Select value={selectedStaffId} onValueChange={setSelectedStaffId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select staff" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableStaff.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          {member.firstName} {member.lastName} ({member.employeeId})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover
+                    open={staffPickerOpen}
+                    onOpenChange={setStaffPickerOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={staffPickerOpen}
+                        className="w-full justify-between"
+                        disabled={staffLoading || !canManageRecipients(selectedPayment) || isBusy}
+                      >
+                        {selectedStaff
+                          ? `${selectedStaff.firstName} ${selectedStaff.lastName} (${selectedStaff.employeeId})`
+                          : staffLoading
+                            ? "Loading staff..."
+                            : "Search and select staff"}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search by name, employee ID, or email" />
+                        <CommandList>
+                          <CommandEmpty>No matching staff.</CommandEmpty>
+                          {availableStaff.map((member) => (
+                            <CommandItem
+                              key={member.id}
+                              value={`${member.firstName} ${member.lastName} ${member.employeeId} ${member.email}`}
+                              onSelect={() => {
+                                setSelectedStaffId(member.id);
+                                setStaffPickerOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  selectedStaffId === member.id ? "opacity-100" : "opacity-0",
+                                )}
+                              />
+                              {member.firstName} {member.lastName} ({member.employeeId})
+                            </CommandItem>
+                          ))}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="space-y-1">
                   <Label>Amount</Label>
