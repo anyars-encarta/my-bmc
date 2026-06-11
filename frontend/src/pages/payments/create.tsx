@@ -18,7 +18,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CreateView, CreateViewHeader } from "@/components/refine-ui/views/create-view";
+import {
+  CreateView,
+  CreateViewHeader,
+} from "@/components/refine-ui/views/create-view";
 import type { CategoryRecord } from "@/types/domain";
 import { BaseRecord, HttpError, useList, useOne } from "@refinedev/core";
 import { useForm } from "@refinedev/react-hook-form";
@@ -41,14 +44,21 @@ export const PaymentCreate = () => {
   return <PaymentForm mode="create" />;
 };
 
-export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paymentId?: string }) => {
+export const PaymentForm = ({
+  mode,
+  paymentId,
+}: {
+  mode: "create" | "edit";
+  paymentId?: string;
+}) => {
   const navigate = useNavigate();
-  const { result: categoriesResult, query: categoriesQuery } = useList<CategoryRecord>({
-    resource: "categories",
-    pagination: {
-      pageSize: 200,
-    },
-  });
+  const { result: categoriesResult, query: categoriesQuery } =
+    useList<CategoryRecord>({
+      resource: "categories",
+      pagination: {
+        pageSize: 200,
+      },
+    });
 
   const categories = categoriesResult?.data ?? [];
   const categoriesLoading = categoriesQuery.isLoading;
@@ -116,7 +126,11 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
 
   return (
     <CreateView className="space-y-4">
-      <CreateViewHeader title={mode === "create" ? "Create Payment Batch" : "Edit Payment Batch"} />
+      <CreateViewHeader
+        title={
+          mode === "create" ? "Create Payment Batch" : "Edit Payment Batch"
+        }
+      />
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
@@ -125,9 +139,22 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
           <TextField form={form} name="title" label="Payment Title" />
           <TextField form={form} name="period" label="Period" />
           <TextField form={form} name="createdBy" label="Payment Officer" />
-          <TextField form={form} name="approvingOfficer" label="Approving Officer" />
-          <TextField form={form} name="totalAmount" label="Total Amount" type="number" />
-          <TextField form={form} name="momoReferenceId" label="MoMo Reference ID" />
+          <TextField
+            form={form}
+            name="approvingOfficer"
+            label="Approving Officer"
+          />
+          <TextField
+            form={form}
+            name="totalAmount"
+            label="Total Amount"
+            type="number"
+          />
+          <TextField
+            form={form}
+            name="momoReferenceId"
+            label="MoMo Reference ID"
+          />
 
           <FormField
             control={form.control}
@@ -137,10 +164,17 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
               <FormItem>
                 <FormLabel>Category</FormLabel>
                 <FormControl>
-                  <Select onValueChange={field.onChange} value={field.value || ""}>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value || ""}
+                  >
                     <SelectTrigger>
                       <SelectValue
-                        placeholder={categoriesLoading ? "Loading categories..." : "Select category"}
+                        placeholder={
+                          categoriesLoading
+                            ? "Loading categories..."
+                            : "Select category"
+                        }
                       />
                     </SelectTrigger>
                     <SelectContent>
@@ -182,7 +216,10 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Status</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value || "draft"}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value || "draft"}
+                >
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Select status" />
@@ -202,7 +239,12 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
           />
 
           <div className="md:col-span-2 flex gap-2">
-            <Button type="submit" {...form.saveButtonProps} disabled={isSubmitting}>
+            <Button
+              type="submit"
+              className="cursor-pointer"
+              {...form.saveButtonProps}
+              disabled={isSubmitting}
+            >
               {isSubmitting ? (
                 <span className="inline-flex items-center gap-2">
                   <PageLoader inline />
@@ -212,7 +254,12 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
                 "Save Payment"
               )}
             </Button>
-            <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+            <Button
+              type="button"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => navigate(-1)}
+            >
               Cancel
             </Button>
           </div>
@@ -224,7 +271,7 @@ export const PaymentForm = ({ mode, paymentId }: { mode: "create" | "edit"; paym
 
 type FieldProps = {
   form: ReturnType<typeof useForm<BaseRecord, HttpError, PaymentFormValues>>;
-  name: string;
+  name: keyof PaymentFormValues;
   label: string;
   type?: string;
 };
@@ -239,7 +286,12 @@ function TextField({ form, name, label, type = "text" }: FieldProps) {
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <FormControl>
-            <Input {...field} value={field.value || ""} type={type} placeholder={`Enter ${label.toLowerCase()}`} />
+            <Input
+              {...field}
+              value={field.value || ""}
+              type={type}
+              placeholder={`Enter ${label.toLowerCase()}`}
+            />
           </FormControl>
           <FormMessage />
         </FormItem>

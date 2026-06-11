@@ -38,6 +38,7 @@ import { useGetIdentity, useList, useNotification } from "@refinedev/core";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { MomoBalanceResponse } from "@/types/momo";
+import PageLoader from "@/components/PageLoader";
 
 type ApprovalPayment = {
   id: string;
@@ -674,12 +675,17 @@ export const ApprovalQueueList = () => {
                   <Button
                     size="sm"
                     variant="outline"
+                    className="cursor-pointer"
                     onClick={() => openReview(item.raw)}
                   >
                     Manage Beneficiaries
                   </Button>
                 ) : (
-                  <Button size="sm" onClick={() => openReview(item.raw)}>
+                  <Button
+                    size="sm"
+                    className="cursor-pointer"
+                    onClick={() => openReview(item.raw)}
+                  >
                     Open Review
                   </Button>
                 )}
@@ -735,6 +741,7 @@ export const ApprovalQueueList = () => {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="cursor-pointer"
                     onClick={selectAllRecipients}
                     disabled={recipients.length === 0 || isBusy}
                   >
@@ -744,6 +751,7 @@ export const ApprovalQueueList = () => {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="cursor-pointer"
                     onClick={clearRecipientSelection}
                     disabled={selectedRecipientIds.length === 0 || isBusy}
                   >
@@ -752,6 +760,7 @@ export const ApprovalQueueList = () => {
                   <Button
                     type="button"
                     size="sm"
+                    className="cursor-pointer"
                     onClick={() => handleBulkReviewRecipients("approved")}
                     disabled={
                       selectedRecipientIds.length === 0 ||
@@ -759,11 +768,19 @@ export const ApprovalQueueList = () => {
                       !canManageRecipients(selectedPayment)
                     }
                   >
-                    Bulk Reviewed
+                    {isBusy ? (
+                      <>
+                        <PageLoader inline />
+                        <span>Approving...</span>
+                      </>
+                    ) : (
+                      "Bulk Approve"
+                    )}
                   </Button>
                   <Button
                     type="button"
                     size="sm"
+                    className="cursor-pointer"
                     variant="destructive"
                     onClick={() => handleBulkReviewRecipients("disapproved")}
                     disabled={
@@ -772,7 +789,14 @@ export const ApprovalQueueList = () => {
                       !canManageRecipients(selectedPayment)
                     }
                   >
-                    Bulk Disapproved
+                    {isBusy ? (
+                      <>
+                        <PageLoader inline />
+                        <span>Disapproving...</span>
+                      </>
+                    ) : (
+                      "Bulk Disapprove"
+                    )}
                   </Button>
                 </div>
               </div>
@@ -803,7 +827,7 @@ export const ApprovalQueueList = () => {
                         <button
                           type="button"
                           onClick={() => openStaffDetails(recipient)}
-                          className="mb-2 text-sm font-medium text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+                          className="mb-2 text-sm font-medium text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm cursor-pointer"
                         >
                           {(recipient.staff?.firstName || "") +
                             " " +
@@ -842,17 +866,26 @@ export const ApprovalQueueList = () => {
                               <Button
                                 type="button"
                                 size="sm"
+                                className="cursor-pointer"
                                 onClick={() => handleUpdateAmount(recipient)}
                                 disabled={
                                   !canManageRecipients(selectedPayment) ||
                                   isBusy
                                 }
                               >
-                                Save Amount
+                                {isBusy ? (
+                                  <>
+                                    <PageLoader inline />
+                                    <span>Saving...</span>
+                                  </>
+                                ) : (
+                                  "Save Amount"
+                                )}
                               </Button>
                               <Button
                                 type="button"
                                 size="sm"
+                                className="cursor-pointer"
                                 variant="destructive"
                                 onClick={() =>
                                   handleRemoveRecipient(recipient.id)
@@ -862,7 +895,14 @@ export const ApprovalQueueList = () => {
                                   isBusy
                                 }
                               >
-                                Remove
+                                {isBusy ? (
+                                  <>
+                                    <PageLoader inline />
+                                    <span>Removing...</span>
+                                  </>
+                                ) : (
+                                  "Remove"
+                                )}
                               </Button>
                             </>
                           )}
@@ -885,7 +925,7 @@ export const ApprovalQueueList = () => {
                               <Button
                                 type="button"
                                 size="sm"
-                                variant="outline"
+                                className="cursor-pointer"
                                 onClick={() =>
                                   handleReviewRecipient(recipient, "approved")
                                 }
@@ -895,11 +935,19 @@ export const ApprovalQueueList = () => {
                                   recipient.status === "approved"
                                 }
                               >
-                                Mark Reviewed
+                                {isBusy ? (
+                                  <>
+                                    <PageLoader inline />
+                                    <span>Approving...</span>
+                                  </>
+                                ) : (
+                                  "Approve"
+                                )}
                               </Button>
                               <Button
                                 type="button"
                                 size="sm"
+                                className="cursor-pointer"
                                 variant="outline"
                                 onClick={() =>
                                   handleReviewRecipient(
@@ -913,7 +961,14 @@ export const ApprovalQueueList = () => {
                                   recipient.status === "disapproved"
                                 }
                               >
-                                Mark Disapproved
+                                {isBusy ? (
+                                  <>
+                                    <PageLoader inline />
+                                    <span>Disapproving...</span>
+                                  </>
+                                ) : (
+                                  "Disapprove"
+                                )}
                               </Button>
                             </>
                           )}
@@ -940,7 +995,7 @@ export const ApprovalQueueList = () => {
                         variant="outline"
                         role="combobox"
                         aria-expanded={staffPickerOpen}
-                        className="w-full justify-between"
+                        className="w-full justify-between cursor-pointer"
                         disabled={
                           staffLoading ||
                           !canManageRecipients(selectedPayment) ||
@@ -1001,6 +1056,7 @@ export const ApprovalQueueList = () => {
               </div>
               <Button
                 type="button"
+                className="cursor-pointer"
                 onClick={handleAddRecipient}
                 disabled={
                   !canManageRecipients(selectedPayment) ||
@@ -1009,7 +1065,14 @@ export const ApprovalQueueList = () => {
                   !newAmount
                 }
               >
-                Add Beneficiary
+                {isBusy ? (
+                  <>
+                    <PageLoader inline />
+                    <span>Adding...</span>
+                  </>
+                ) : (
+                  "Add Beneficiary"
+                )}
               </Button>
             </div>
           </div>
@@ -1027,6 +1090,7 @@ export const ApprovalQueueList = () => {
                   <>
                     <Button
                       type="button"
+                      className="cursor-pointer"
                       onClick={handleApproveBatch}
                       disabled={
                         !selectedPayment ||
@@ -1035,11 +1099,19 @@ export const ApprovalQueueList = () => {
                         selectedPayment?.status !== "pending_approval"
                       }
                     >
-                      Approve Batch
+                      {isBusy ? (
+                        <>
+                          <PageLoader inline />
+                          <span>Approving...</span>
+                        </>
+                      ) : (
+                        "Approve"
+                      )}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
+                      className="cursor-pointer"
                       onClick={() => setSelectedPayment(null)}
                     >
                       Close
@@ -1106,6 +1178,7 @@ export const ApprovalQueueList = () => {
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={() => setSelectedRecipientStaff(null)}
             >
               Close
