@@ -193,9 +193,22 @@ export const insertPaymentSchema = createInsertSchema(payments, {
   updatedAt: true,
 });
 
-export const updatePaymentSchema = insertPaymentSchema
-  .omit({ createdBy: true })
-  .partial();
+export const updatePaymentSchema = createInsertSchema(payments, {
+  title: z.string().min(1).max(255),
+  categoryId: z.string().uuid(),
+}).omit({
+  id: true,
+  totalAmount: true,
+  submittedAt: true,
+  approvedBy: true,
+  approvedAt: true,
+  processedBy: true,
+  processedAt: true,
+  momoReferenceId: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+}).partial();
 
 export const selectPaymentSchema = createSelectSchema(payments);
 
