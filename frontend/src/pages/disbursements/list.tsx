@@ -11,6 +11,7 @@ import { useCustomMutation, useList, useNotification } from "@refinedev/core";
 import type { DisbursementRecord, PaymentStatus } from "@/types/domain";
 import { useEffect, useMemo, useState } from "react";
 import { MomoBalanceResponse } from "@/types/momo";
+import PageLoader from "@/components/PageLoader";
 
 type DisbursementPayment = {
   id: string;
@@ -19,6 +20,7 @@ type DisbursementPayment = {
   totalAmount: string;
   momoReferenceId?: string | null;
   processedAt?: string | null;
+  period: string;
   recipients?: Array<{ id: string }>;
 };
 
@@ -107,8 +109,10 @@ export const DisbursementList = () => {
   }>();
   const { mutateAsync: disbursePayment, mutation: disbursementMutation } =
     useCustomMutation<DirectDisbursementResponse>();
-  const { mutateAsync: syncDisbursementStatuses, mutation: syncStatusMutation } =
-    useCustomMutation<SyncStatusResponse>();
+  const {
+    mutateAsync: syncDisbursementStatuses,
+    mutation: syncStatusMutation,
+  } = useCustomMutation<SyncStatusResponse>();
 
   const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const isRunningEligible = mutation.status === "pending";
@@ -132,6 +136,7 @@ export const DisbursementList = () => {
         processedAt: payment.processedAt
           ? new Date(payment.processedAt).toLocaleString()
           : "-",
+        period: payment.period,
       }));
   }, [paymentsResult?.data]);
 
@@ -202,7 +207,7 @@ export const DisbursementList = () => {
       await paymentsQuery.refetch();
 
       notify?.({
-        type: failureCount > 0 || pendingCount > 0 ? "warning" : "success",
+        type: "success",
         message:
           failureCount > 0 || pendingCount > 0
             ? `${paymentTitle}: ${successCount}/${attemptedCount} successful, ${failureCount} failed, ${pendingCount} pending final MTN confirmation.`
@@ -251,7 +256,7 @@ export const DisbursementList = () => {
       await paymentsQuery.refetch();
 
       notify?.({
-        type: paymentsCompleted > 0 ? "success" : "info",
+        type: "success",
         message:
           paymentsChecked === 0
             ? "No processing payments found to sync."
@@ -276,68 +281,68 @@ export const DisbursementList = () => {
     [lastSyncResult],
   );
 
-    useEffect(() => {
-      const controller = new AbortController();
-  
-      const loadMomoBalance = async () => {
-        setIsLoadingMomoBalance(true);
-        setMomoBalanceError(null);
-  
-        try {
-          const response = await fetch(`${apiBase}/momo/balance`, {
-            credentials: "include",
-            signal: controller.signal,
-          });
-  
-          const text = await response.text();
-          const payload = text ? (JSON.parse(text) as MomoBalanceResponse) : {};
-  
-          if (!response.ok) {
-            const message =
-              payload.error || payload.message || "Unable to fetch MoMo balance.";
-            throw new Error(message);
-          }
-  
-          const availableBalance = Number(payload.data?.availableBalance ?? 0);
-          setMomoBalance(
-            Number.isFinite(availableBalance) ? availableBalance : 0,
-          );
-          setMomoCurrency(payload.data?.currency || "GHS");
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") {
-            return;
-          }
-  
-          setMomoBalanceError(
-            error instanceof Error
-              ? error.message
-              : "Unable to fetch MoMo balance.",
-          );
-        } finally {
-          setIsLoadingMomoBalance(false);
-        }
-      };
-  
-      void loadMomoBalance();
-  
-      return () => controller.abort();
-    }, [apiBase]);
-  
-    const formattedMomoBalance = useMemo(() => {
-      if (momoCurrency === "GHS") {
-        return formatCurrency(momoBalance);
-      }
-  
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadMomoBalance = async () => {
+      setIsLoadingMomoBalance(true);
+      setMomoBalanceError(null);
+
       try {
-        return new Intl.NumberFormat("en-GH", {
-          style: "currency",
-          currency: momoCurrency,
-          minimumFractionDigits: 2,
-        }).format(momoBalance);
-      } catch {
-        return `${momoCurrency} ${momoBalance.toFixed(2)}`;
+        const response = await fetch(`${apiBase}/momo/balance`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+
+        const text = await response.text();
+        const payload = text ? (JSON.parse(text) as MomoBalanceResponse) : {};
+
+        if (!response.ok) {
+          const message =
+            payload.error || payload.message || "Unable to fetch MoMo balance.";
+          throw new Error(message);
+        }
+
+        const availableBalance = Number(payload.data?.availableBalance ?? 0);
+        setMomoBalance(
+          Number.isFinite(availableBalance) ? availableBalance : 0,
+        );
+        setMomoCurrency(payload.data?.currency || "GHS");
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+
+        setMomoBalanceError(
+          error instanceof Error
+            ? error.message
+            : "Unable to fetch MoMo balance.",
+        );
+      } finally {
+        setIsLoadingMomoBalance(false);
       }
-    }, [momoBalance, momoCurrency]);
+    };
+
+    void loadMomoBalance();
+
+    return () => controller.abort();
+  }, [apiBase]);
+
+  const formattedMomoBalance = useMemo(() => {
+    if (momoCurrency === "GHS") {
+      return formatCurrency(momoBalance);
+    }
+
+    try {
+      return new Intl.NumberFormat("en-GH", {
+        style: "currency",
+        currency: momoCurrency,
+        minimumFractionDigits: 2,
+      }).format(momoBalance);
+    } catch {
+      return `${momoCurrency} ${momoBalance.toFixed(2)}`;
+    }
+  }, [momoBalance, momoCurrency]);
 
   return (
     <ListView className="space-y-4">
@@ -387,7 +392,9 @@ export const DisbursementList = () => {
           >
             {syncStatusMutation.status === "pending"
               ? "Syncing..."
-              : `Sync Status${processingCount > 0 ? ` (${processingCount})` : ""}`}
+              : `Sync Status${
+                  processingCount > 0 ? ` (${processingCount})` : ""
+                }`}
           </Button>
           <Button variant="outline" className="cursor-pointer" disabled>
             Download Settlement Report
@@ -436,7 +443,8 @@ export const DisbursementList = () => {
                     >
                       <p className="font-medium">{payment.paymentTitle}</p>
                       <p className="text-xs text-muted-foreground">
-                        {payment.successCount} successful of {payment.polledRecipients} polled
+                        {payment.successCount} successful of{" "}
+                        {payment.polledRecipients} polled
                       </p>
                     </div>
                   ))}
@@ -467,7 +475,9 @@ export const DisbursementList = () => {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-base">{item.paymentTitle}</CardTitle>
+                <CardTitle className="text-base">
+                  {item.paymentTitle} - {item.period}
+                </CardTitle>
                 <p className="text-sm text-muted-foreground">
                   Batch {item.momoBatchId}
                 </p>
@@ -498,11 +508,16 @@ export const DisbursementList = () => {
                   }
                 >
                   {disbursementMutation.status === "pending" &&
-                  activePaymentId === item.id
-                    ? "Disbursing..."
-                    : item.status === "queued"
-                    ? "Disburse Selected Payment"
-                    : "Disbursement Not Available"}
+                  activePaymentId === item.id ? (
+                    <>
+                      <PageLoader />
+                      <span>Disbursing...</span>
+                    </>
+                  ) : item.status === "queued" ? (
+                    "Disburse Selected Payment"
+                  ) : (
+                    "Disbursement Not Available"
+                  )}
                 </Button>
               </div>
             </CardContent>

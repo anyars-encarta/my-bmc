@@ -45,6 +45,7 @@ type ApprovalPayment = {
   title: string;
   status: PaymentStatus;
   totalAmount: string;
+  period: string;
   approvingOfficer?: string | null;
   category?: {
     name?: string;
@@ -180,7 +181,7 @@ export const ApprovalQueueList = () => {
     void loadMomoBalance();
 
     return () => controller.abort();
-  }, [apiBase]);
+  }, []);
 
   const formattedMomoBalance = useMemo(() => {
     if (momoCurrency === "GHS") {
@@ -243,6 +244,7 @@ export const ApprovalQueueList = () => {
         return {
           id: payment.id,
           paymentTitle: payment.title,
+          period: payment.period,
           categoryName: payment.category?.name || "-",
           recipientsCount: payment.recipients?.length ?? 0,
           pendingReviewCount,
@@ -657,7 +659,7 @@ export const ApprovalQueueList = () => {
           >
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-base">{item.paymentTitle}</CardTitle>
+                <CardTitle className="text-base">{item.paymentTitle} - {item.period}</CardTitle>
                 <p className="text-sm text-muted-foreground">
                   {item.categoryName}
                 </p>
@@ -727,7 +729,7 @@ export const ApprovalQueueList = () => {
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
-              Beneficiaries: {selectedPayment?.title || "Payment"}
+              Beneficiaries: {selectedPayment?.title || "Payment"} - {selectedPayment?.period}
             </DialogTitle>
             <DialogDescription>
               Approving officer can view, add, remove, and adjust individual

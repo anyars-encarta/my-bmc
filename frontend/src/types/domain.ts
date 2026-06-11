@@ -67,6 +67,7 @@ export interface DisbursementRecord {
   momoBatchId: string;
   recipientsCount: number;
   totalAmount: string;
+  period: string;
   status: "queued" | "sent" | "successful" | "failed";
   processedAt: string;
 }
