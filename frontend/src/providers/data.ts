@@ -1,10 +1,17 @@
 import type {
   BaseRecord,
+  CreateParams,
   CrudFilter,
   CrudFilters,
   CrudSorting,
+  CustomParams,
   DataProvider,
+  DeleteOneParams,
+  GetListParams,
+  GetManyParams,
+  GetOneParams,
   HttpError,
+  UpdateParams,
 } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
@@ -37,10 +44,10 @@ const toError = (response: Response, payload: unknown) => {
           : null
       : null;
 
-  const error = new Error(payloadMessage || response.statusText) as HttpError;
+  const error = new Error(payloadMessage || response.statusText) as unknown as HttpError;
   error.statusCode = response.status;
   error.message = payloadMessage || response.statusText;
-  error.errors = payload;
+  error.errors = payload as HttpError["errors"];
 
   return error;
 };
@@ -249,7 +256,7 @@ const requestJson = async <T>(
 export const dataProvider: DataProvider = {
   getApiUrl: () => apiUrl,
 
-  getList: async ({ resource, pagination, filters, sorters }) => {
+  getList: async ({ resource, pagination, filters, sorters }: GetListParams) => {
     const currentPage = pagination?.currentPage ?? 1;
     const pageSize = pagination?.pageSize ?? 10;
 
@@ -262,9 +269,9 @@ export const dataProvider: DataProvider = {
       const data = unwrapData<BaseRecord[]>(payload) ?? [];
 
       return {
-        data,
+        data: data as never,
         total: Number(payload.pagination?.total ?? data.length),
-      };
+      } as never;
     }
 
     let allData = listCache.get(resource);
@@ -280,31 +287,31 @@ export const dataProvider: DataProvider = {
     const paged = applyClientPagination(sorted, currentPage, pageSize);
 
     return {
-      data: paged,
+      data: paged as never,
       total: sorted.length,
-    };
+    } as never;
   },
 
-  getOne: async ({ resource, id }) => {
+  getOne: async ({ resource, id }: GetOneParams) => {
     const { payload } = await requestJson<ApiEnvelope<BaseRecord>>(buildUrl(resource, id));
 
     return {
-      data: unwrapData<BaseRecord>(payload),
-    };
+      data: unwrapData<BaseRecord>(payload) as never,
+    } as never;
   },
 
-  getMany: async ({ resource, ids }) => {
+  getMany: async ({ resource, ids }: GetManyParams) => {
     const records = await Promise.all(
-      ids.map(async (id) => {
+      ids.map(async (id: string | number) => {
         const { payload } = await requestJson<ApiEnvelope<BaseRecord>>(buildUrl(resource, id));
         return unwrapData<BaseRecord>(payload);
       }),
     );
 
-    return { data: records };
+    return { data: records as never } as never;
   },
 
-  create: async ({ resource, variables }) => {
+  create: (async ({ resource, variables }: CreateParams) => {
     const { payload } = await requestJson<ApiEnvelope<BaseRecord>>(buildUrl(resource), {
       method: "POST",
       body: JSON.stringify(variables),
@@ -313,11 +320,11 @@ export const dataProvider: DataProvider = {
     listCache.delete(resource);
 
     return {
-      data: unwrapData<BaseRecord>(payload),
-    };
-  },
+      data: unwrapData<BaseRecord>(payload) as never,
+    } as never;
+  }) as DataProvider["create"],
 
-  update: async ({ resource, id, variables }) => {
+  update: (async ({ resource, id, variables }: UpdateParams) => {
     const method = isUsersResource(resource) ? "PUT" : "PATCH";
     const { payload } = await requestJson<ApiEnvelope<BaseRecord>>(buildUrl(resource, id), {
       method,
@@ -327,11 +334,11 @@ export const dataProvider: DataProvider = {
     listCache.delete(resource);
 
     return {
-      data: unwrapData<BaseRecord>(payload),
-    };
-  },
+      data: unwrapData<BaseRecord>(payload) as never,
+    } as never;
+  }) as DataProvider["update"],
 
-  deleteOne: async ({ resource, id, variables }) => {
+  deleteOne: (async ({ resource, id, variables }: DeleteOneParams) => {
     const { payload } = await requestJson<ApiEnvelope<BaseRecord>>(buildUrl(resource, id), {
       method: "DELETE",
       body: variables ? JSON.stringify(variables) : undefined,
@@ -340,11 +347,12 @@ export const dataProvider: DataProvider = {
     listCache.delete(resource);
 
     return {
-      data: unwrapData<BaseRecord | undefined>(payload) ?? ({ id } as BaseRecord),
-    };
-  },
+      data: (unwrapData<BaseRecord | undefined>(payload) ?? ({ id } as BaseRecord)) as never,
+    } as never;
+  }) as DataProvider["deleteOne"],
 
-  custom: async ({ url, method = "get", payload, query, headers }) => {
+  custom: async ({ url, method = "get", payload, query, headers }: CustomParams) => {
+    const normalizedMethod = method.toUpperCase();
     const targetUrl = query
       ? `${url}${url.includes("?") ? "&" : "?"}${new URLSearchParams(
           Object.entries(query).reduce<Record<string, string>>((acc, [key, value]) => {
@@ -359,14 +367,18 @@ export const dataProvider: DataProvider = {
     const { payload: responsePayload } = await requestJson<ApiEnvelope<BaseRecord> | BaseRecord>(
       targetUrl,
       {
-        method: method.toUpperCase(),
+        method: normalizedMethod,
         headers,
         body: payload ? JSON.stringify(payload) : undefined,
       },
     );
 
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(normalizedMethod)) {
+      listCache.clear();
+    }
+
     return {
-      data: unwrapData(responsePayload),
-    };
+      data: unwrapData(responsePayload) as never,
+    } as never;
   },
 };

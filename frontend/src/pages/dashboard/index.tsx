@@ -1,4 +1,5 @@
 import { APP_TAGLINE } from "@/constants/app";
+import { BACKEND_BASE_URL } from "@/constants";
 import { formatCurrency } from "@/lib/currency";
 import {
   ListView,
@@ -14,23 +15,97 @@ import MetricCard from "@/components/MetricCard";
 import MonthlyPaymentsTrendChart from "@/components/MonthlyPaymentsTrendChart";
 import type { PaymentRecord } from "@/types/domain";
 import { useList } from "@refinedev/core";
+import { useEffect, useMemo, useState } from "react";
+import { MomoBalanceResponse } from "@/types/momo";
 
 type DashboardPayment = PaymentRecord & {
   recipients?: Array<{ status?: string }>;
-};
+}
 
 export const DashboardPage = () => {
-  const { result: paymentResult, query: paymentQuery } = useList<DashboardPayment>({
-    resource: "payments",
-    pagination: {
-      pageSize: 500,
-    },
-  });
+  const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
+  const { result: paymentResult, query: paymentQuery } =
+    useList<DashboardPayment>({
+      resource: "payments",
+      pagination: {
+        pageSize: 500,
+      },
+    });
+
+  const [momoBalance, setMomoBalance] = useState(0);
+  const [momoCurrency, setMomoCurrency] = useState("GHS");
+  const [isLoadingMomoBalance, setIsLoadingMomoBalance] = useState(true);
+  const [momoBalanceError, setMomoBalanceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadMomoBalance = async () => {
+      setIsLoadingMomoBalance(true);
+      setMomoBalanceError(null);
+
+      try {
+        const response = await fetch(`${apiBase}/momo/balance`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+
+        const text = await response.text();
+        const payload = text ? (JSON.parse(text) as MomoBalanceResponse) : {};
+
+        if (!response.ok) {
+          const message =
+            payload.error || payload.message || "Unable to fetch MoMo balance.";
+          throw new Error(message);
+        }
+
+        const availableBalance = Number(payload.data?.availableBalance ?? 0);
+        setMomoBalance(
+          Number.isFinite(availableBalance) ? availableBalance : 0,
+        );
+        setMomoCurrency(payload.data?.currency || "GHS");
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+
+        setMomoBalanceError(
+          error instanceof Error
+            ? error.message
+            : "Unable to fetch MoMo balance.",
+        );
+      } finally {
+        setIsLoadingMomoBalance(false);
+      }
+    };
+
+    void loadMomoBalance();
+
+    return () => controller.abort();
+  }, [apiBase]);
+
+  const formattedMomoBalance = useMemo(() => {
+    if (momoCurrency === "GHS") {
+      return formatCurrency(momoBalance);
+    }
+
+    try {
+      return new Intl.NumberFormat("en-GH", {
+        style: "currency",
+        currency: momoCurrency,
+        minimumFractionDigits: 2,
+      }).format(momoBalance);
+    } catch {
+      return `${momoCurrency} ${momoBalance.toFixed(2)}`;
+    }
+  }, [momoBalance, momoCurrency]);
 
   const payments = paymentResult?.data ?? [];
   const totalPayments = payments.length;
 
-  const draftPayments = payments.filter((payment) => payment.status === "draft");
+  const draftPayments = payments.filter(
+    (payment) => payment.status === "draft",
+  );
   const pendingApprovals = payments.filter(
     (payment) => payment.status === "pending_approval",
   );
@@ -82,20 +157,35 @@ export const DashboardPage = () => {
     {
       label: "MTN MoMo Submitted",
       percent: calcPercent(
-        payments.filter((payment) => ["processing", "completed"].includes(payment.status))
-          .length,
+        payments.filter((payment) =>
+          ["processing", "completed"].includes(payment.status),
+        ).length,
       ),
     },
   ];
 
   return (
     <ListView className="space-y-6">
-      <ListViewHeader title="Operations Dashboard" canCreate={false} />
+      <div className="flex items-center justify-between">
+        <ListViewHeader title="Operations Dashboard" canCreate={false} />
+        <div className="text-right">
+          <p className="text-sm font-medium">
+            MoMo Balance:{" "}
+            {isLoadingMomoBalance ? "Loading..." : formattedMomoBalance}
+          </p>
+          {momoBalanceError && (
+            <p className="text-xs text-destructive">{momoBalanceError}</p>
+          )}
+        </div>
+      </div>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {paymentQuery.isLoading ? (
           Array.from({ length: 4 }).map((_, index) => (
-            <Card key={`kpi-skeleton-${index}`} className="border-0 shadow-sm ring-1 ring-border">
+            <Card
+              key={`kpi-skeleton-${index}`}
+              className="border-0 shadow-sm ring-1 ring-border"
+            >
               <CardContent className="space-y-3 pt-6">
                 <Skeleton className="h-4 w-28" />
                 <Skeleton className="h-8 w-20" />
@@ -120,7 +210,7 @@ export const DashboardPage = () => {
             <MetricCard
               title="Currently Processing"
               value={processingPayments.length.toString()}
-              description="Queued for MTN bulk run"
+              description="Queued for bulk run"
               icon={<Wallet className="h-4 w-4" />}
             />
             <MetricCard
