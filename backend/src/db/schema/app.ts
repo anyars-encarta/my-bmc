@@ -107,6 +107,10 @@ export const paymentRecipients = pgTable("payment_recipients", {
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   status: recipientStatusEnum("status").notNull().default("pending"),
   note: text("note"),               // reason for approval/disapproval
+  momoTransferReferenceId: varchar("momo_transfer_reference_id", { length: 100 }),
+  momoTransferStatus: varchar("momo_transfer_status", { length: 20 }),
+  momoTransferStatusReason: text("momo_transfer_status_reason"),
+  momoTransferCheckedAt: timestamp("momo_transfer_checked_at"),
   verifiedBy: text("verified_by"),  // approving officer user ID
   verifiedAt: timestamp("verified_at"),
   addedBy: text("added_by").notNull(), // user who added this recipient

@@ -5,6 +5,32 @@ type MomoBalance = {
   currency: string;
 };
 
+type MomoTransferInput = {
+  amount: string;
+  currency?: string;
+  phoneNumber: string;
+  externalId: string;
+  payerMessage?: string;
+  payeeNote?: string;
+};
+
+type MomoTransferResult = {
+  referenceId: string;
+  status: "pending";
+};
+
+type MomoTransferStatus = {
+  status: "SUCCESSFUL" | "FAILED" | "PENDING" | "UNKNOWN";
+  reason?: string;
+  raw: unknown;
+};
+
+type PollTransferStatusInput = {
+  referenceId: string;
+  maxAttempts?: number;
+  intervalMs?: number;
+};
+
 type MomoEnvConfig = {
   baseUrl: string;
   product: MomoProduct;
@@ -180,4 +206,132 @@ export const getMomoBalance = async (): Promise<MomoBalance> => {
     availableBalance: data.availableBalance,
     currency: data.currency,
   };
+};
+
+export const initiateMomoTransfer = async (
+  input: MomoTransferInput,
+): Promise<MomoTransferResult> => {
+  const config = getConfig();
+  const accessToken = await getAccessToken(config);
+  const transferUrl = `${config.baseUrl}/${config.product}/v1_0/transfer`;
+  const referenceId = crypto.randomUUID();
+  const currency = normalizeValue(input.currency, "GHS").toUpperCase();
+
+  await requestMomo(transferUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "X-Reference-Id": referenceId,
+      "X-Target-Environment": config.targetEnvironment,
+      "Ocp-Apim-Subscription-Key": config.subscriptionKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      amount: input.amount,
+      currency,
+      externalId: input.externalId,
+      payee: {
+        partyIdType: "MSISDN",
+        partyId: input.phoneNumber,
+      },
+      payerMessage: input.payerMessage ?? "Facility disbursement",
+      payeeNote: input.payeeNote ?? "Payment disbursement",
+    }),
+  });
+
+  return {
+    referenceId,
+    status: "pending",
+  };
+};
+
+const sleep = async (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const normalizeTransferState = (value: unknown): MomoTransferStatus["status"] => {
+  if (typeof value !== "string") {
+    return "UNKNOWN";
+  }
+
+  const normalized = value.trim().toUpperCase();
+
+  if (normalized === "SUCCESSFUL") {
+    return "SUCCESSFUL";
+  }
+
+  if (normalized === "FAILED") {
+    return "FAILED";
+  }
+
+  if (normalized === "PENDING") {
+    return "PENDING";
+  }
+
+  return "UNKNOWN";
+};
+
+export const getMomoTransferStatus = async (
+  referenceId: string,
+): Promise<MomoTransferStatus> => {
+  const config = getConfig();
+  const accessToken = await getAccessToken(config);
+  const statusUrl = `${config.baseUrl}/${config.product}/v1_0/transfer/${referenceId}`;
+
+  const { data } = await requestMomo(statusUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "X-Target-Environment": config.targetEnvironment,
+      "Ocp-Apim-Subscription-Key": config.subscriptionKey,
+      Accept: "application/json",
+    },
+  });
+
+  if (!data || typeof data !== "object") {
+    return { status: "UNKNOWN", raw: data };
+  }
+
+  const reason =
+    "reason" in data && typeof data.reason === "string"
+      ? data.reason
+      : "financialTransactionId" in data && typeof data.financialTransactionId === "string"
+        ? data.financialTransactionId
+        : undefined;
+
+  return {
+    status: normalizeTransferState("status" in data ? data.status : undefined),
+    ...(reason ? { reason } : {}),
+    raw: data,
+  };
+};
+
+export const pollMomoTransferStatus = async ({
+  referenceId,
+  maxAttempts,
+  intervalMs,
+}: PollTransferStatusInput): Promise<MomoTransferStatus> => {
+  const attempts = Math.max(1, maxAttempts ?? Number(process.env.MTN_MOMO_POLL_MAX_ATTEMPTS ?? 10));
+  const waitMs = Math.max(500, intervalMs ?? Number(process.env.MTN_MOMO_POLL_INTERVAL_MS ?? 3000));
+
+  let lastStatus: MomoTransferStatus = {
+    status: "UNKNOWN",
+    raw: null,
+  };
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    lastStatus = await getMomoTransferStatus(referenceId);
+
+    if (lastStatus.status === "SUCCESSFUL" || lastStatus.status === "FAILED") {
+      return lastStatus;
+    }
+
+    if (attempt < attempts) {
+      await sleep(waitMs);
+    }
+  }
+
+  return lastStatus;
 };

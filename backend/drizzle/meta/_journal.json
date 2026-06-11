@@ -29,6 +29,13 @@
       "when": 1781170951355,
       "tag": "0003_slimy_silver_centurion",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781183793985,
+      "tag": "0004_fancy_khan",
+      "breakpoints": true
     }
   ]
 }
