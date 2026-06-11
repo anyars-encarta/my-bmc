@@ -73,6 +73,7 @@ export const payments = pgTable("payments", {
   id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
+  period: varchar("period", { length: 100 }), // e.g. "Q1 2024", "March 2024"
   categoryId: uuid("category_id")
     .notNull()
     .references(() => categories.id),
