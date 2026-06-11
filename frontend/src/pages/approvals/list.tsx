@@ -1,4 +1,5 @@
 import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,6 +48,7 @@ type ApprovalRecipient = {
   amount: string;
   status: "pending" | "approved" | "disapproved";
   staff?: {
+    id?: string;
     firstName?: string;
     lastName?: string;
     employeeId?: string;
@@ -102,6 +104,7 @@ export const ApprovalQueueList = () => {
   const [selectedStaffId, setSelectedStaffId] = useState("");
   const [staffPickerOpen, setStaffPickerOpen] = useState(false);
   const [staff, setStaff] = useState<StaffRecord[]>([]);
+  const [selectedRecipientStaff, setSelectedRecipientStaff] = useState<StaffRecord | null>(null);
   const [staffLoading, setStaffLoading] = useState(false);
   const [newAmount, setNewAmount] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -207,6 +210,27 @@ export const ApprovalQueueList = () => {
   }, [recipients, staff]);
 
   const selectedStaff = availableStaff.find((member) => member.id === selectedStaffId);
+
+  const openStaffDetails = (recipient: ApprovalRecipient) => {
+    const matched = staff.find((member) => member.id === recipient.staffId);
+    if (matched) {
+      setSelectedRecipientStaff(matched);
+      return;
+    }
+
+    setSelectedRecipientStaff({
+      id: recipient.staffId,
+      firstName: recipient.staff?.firstName || "Unknown",
+      lastName: recipient.staff?.lastName || "Staff",
+      employeeId: recipient.staff?.employeeId || "-",
+      email: "-",
+      momoNumber: "-",
+      status: "active",
+      department: "-",
+      position: "-",
+      imageUrl: "",
+    });
+  };
 
   const handleUpdateAmount = async (recipient: ApprovalRecipient) => {
     if (!selectedPayment) return;
@@ -341,6 +365,7 @@ export const ApprovalQueueList = () => {
             setRecipientAmounts({});
             setSelectedStaffId("");
             setStaffPickerOpen(false);
+            setSelectedRecipientStaff(null);
             setNewAmount("");
           }
         }}
@@ -366,10 +391,14 @@ export const ApprovalQueueList = () => {
               ) : (
                 recipients.map((recipient) => (
                   <div key={recipient.id} className="rounded-md border p-3">
-                    <div className="mb-2 text-sm font-medium">
+                    <button
+                      type="button"
+                      onClick={() => openStaffDetails(recipient)}
+                      className="mb-2 text-sm font-medium text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+                    >
                       {(recipient.staff?.firstName || "") + " " + (recipient.staff?.lastName || "") || "Unknown Staff"}
                       {recipient.staff?.employeeId ? ` (${recipient.staff.employeeId})` : ""}
-                    </div>
+                    </button>
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="min-w-40 flex-1 space-y-1">
                         <Label htmlFor={`amount-${recipient.id}`}>Amount</Label>
@@ -487,6 +516,59 @@ export const ApprovalQueueList = () => {
               type="button"
               variant="outline"
               onClick={() => setSelectedPayment(null)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(selectedRecipientStaff)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedRecipientStaff(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Staff Details</DialogTitle>
+            <DialogDescription>
+              Beneficiary profile summary.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-start">
+              <Avatar className="size-68 border shadow-sm">
+                <AvatarImage
+                  src={selectedRecipientStaff?.imageUrl ?? ""}
+                  alt={`${selectedRecipientStaff?.firstName ?? ""} ${selectedRecipientStaff?.lastName ?? ""}`.trim()}
+                />
+                <AvatarFallback>
+                  {`${selectedRecipientStaff?.firstName?.[0] ?? ""}${selectedRecipientStaff?.lastName?.[0] ?? ""}`
+                    .trim()
+                    .toUpperCase() || "S"}
+                </AvatarFallback>
+              </Avatar>
+              <div className="space-y-3">
+                <p className="font-semibold text-base">
+                  {selectedRecipientStaff?.firstName} {selectedRecipientStaff?.lastName}
+                </p>
+                <div className="grid gap-3">
+                  <DataLine label="Department" value={selectedRecipientStaff?.department || "-"} />
+                  <DataLine label="Position" value={selectedRecipientStaff?.position || "-"} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSelectedRecipientStaff(null)}
             >
               Close
             </Button>
