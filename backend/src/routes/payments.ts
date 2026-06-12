@@ -246,11 +246,16 @@ router.post("/:id/approve", async (req, res, next) => {
       return;
     }
 
+    const approverName =
+      typeof req.user.name === "string" && req.user.name.trim()
+        ? req.user.name.trim()
+        : req.user.id;
+
     const [updated] = await db
       .update(payments)
       .set({
         status: "approved",
-        approvedBy: req.user.id,
+        approvedBy: approverName,
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
