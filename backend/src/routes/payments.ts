@@ -89,10 +89,7 @@ router.post("/", async (req, res, next) => {
       return;
     }
 
-    const createdBy =
-      typeof parsed.data.createdBy === "string" && parsed.data.createdBy.trim()
-        ? parsed.data.createdBy.trim()
-        : req.user.id;
+    const createdBy = req.user.id;
 
     const [created] = await db
       .insert(payments)
@@ -238,6 +235,11 @@ router.post("/:id/approve", async (req, res, next) => {
 
     if (pendingRecipients.length === 0) {
       res.status(422).json({ error: "Payment must have at least one recipient" });
+      return;
+    }
+
+    if (!pendingRecipients.some((recipient) => recipient.status === "approved")) {
+      res.status(422).json({ error: "At least one beneficiary must be approved before payment approval" });
       return;
     }
 
@@ -401,6 +403,20 @@ router.post("/:id/disburse", async (req, res, next) => {
     }> = [];
 
     for (const recipient of approvedRecipients) {
+      if (recipient.momoTransferStatus === "SUCCESSFUL") {
+        results.push({
+          recipientId: recipient.id,
+          staffId: recipient.staffId,
+          momoNumber: recipient.staff.momoNumber,
+          amount: String(recipient.amount),
+          referenceId: recipient.momoTransferReferenceId ?? undefined,
+          status: "success",
+          transferStatus: "SUCCESSFUL",
+          message: "Transfer already completed",
+        });
+        continue;
+      }
+
       try {
         const transfer = await initiateMomoTransfer({
           amount: String(recipient.amount),
@@ -551,10 +567,7 @@ router.post("/:id/disburse", async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof MomoConfigError || error instanceof MomoApiError) {
-      res.status(error.statusCode).json({
-        error: error.message,
-        details: error instanceof MomoApiError ? error.details : undefined,
-      });
+      res.status(error.statusCode).json({ error: error.message });
       return;
     }
 
@@ -703,10 +716,7 @@ router.post("/sync-status", async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof MomoConfigError || error instanceof MomoApiError) {
-      res.status(error.statusCode).json({
-        error: error.message,
-        details: error instanceof MomoApiError ? error.details : undefined,
-      });
+      res.status(error.statusCode).json({ error: error.message });
       return;
     }
 

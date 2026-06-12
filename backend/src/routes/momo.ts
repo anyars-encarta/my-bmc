@@ -10,10 +10,7 @@ router.get("/balance", async (_req, res, next) => {
     res.json({ data: balance });
   } catch (error) {
     if (error instanceof MomoConfigError || error instanceof MomoApiError) {
-      res.status(error.statusCode).json({
-        error: error.message,
-        details: error instanceof MomoApiError ? error.details : undefined,
-      });
+      res.status(error.statusCode).json({ error: error.message });
       return;
     }
 

@@ -31,8 +31,9 @@ const configuredFrontendUrls = (process.env.FRONTEND_URL ?? "")
   .split(",")
   .map((origin) => normalizeOrigin(origin))
   .filter((origin) => Boolean(origin));
+const isProduction = process.env.NODE_ENV === "production";
 
-const allowedOrigins = new Set<string>([
+const defaultDevOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://127.0.0.1:5173",
@@ -41,6 +42,11 @@ const allowedOrigins = new Set<string>([
   "http://localhost:4174",
   "http://127.0.0.1:4173",
   "http://127.0.0.1:4174",
+];
+
+const allowedOrigins = new Set<string>([
+  ...(isProduction ? [] : defaultDevOrigins),
+  ...configuredFrontendUrls,
 ]);
 
 allowedOrigins.forEach((origin) => {
@@ -49,10 +55,6 @@ allowedOrigins.forEach((origin) => {
     allowedOrigins.delete(origin);
     allowedOrigins.add(normalized);
   }
-});
-
-configuredFrontendUrls.forEach((origin) => {
-  allowedOrigins.add(origin);
 });
 
 app.use(

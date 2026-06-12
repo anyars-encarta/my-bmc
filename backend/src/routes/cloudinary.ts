@@ -1,18 +1,13 @@
 import express from "express";
-import { v2 as cloudinary } from "cloudinary";
+import { eq } from "drizzle-orm";
+
+import { db } from "../db/index.js";
+import { user } from "../db/schema/index.js";
+import { cloudinary } from "../lib/cloudinary.js";
 
 const router = express.Router();
 
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.warn("Cloudinary environment variables are not fully set. Cloudinary routes will not work.");
-};
-
-// Configure Cloudinary (should be in your environment variables)
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
-  api_key: process.env.CLOUDINARY_API_KEY || "",
-  api_secret: process.env.CLOUDINARY_API_SECRET || "",
-});
+const PUBLIC_ID_PATTERN = /^[A-Za-z0-9_./-]{1,255}$/;
 
 router.get("/", (req, res) => {
   res.json({
@@ -23,17 +18,55 @@ router.get("/", (req, res) => {
 
 router.post("/delete", async (req, res) => {
   try {
-    const { publicId } = req.body as { publicId?: string };
+    if (!req.user?.id) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+      });
+    }
 
-    if (!publicId) {
+    const { publicId } = req.body as { publicId?: string };
+    const normalizedPublicId = typeof publicId === "string" ? publicId.trim() : "";
+
+    if (!normalizedPublicId) {
       return res.status(400).json({
         success: false,
         error: "publicId is required",
       });
     }
 
+    if (!PUBLIC_ID_PATTERN.test(normalizedPublicId)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid publicId format",
+      });
+    }
+
+    const [actor] = await db
+      .select({ id: user.id, role: user.role, imageCldPubId: user.imageCldPubId })
+      .from(user)
+      .where(eq(user.id, req.user.id))
+      .limit(1);
+
+    if (!actor) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+      });
+    }
+
+    const canDeleteAny = actor.role === "admin";
+    const ownsImage = actor.imageCldPubId === normalizedPublicId;
+
+    if (!canDeleteAny && !ownsImage) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden",
+      });
+    }
+
     // Delete image from Cloudinary
-    const result = await cloudinary.uploader.destroy(publicId);
+    const result = await cloudinary.uploader.destroy(normalizedPublicId);
 
     if (result.result === "ok") {
       return res.status(200).json({
