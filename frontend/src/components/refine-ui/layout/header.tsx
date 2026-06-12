@@ -51,8 +51,11 @@ export const Header = () => {
   const { isMobile } = useSidebar();
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
 
-  const { data: user, isLoading: userLoading, refetch } =
-    useGetIdentity<CurrentUserIdentity>();
+  const {
+    data: user,
+    isLoading: userLoading,
+    refetch,
+  } = useGetIdentity<CurrentUserIdentity>();
 
   const openProfileEditor = () => {
     if (user?.id) {
@@ -93,7 +96,6 @@ function DesktopHeader({
   userLoading: boolean;
   onEditProfile: () => void;
 }) {
-
   return (
     <header
       className={cn(
@@ -112,9 +114,16 @@ function DesktopHeader({
         "z-40",
       )}
     >
-      <div className="flex w-full items-center justify-between gap-4">
+      <div className="flex w-full items-center justify-end gap-2">
+        <ThemeToggle />
+        {/* <UserDropdown user={user} onEditProfile={onEditProfile} /> */}
+
         <div className="flex gap-2 pl-2">
-          <TopUserInfo user={user} isLoading={userLoading} />
+          <TopUserInfo
+            user={user}
+            isLoading={userLoading}
+            onEditProfile={onEditProfile}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -124,11 +133,6 @@ function DesktopHeader({
           >
             <PencilLine className="h-4 w-4" />
           </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <UserDropdown user={user} onEditProfile={onEditProfile} />
         </div>
       </div>
     </header>
@@ -220,9 +224,11 @@ function MobileHeader({
 const TopUserInfo = ({
   user,
   isLoading,
+  onEditProfile,
 }: {
   user?: CurrentUserIdentity | null;
   isLoading: boolean;
+  onEditProfile: () => void;
 }) => {
   if (isLoading) {
     return (
@@ -245,12 +251,13 @@ const TopUserInfo = ({
 
   return (
     <div className={cn("hidden", "items-center", "gap-2", "md:flex")}>
-      <Avatar className="h-10 w-10">
+      <UserDropdown user={user} onEditProfile={onEditProfile} />
+      {/* <Avatar className="h-10 w-10">
         {user.avatar ? (
           <AvatarImage src={user.avatar} alt={displayName} />
         ) : null}
         <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
-      </Avatar>
+      </Avatar> */}
       <div className="leading-tight text-left">
         <p className="text-sm font-medium text-foreground">{displayName}</p>
         <p className="text-xs capitalize text-muted-foreground">{role}</p>
@@ -351,8 +358,12 @@ const ProfileEditDialog = ({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(null);
-  const [currentImagePublicId, setCurrentImagePublicId] = useState<string | null>(null);
+  const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(
+    null,
+  );
+  const [currentImagePublicId, setCurrentImagePublicId] = useState<
+    string | null
+  >(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const { query: profileQuery } = useOne<User>({
@@ -551,7 +562,9 @@ const ProfileEditDialog = ({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="profile-confirm-password">Confirm New Password</Label>
+              <Label htmlFor="profile-confirm-password">
+                Confirm New Password
+              </Label>
               <InputPassword
                 id="profile-confirm-password"
                 value={confirmPassword}
