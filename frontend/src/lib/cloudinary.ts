@@ -19,16 +19,32 @@ export async function uploadToCloudinary(file: File, folder: string) {
   formData.append("file", file);
   formData.append("folder", folder);
 
-  const response = await fetch(CLOUDINARY_UPLOAD_URL, {
-    method: "POST",
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, 30000);
 
-  if (!response.ok) {
-    throw new Error("Failed to upload image to Cloudinary");
+  try {
+    const response = await fetch(CLOUDINARY_UPLOAD_URL, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to upload image to Cloudinary");
+    }
+
+    return response.json() as Promise<{ secure_url: string; public_id: string }>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Cloudinary upload timed out. Please try again.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-
-  return response.json() as Promise<{ secure_url: string; public_id: string }>;
 }
 
 export const bannerPhoto = (bannerCldPubId: string, name: string) => {

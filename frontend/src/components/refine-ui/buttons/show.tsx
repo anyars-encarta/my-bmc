@@ -55,7 +55,7 @@ export const ShowButton = React.forwardRef<
         <LinkComponent
           to={to}
           replace={false}
-          aria-label={children ? rest["aria-label"] : "Show record"}
+          aria-label={rest["aria-label"] ?? "Show record"}
           onClick={(e: React.PointerEvent<HTMLButtonElement>) => {
             if (isDisabled) {
               e.preventDefault();
