@@ -55,6 +55,7 @@ export const EditButton = React.forwardRef<
         <LinkComponent
           to={to}
           replace={false}
+          aria-label={children ? rest["aria-label"] : "Edit record"}
           onClick={(e: React.PointerEvent<HTMLButtonElement>) => {
             if (isDisabled) {
               e.preventDefault();

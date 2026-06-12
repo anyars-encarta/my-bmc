@@ -258,10 +258,10 @@ function SidebarHeader() {
     return <PageLoader />;
   }
 
-  const appIcon = record.logoUrl ? (
+  const appIcon = record?.logoUrl ? (
     <img
       src={record.logoUrl}
-      alt={record.facilityName}
+      alt={record.facilityName ?? appTitle}
       className="h-8 w-8 rounded-md object-contain border border-border bg-white p-1"
     />
   ) : (

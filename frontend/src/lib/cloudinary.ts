@@ -1,4 +1,4 @@
-import { CLOUDINARY_CLOUD_NAME } from "@/constants/index";
+import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_URL } from "@/constants/index";
 import { Cloudinary } from "@cloudinary/url-gen";
 import { dpr, format, quality } from "@cloudinary/url-gen/actions/delivery";
 import { source } from "@cloudinary/url-gen/actions/overlay";
@@ -13,6 +13,23 @@ const cld = new Cloudinary({
     cloudName: CLOUDINARY_CLOUD_NAME,
   },
 });
+
+export async function uploadToCloudinary(file: File, folder: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("folder", folder);
+
+  const response = await fetch(CLOUDINARY_UPLOAD_URL, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to upload image to Cloudinary");
+  }
+
+  return response.json() as Promise<{ secure_url: string; public_id: string }>;
+}
 
 export const bannerPhoto = (bannerCldPubId: string, name: string) => {
   return cld

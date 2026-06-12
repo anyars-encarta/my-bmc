@@ -59,7 +59,7 @@ export const SignUpForm = ({
 
   const { title: appTitle } = useRefineOptions();
 
-  const { mutate: register } = useRegister();
+  const { mutateAsync: register } = useRegister();
 
   const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -77,7 +77,7 @@ export const SignUpForm = ({
       return;
     }
 
-    register({
+    await register({
       name,
       email,
       password,

@@ -130,6 +130,7 @@ function DesktopHeader({
             disabled={!user?.id}
             className="h-9"
             onClick={onEditProfile}
+            aria-label="Edit profile"
           >
             <PencilLine className="h-4 w-4" />
           </Button>

@@ -1,13 +1,18 @@
 import { ShowView, ShowViewHeader } from "@/components/refine-ui/views/show-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import PageLoader from "@/components/PageLoader";
 import { formatCurrency } from "@/lib/currency";
 import { paymentStatusTone, toTitleCase } from "@/lib/payment";
 import { useShow } from "@refinedev/core";
 import type { PaymentRecord } from "@/types/domain";
 
 export const PaymentShow = () => {
-  const { result: record } = useShow<PaymentRecord>({});
+  const { result: record, query } = useShow<PaymentRecord>({});
+
+  if (query.isLoading) {
+    return <PageLoader />;
+  }
 
   return (
     <ShowView className="space-y-4">

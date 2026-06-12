@@ -46,7 +46,6 @@ export const BACKEND_BASE_URL = getApiBaseUrl();
 export const BASE_URL = getEnvVar("VITE_API_URL");
 export const ACCESS_TOKEN_KEY = getEnvVar("VITE_ACCESS_TOKEN_KEY");
 export const REFRESH_TOKEN_KEY = getEnvVar("VITE_REFRESH_TOKEN_KEY");
-export const ADMIN_PASSKEY = getEnvVar("VITE_ADMIN_PASSKEY");
 
 export const REFRESH_TOKEN_URL = `${BASE_URL}/refresh-token`;
 

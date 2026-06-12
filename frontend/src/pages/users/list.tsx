@@ -83,8 +83,6 @@ const ListUsers = () => {
   const { mutateAsync: deleteUser } = useDelete();
   const { mutateAsync: updateUser } = useUpdate();
 
-  const developer = import.meta.env.VITE_DEVELOPER || "";
-
   const filters = useMemo(() => {
     const values: Array<{
       field: string;
@@ -288,7 +286,7 @@ const ListUsers = () => {
               >
                 <ActionButton type="view" />
               </ShowButton>
-              {row.original.email !== developer && (
+              {row.original.id !== loggedInUser?.id && (
                 <>
                   <EditButton
                     resource="users"
@@ -313,7 +311,7 @@ const ListUsers = () => {
           ),
         },
       ],
-      [developer, selectedUserIds],
+      [loggedInUser?.id, selectedUserIds],
     ),
     refineCoreProps: {
       resource: "users",

@@ -1,4 +1,4 @@
-import { uploadToCloudinary } from "@/lib/cloudinaryUpload";
+import { uploadToCloudinary } from "@/lib/cloudinary";
 import { cn } from "@/lib/utils";
 import { Building2, ImageUp, Loader2, X } from "lucide-react";
 import { useRef, useState } from "react";
@@ -57,7 +57,10 @@ export function LogoUploader({ value, onChange, className }: LogoUploaderProps) 
         aria-label="Upload facility logo"
         onClick={() => !isUploading && inputRef.current?.click()}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
         }}
         className={cn(
           "relative flex flex-col items-center justify-center gap-2",
