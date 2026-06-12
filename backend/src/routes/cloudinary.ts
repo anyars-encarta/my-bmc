@@ -69,6 +69,13 @@ router.post("/delete", async (req, res) => {
     const result = await cloudinary.uploader.destroy(normalizedPublicId);
 
     if (result.result === "ok") {
+      if (actor.imageCldPubId === normalizedPublicId) {
+        await db
+          .update(user)
+          .set({ imageCldPubId: null, updatedAt: new Date() })
+          .where(eq(user.id, actor.id));
+      }
+
       return res.status(200).json({
         success: true,
         message: "Image deleted successfully",

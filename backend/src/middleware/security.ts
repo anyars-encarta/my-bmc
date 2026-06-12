@@ -83,7 +83,7 @@ const securityMiddleware = async (
     next();
   } catch (e) {
     console.error("Arcjet Middleware error: ", e);
-    next();
+    next(e);
   }
 };
 

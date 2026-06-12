@@ -417,6 +417,51 @@ router.post("/:id/disburse", async (req, res, next) => {
         continue;
       }
 
+      if (recipient.momoTransferReferenceId) {
+        const finalTransferStatus = await pollMomoTransferStatus({
+          referenceId: recipient.momoTransferReferenceId,
+        });
+
+        await db
+          .update(paymentRecipients)
+          .set({
+            momoTransferStatus: finalTransferStatus.status,
+            momoTransferStatusReason:
+              finalTransferStatus.reason ??
+              (finalTransferStatus.status === "FAILED"
+                ? "MTN MoMo marked this transfer as failed"
+                : finalTransferStatus.status === "SUCCESSFUL"
+                  ? null
+                  : "Transfer is still pending MTN final confirmation"),
+            momoTransferCheckedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentRecipients.id, recipient.id));
+
+        results.push({
+          recipientId: recipient.id,
+          staffId: recipient.staffId,
+          momoNumber: recipient.staff.momoNumber,
+          amount: String(recipient.amount),
+          referenceId: recipient.momoTransferReferenceId,
+          status:
+            finalTransferStatus.status === "SUCCESSFUL"
+              ? "success"
+              : finalTransferStatus.status === "FAILED"
+                ? "failed"
+                : "pending",
+          transferStatus: finalTransferStatus.status,
+          ...(finalTransferStatus.reason
+            ? { message: finalTransferStatus.reason }
+            : finalTransferStatus.status === "FAILED"
+              ? { message: "MTN MoMo marked this transfer as failed" }
+              : finalTransferStatus.status === "SUCCESSFUL"
+                ? { message: "Transfer already completed" }
+                : { message: "Transfer is still pending MTN final confirmation" }),
+        });
+        continue;
+      }
+
       try {
         const transfer = await initiateMomoTransfer({
           amount: String(recipient.amount),
