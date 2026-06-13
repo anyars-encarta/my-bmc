@@ -23,6 +23,7 @@ const frontendUrls = (process.env.FRONTEND_URL ?? "")
   .split(",")
   .map((origin) => normalizeOrigin(origin))
   .filter((origin) => Boolean(origin));
+const isProduction = process.env.NODE_ENV === "production";
 const defaultTrustedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -34,20 +35,22 @@ const defaultTrustedOrigins = [
   "http://127.0.0.1:4174",
 ];
 const trustedOrigins = [
-  ...new Set([...defaultTrustedOrigins.map((origin) => normalizeOrigin(origin)), ...frontendUrls]),
+  ...new Set([
+    ...(isProduction ? [] : defaultTrustedOrigins.map((origin) => normalizeOrigin(origin))),
+    ...frontendUrls,
+  ]),
 ];
 const authBaseUrl =
   process.env.BETTER_AUTH_URL
     ?.trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
-const RoleEnum = z.enum(["staff", "teacher", "parent", "admin"]);
+const RoleEnum = z.enum(["accounts", "admin"]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
 if (!trustedOrigins.length) throw new Error("FRONTEND_URL is not set in the .env file");
 
-const isProduction = process.env.NODE_ENV === "production";
 const smtpHost = process.env.SMTP_HOST;
 const smtpPort = Number(process.env.SMTP_PORT ?? 587);
 const smtpSecure = process.env.SMTP_SECURE === "true";
@@ -173,7 +176,7 @@ export const auth = betterAuth({
       role: {
         type: "string",
         required: true,
-        defaultValue: "staff",
+        defaultValue: "accounts",
         validator: { input: RoleEnum },
       },
       status: {

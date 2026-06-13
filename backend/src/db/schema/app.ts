@@ -46,6 +46,7 @@ export const staff = pgTable("staff", {
   momoNumber: varchar("momo_number", { length: 20 }).notNull(), // MTN MoMo number
   momoName: varchar("momo_name", { length: 200 }),             // registered name on MoMo
   status: staffStatusEnum("status").notNull().default("active"),
+  imageUrl: varchar("image_url", { length: 255 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
@@ -72,6 +73,7 @@ export const payments = pgTable("payments", {
   id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
+  period: varchar("period", { length: 100 }), // e.g. "Q1 2024", "March 2024"
   categoryId: uuid("category_id")
     .notNull()
     .references(() => categories.id),
@@ -105,9 +107,25 @@ export const paymentRecipients = pgTable("payment_recipients", {
   amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
   status: recipientStatusEnum("status").notNull().default("pending"),
   note: text("note"),               // reason for approval/disapproval
+  momoTransferReferenceId: varchar("momo_transfer_reference_id", { length: 100 }),
+  momoTransferStatus: varchar("momo_transfer_status", { length: 20 }),
+  momoTransferStatusReason: text("momo_transfer_status_reason"),
+  momoTransferCheckedAt: timestamp("momo_transfer_checked_at"),
   verifiedBy: text("verified_by"),  // approving officer user ID
   verifiedAt: timestamp("verified_at"),
   addedBy: text("added_by").notNull(), // user who added this recipient
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const facilitySetup = pgTable("facility_setup", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  facilityName: varchar("facility_name", { length: 255 }).notNull(),
+  facilityCode: varchar("facility_code", { length: 50 }).notNull(),
+  telephone: varchar("telephone", { length: 20 }),
+  email: varchar("email", { length: 255 }),
+  address: text("address"),
+  logoUrl: varchar("logo_url", { length: 255 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -175,14 +193,24 @@ export const insertPaymentSchema = createInsertSchema(payments, {
   approvedAt: true,
   processedBy: true,
   processedAt: true,
-  momoReferenceId: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export const updatePaymentSchema = insertPaymentSchema
-  .omit({ createdBy: true })
-  .partial();
+export const updatePaymentSchema = createInsertSchema(payments, {
+  title: z.string().min(1).max(255),
+  categoryId: z.string().uuid(),
+}).omit({
+  id: true,
+  totalAmount: true,
+  submittedAt: true,
+  approvedBy: true,
+  approvedAt: true,
+  processedBy: true,
+  processedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).partial();
 
 export const selectPaymentSchema = createSelectSchema(payments);
 
@@ -192,6 +220,7 @@ export const insertRecipientSchema = createInsertSchema(paymentRecipients, {
 }).omit({
   id: true,
   paymentId: true,
+  addedBy: true,
   status: true,
   verifiedBy: true,
   verifiedAt: true,
@@ -208,6 +237,17 @@ export const reviewRecipientSchema = z.object({
   note: z.string().optional(),
 });
 
+export const insertFacilitySetupSchema = createInsertSchema(facilitySetup, {
+  facilityName: z.string().min(1).max(255),
+  facilityCode: z.string().min(1).max(50),
+  telephone: z.string().max(20).optional(),
+  email: z.string().email().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+export const updateFacilitySetupSchema = insertFacilitySetupSchema.partial();
+
+export const selectFacilitySetupSchema = createSelectSchema(facilitySetup);
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Staff = typeof staff.$inferSelect;
@@ -218,3 +258,5 @@ export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
 export type PaymentRecipient = typeof paymentRecipients.$inferSelect;
 export type NewPaymentRecipient = typeof paymentRecipients.$inferInsert;
+export type FacilitySetup = typeof facilitySetup.$inferSelect;
+export type NewFacilitySetup = typeof facilitySetup.$inferInsert;

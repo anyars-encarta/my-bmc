@@ -21,9 +21,7 @@ const securityMiddleware = async (
         message =
           "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.";
         break;
-      case "teacher":
-      case "staff":
-        case "parent":
+      case "accounts":
         limit = 200;
         message =
           "User request limit exceeded (200 per minute). Please wait before making another request.";
@@ -85,10 +83,7 @@ const securityMiddleware = async (
     next();
   } catch (e) {
     console.error("Arcjet Middleware error: ", e);
-    res.status(500).json({
-      error: "Internal Server Error",
-      message: "Something went wrong with security middleware",
-    });
+    next(e);
   }
 };
 

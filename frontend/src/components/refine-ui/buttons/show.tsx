@@ -38,7 +38,7 @@ export const ShowButton = React.forwardRef<
     { resource, recordItemId, accessControl, meta, children, onClick, ...rest },
     ref
   ) => {
-    const { hidden, disabled, LinkComponent, to, label } = useShowButton({
+    const { hidden, disabled, LinkComponent, to } = useShowButton({
       resource,
       id: recordItemId,
       accessControl,
@@ -55,6 +55,7 @@ export const ShowButton = React.forwardRef<
         <LinkComponent
           to={to}
           replace={false}
+          aria-label={rest["aria-label"] ?? "Show record"}
           onClick={(e: React.PointerEvent<HTMLButtonElement>) => {
             if (isDisabled) {
               e.preventDefault();
@@ -69,7 +70,6 @@ export const ShowButton = React.forwardRef<
           {children ?? (
             <div className="flex items-center gap-2 font-semibold">
               <Eye className="h-4 w-4" />
-              <span>{label}</span>
             </div>
           )}
         </LinkComponent>

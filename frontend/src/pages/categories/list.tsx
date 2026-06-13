@@ -1,16 +1,19 @@
 import { useTable } from "@refinedev/react-table";
 import { createColumnHelper } from "@tanstack/react-table";
 import React from "react";
+import { Badge } from "@/components/ui/badge";
 
 import { DeleteButton } from "@/components/refine-ui/buttons/delete";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { DataTable } from "@/components/refine-ui/data-table/data-table";
-import { ListView } from "@/components/refine-ui/views/list-view";
+import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
 
 type Category = {
   id: string;
-  title: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
 };
 
 export const CategoryList = () => {
@@ -23,10 +26,24 @@ export const CategoryList = () => {
         header: "ID",
         enableSorting: false,
       }),
-      columnHelper.accessor("title", {
-        id: "title",
-        header: "Title",
+      columnHelper.accessor("name", {
+        id: "name",
+        header: "Category",
         enableSorting: true,
+      }),
+      columnHelper.accessor("description", {
+        id: "description",
+        header: "Description",
+        cell: ({ row }) => row.original.description || "-",
+      }),
+      columnHelper.accessor("isActive", {
+        id: "isActive",
+        header: "Status",
+        cell: ({ row }) => (
+          <Badge variant={row.original.isActive ? "default" : "outline"}>
+            {row.original.isActive ? "Active" : "Inactive"}
+          </Badge>
+        ),
       }),
       columnHelper.display({
         id: "actions",
@@ -53,6 +70,7 @@ export const CategoryList = () => {
 
   return (
     <ListView>
+      <ListViewHeader title="Payment Categories" />
       <DataTable table={table} />
     </ListView>
   );

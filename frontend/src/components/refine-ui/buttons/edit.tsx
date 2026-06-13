@@ -38,7 +38,7 @@ export const EditButton = React.forwardRef<
     { resource, recordItemId, accessControl, meta, children, onClick, ...rest },
     ref
   ) => {
-    const { hidden, disabled, LinkComponent, to, label } = useEditButton({
+    const { hidden, disabled, LinkComponent, to } = useEditButton({
       resource,
       id: recordItemId,
       accessControl,
@@ -55,6 +55,7 @@ export const EditButton = React.forwardRef<
         <LinkComponent
           to={to}
           replace={false}
+          aria-label={children ? rest["aria-label"] : "Edit record"}
           onClick={(e: React.PointerEvent<HTMLButtonElement>) => {
             if (isDisabled) {
               e.preventDefault();
@@ -69,7 +70,6 @@ export const EditButton = React.forwardRef<
           {children ?? (
             <div className="flex items-center gap-2 font-semibold">
               <Pencil className="h-4 w-4" />
-              <span>{label}</span>
             </div>
           )}
         </LinkComponent>

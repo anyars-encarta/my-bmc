@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -22,20 +23,30 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import {
+  useActiveAuthProvider,
   useLink,
+  useLogout,
   useMenu,
-  useRefineOptions,
   type TreeMenuItem,
 } from "@refinedev/core";
-import { ChevronRight, ListIcon } from "lucide-react";
+import { APP_NAME } from "@/constants/app";
+import { Building2, ChevronRight, ListIcon, LogOut } from "lucide-react";
 import React from "react";
+import { useList } from "@refinedev/core";
+import PageLoader from "@/components/PageLoader";
+import { SetupRecord } from "@/types/domain";
 
 export function Sidebar() {
   const { open } = useShadcnSidebar();
   const { menuItems, selectedKey } = useMenu();
 
   return (
-    <ShadcnSidebar collapsible="icon" className={cn("border-none")}>
+    <ShadcnSidebar
+      collapsible="icon"
+      className={cn(
+        "border-none bg-linear-to-b from-cyan-500/10 via-transparent to-emerald-500/10",
+      )}
+    >
       <ShadcnSidebarRail />
       <SidebarHeader />
       <ShadcnSidebarContent
@@ -47,12 +58,12 @@ export function Sidebar() {
           "gap-2",
           "pt-2",
           "pb-2",
-          "border-r",
-          "border-border",
+          "border-r border-border/60",
+          "backdrop-blur-sm",
           {
             "px-3": open,
             "px-1": !open,
-          }
+          },
         )}
       >
         {menuItems.map((item: TreeMenuItem) => (
@@ -62,8 +73,30 @@ export function Sidebar() {
             selectedKey={selectedKey}
           />
         ))}
+
+        {/* Logout button pinned to bottom of sidebar */}
+        <LogoutButton />
       </ShadcnSidebarContent>
     </ShadcnSidebar>
+  );
+}
+
+function LogoutButton() {
+  const { mutate: logout } = useLogout();
+  const authProvider = useActiveAuthProvider();
+
+  if (!authProvider?.getIdentity) return null;
+
+  const item: any = {
+    name: "logout",
+    label: "Logout",
+    meta: { icon: <LogOut /> },
+  };
+
+  return (
+    <div className={cn("mt-auto", "pt-2", "border-t", "border-sidebar-border")}>
+      <SidebarButton item={item} onClick={() => logout()} />
+    </div>
   );
 }
 
@@ -112,7 +145,7 @@ function SidebarItemGroup({ item, selectedKey }: MenuItemProps) {
             "opacity-100": open,
             "pointer-events-none": !open,
             "pointer-events-auto": open,
-          }
+          },
         )}
       >
         {getDisplayName(item)}
@@ -144,7 +177,7 @@ function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
         "text-muted-foreground",
         "transition-transform",
         "duration-200",
-        "group-data-[state=open]:rotate-90"
+        "group-data-[state=open]:rotate-90",
       )}
     />
   );
@@ -210,8 +243,32 @@ function SidebarItemLink({ item, selectedKey }: MenuItemProps) {
 }
 
 function SidebarHeader() {
-  const { title } = useRefineOptions();
   const { open, isMobile } = useShadcnSidebar();
+  const appTitle = APP_NAME;
+
+  const { result, query } = useList<SetupRecord>({
+    resource: "setup",
+    pagination: { pageSize: 1 },
+  });
+
+  const isLoading = query.isLoading;
+  const record = result?.data?.[0];
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  const appIcon = record?.logoUrl ? (
+    <img
+      src={record.logoUrl}
+      alt={record.facilityName ?? appTitle}
+      className="h-8 w-8 rounded-md object-contain border border-border bg-white p-1"
+    />
+  ) : (
+    <div className="flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-border bg-muted">
+      <Building2 className="h-6 w-6 text-muted-foreground" />
+    </div>
+  );
 
   return (
     <ShadcnSidebarHeader
@@ -223,7 +280,7 @@ function SidebarHeader() {
         "flex-row",
         "items-center",
         "justify-between",
-        "overflow-hidden"
+        "overflow-hidden",
       )}
     >
       <div
@@ -240,10 +297,10 @@ function SidebarHeader() {
           {
             "pl-3": !open,
             "pl-5": open,
-          }
+          },
         )}
       >
-        <div>{title.icon}</div>
+        <div>{appIcon}</div>
         <h2
           className={cn(
             "text-sm",
@@ -253,10 +310,10 @@ function SidebarHeader() {
             {
               "opacity-0": !open,
               "opacity-100": open,
-            }
+            },
           )}
         >
-          {title.text}
+          {appTitle}
         </h2>
       </div>
 
@@ -340,14 +397,16 @@ function SidebarButton({
       variant="ghost"
       size="lg"
       className={cn(
-        "flex w-full items-center justify-start gap-2 py-2 !px-3 text-sm",
+        "flex w-full items-center justify-start gap-2 py-2 px-3! text-sm",
+        "transition-all duration-200 hover:-translate-y-px",
         {
           "bg-sidebar-primary": isSelected,
-          "hover:!bg-sidebar-primary/90": isSelected,
+          "hover:bg-sidebar-primary/90!": isSelected,
           "text-sidebar-primary-foreground": isSelected,
           "hover:text-sidebar-primary-foreground": isSelected,
+          "hover:bg-cyan-500/10": !isSelected,
         },
-        className
+        className,
       )}
       onClick={onClick}
       {...props}
