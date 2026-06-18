@@ -4,12 +4,16 @@ import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { DataTable } from "@/components/refine-ui/data-table/data-table";
 import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import { Input } from "@/components/ui/input";
 import { useTable } from "@refinedev/react-table";
 import { createColumnHelper } from "@tanstack/react-table";
-import { useMemo } from "react";
+import { Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { StaffRecord } from "@/types/domain";
 
 export const StaffList = () => {
+  const [searchQuery, setSearchQuery] = useState("");
+
   const columns = useMemo(() => {
     const helper = createColumnHelper<StaffRecord>();
 
@@ -54,16 +58,50 @@ export const StaffList = () => {
     ];
   }, []);
 
+  const filters = useMemo(() => {
+    const query = searchQuery.trim();
+
+    return query
+      ? [
+          {
+            field: "search",
+            operator: "contains" as const,
+            value: query,
+          },
+        ]
+      : [];
+  }, [searchQuery]);
+
   const table = useTable({
     columns,
     refineCoreProps: {
       syncWithLocation: true,
+      filters: {
+        permanent: filters,
+      },
     },
   });
+
+  const {
+    refineCore: { setCurrentPage },
+  } = table;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, setCurrentPage]);
 
   return (
     <ListView className="space-y-4">
       <ListViewHeader title="Staff Directory" />
+      <div className="relative w-full sm:max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search staff by name, employee ID, email, MoMo number, or status"
+          className="pl-9"
+        />
+      </div>
       <DataTable table={table} />
     </ListView>
   );

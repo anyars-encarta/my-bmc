@@ -1,7 +1,9 @@
 import { useTable } from "@refinedev/react-table";
 import { createColumnHelper } from "@tanstack/react-table";
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
 
 import { DeleteButton } from "@/components/refine-ui/buttons/delete";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
@@ -17,7 +19,9 @@ type Category = {
 };
 
 export const CategoryList = () => {
-  const columns = React.useMemo(() => {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const columns = useMemo(() => {
     const columnHelper = createColumnHelper<Category>();
 
     return [
@@ -61,16 +65,50 @@ export const CategoryList = () => {
     ];
   }, []);
 
+  const filters = useMemo(() => {
+    const query = searchQuery.trim();
+
+    return query
+      ? [
+          {
+            field: "search",
+            operator: "contains" as const,
+            value: query,
+          },
+        ]
+      : [];
+  }, [searchQuery]);
+
   const table = useTable({
     columns,
     refineCoreProps: {
       syncWithLocation: true,
+      filters: {
+        permanent: filters,
+      },
     },
   });
 
+  const {
+    refineCore: { setCurrentPage },
+  } = table;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, setCurrentPage]);
+
   return (
-    <ListView>
+    <ListView className="space-y-4">
       <ListViewHeader title="Payment Categories" />
+      <div className="relative w-full sm:max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search categories by name, description, or status"
+          className="pl-9"
+        />
+      </div>
       <DataTable table={table} />
     </ListView>
   );

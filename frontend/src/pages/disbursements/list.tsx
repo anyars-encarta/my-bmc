@@ -5,12 +5,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { BACKEND_BASE_URL } from "@/constants";
 import { formatCurrency } from "@/lib/currency";
 import { useCustomMutation, useList, useNotification } from "@refinedev/core";
 import type { DisbursementRecord, PaymentStatus } from "@/types/domain";
 import { useEffect, useMemo, useState } from "react";
 import { MomoBalanceResponse } from "@/types/momo";
+import { Search } from "lucide-react";
 import PageLoader from "@/components/PageLoader";
 
 type DisbursementPayment = {
@@ -64,6 +66,7 @@ export const DisbursementList = () => {
   const [momoCurrency, setMomoCurrency] = useState("GHS");
   const [isLoadingMomoBalance, setIsLoadingMomoBalance] = useState(true);
   const [momoBalanceError, setMomoBalanceError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [lastSyncResult, setLastSyncResult] = useState<{
     syncedAt: string;
     data: SyncStatusResponse;
@@ -344,6 +347,29 @@ export const DisbursementList = () => {
     }
   }, [momoBalance, momoCurrency]);
 
+  const filteredDisbursements = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+
+    if (!normalizedSearch) {
+      return disbursements;
+    }
+
+    return disbursements.filter((item) => {
+      const searchableText = [
+        item.paymentTitle,
+        item.period,
+        item.status,
+        item.momoBatchId,
+        item.id,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase())
+        .join(" ");
+
+      return searchableText.includes(normalizedSearch);
+    });
+  }, [disbursements, searchQuery]);
+
   return (
     <ListView className="space-y-4">
       <div className="flex items-center justify-between">
@@ -401,6 +427,16 @@ export const DisbursementList = () => {
           </Button>
         </CardContent>
       </Card>
+
+      <div className="relative w-full max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search disbursements by payment, period, status, or batch reference"
+          className="pl-9"
+        />
+      </div>
 
       {lastSyncResult && (
         <Card className="border-0 shadow-sm ring-1 ring-border">
@@ -460,14 +496,14 @@ export const DisbursementList = () => {
           Loading disbursements...
         </p>
       )}
-      {!paymentsQuery.isLoading && disbursements.length === 0 && (
+      {!paymentsQuery.isLoading && filteredDisbursements.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No disbursements found yet.
+          No disbursements match your search.
         </p>
       )}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {disbursements.map((item, index) => (
+        {filteredDisbursements.map((item, index) => (
           <Card
             key={item.id}
             className="border-0 shadow-sm ring-1 ring-border animate-in fade-in zoom-in-95"
