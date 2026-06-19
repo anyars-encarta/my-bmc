@@ -77,6 +77,7 @@ const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
 const requestRecipients = async <T,>(
   url: string,
+  signal?: AbortSignal,
   init?: RequestInit,
 ): Promise<T> => {
   const response = await fetch(url, {
@@ -85,6 +86,7 @@ const requestRecipients = async <T,>(
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
+    signal,
     ...init,
   });
 
@@ -124,20 +126,22 @@ export const ApprovalReviewPage = () => {
   const isBusy = busyActionKey !== null;
   const isActionBusy = (actionKey: string) => busyActionKey === actionKey;
 
-  const refreshPayment = async () => {
+  const refreshPayment = async (signal?: AbortSignal) => {
     if (!paymentId) return;
 
     const nextPayment = await requestRecipients<ApprovalPayment>(
       `${apiBase}/payments/${paymentId}`,
+      signal,
     );
     setPayment(nextPayment);
   };
 
-  const refreshRecipients = async () => {
+  const refreshRecipients = async (signal?: AbortSignal) => {
     if (!paymentId) return;
 
     const nextRecipients = await requestRecipients<ApprovalRecipient[]>(
       `${apiBase}/payments/${paymentId}/recipients`,
+      signal,
     );
     setRecipients(nextRecipients);
     setRecipientAmounts(
@@ -149,17 +153,26 @@ export const ApprovalReviewPage = () => {
   };
 
   useEffect(() => {
+    const controller = new AbortController();
+
     if (!paymentId) {
       setPaymentLoading(false);
-      return;
+      return () => controller.abort();
     }
 
     const run = async () => {
       try {
         setPaymentLoading(true);
-        await Promise.all([refreshPayment(), refreshRecipients()]);
+        await Promise.all([
+          refreshPayment(controller.signal),
+          refreshRecipients(controller.signal),
+        ]);
         setSelectedRecipientIds([]);
       } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
         notify?.({
           type: "error",
           message:
@@ -171,6 +184,8 @@ export const ApprovalReviewPage = () => {
     };
 
     void run();
+
+    return () => controller.abort();
   }, [paymentId, notify]);
 
   useEffect(() => {
@@ -555,7 +570,7 @@ export const ApprovalReviewPage = () => {
             </div>
           )}
 
-          <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1">
+          <div className="max-h-128 space-y-3 overflow-y-auto pr-1">
             {recipients.length === 0 ? (
               <p className="text-sm text-muted-foreground">No beneficiaries added yet.</p>
             ) : (
@@ -576,7 +591,7 @@ export const ApprovalReviewPage = () => {
                         onClick={() => openStaffDetails(recipient)}
                         className="mb-2 cursor-pointer rounded-sm text-left text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
-                        {(recipient.staff?.firstName || "") + " " + (recipient.staff?.lastName || "") || "Unknown Staff"}
+                        {((recipient.staff?.firstName || "").trim() + " " + (recipient.staff?.lastName || "").trim()).trim() || "Unknown Staff"}
                         {recipient.staff?.employeeId ? ` (${recipient.staff.employeeId})` : ""}
                       </button>
                       <div className="flex flex-wrap items-end gap-2">
@@ -825,7 +840,7 @@ export const ApprovalReviewPage = () => {
 
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-start">
-              <Avatar className="size-68 border shadow-sm">
+              <Avatar className="size-17 border shadow-sm">
                 <AvatarImage
                   src={selectedRecipientStaff?.imageUrl ?? ""}
                   alt={`${selectedRecipientStaff?.firstName ?? ""} ${selectedRecipientStaff?.lastName ?? ""}`.trim()}

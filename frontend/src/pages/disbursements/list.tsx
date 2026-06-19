@@ -433,6 +433,7 @@ export const DisbursementList = () => {
         <Input
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
+          aria-label="Search disbursements"
           placeholder="Search disbursements by payment, period, status, or batch reference"
           className="pl-9"
         />
@@ -498,7 +499,9 @@ export const DisbursementList = () => {
       )}
       {!paymentsQuery.isLoading && filteredDisbursements.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No disbursements match your search.
+          {searchQuery.trim()
+            ? "No disbursements match your search."
+            : "No disbursements available."}
         </p>
       )}
 
