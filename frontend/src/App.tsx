@@ -16,7 +16,7 @@ import { Layout } from "./components/refine-ui/layout/layout";
 import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
-import { ApprovalQueueList } from "./pages/approvals";
+import { ApprovalQueueList, ApprovalReviewPage } from "./pages/approvals";
 import {
   CategoryCreate,
   CategoryEdit,
@@ -194,7 +194,10 @@ function App() {
                     <Route path="edit/:id" element={<EditUser />} />
                     <Route path="show/:id" element={<ShowUser />} />
                   </Route>
-                  <Route path="/approvals" element={<ApprovalQueueList />} />
+                  <Route path="/approvals">
+                    <Route index element={<ApprovalQueueList />} />
+                    <Route path=":id" element={<ApprovalReviewPage />} />
+                  </Route>
                   <Route
                     path="/disbursements"
                     element={<DisbursementList />}
