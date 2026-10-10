@@ -100,7 +100,7 @@ app.use("/api/momo", momoRoutes);
 
 // Routes
 app.get("/", (req, res) => {
-  res.send("BMC Payment Backend server is running!");
+  res.send("BMC System Backend server is running!");
 });
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
