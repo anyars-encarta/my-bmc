@@ -24,7 +24,7 @@ const requireAuth = async (
     }
 
     const [currentUser] = await db
-      .select({ status: user.status })
+      .select({ status: user.status, role: user.role })
       .from(user)
       .where(eq(user.id, session.user.id))
       .limit(1);
@@ -36,18 +36,17 @@ const requireAuth = async (
       });
     }
 
-    const role =
-      session.user.role === "admin" ||
-      session.user.role === "teacher" ||
-      session.user.role === "parent" ||
-      session.user.role === "staff"
-        ? session.user.role
-        : "staff";
+    if (currentUser.role !== "admin" && currentUser.role !== "accounts") {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "Your account role is not recognized.",
+      });
+    }
 
     req.user = {
       id: session.user.id,
       email: session.user.email,
-      role,
+      role: currentUser.role,
       name: session.user.name,
     };
 

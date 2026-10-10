@@ -8,6 +8,34 @@
       "when": 1779723005285,
       "tag": "0000_busy_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781025860104,
+      "tag": "0001_loud_colleen_wing",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781112055005,
+      "tag": "0002_funny_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781170951355,
+      "tag": "0003_slimy_silver_centurion",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781183793985,
+      "tag": "0004_fancy_khan",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,10 @@ if (!process.env.DATABASE_URL) {
 const dbUrl = new URL(process.env.DATABASE_URL);
 
 export default defineConfig({
-  schema: ["./src/db/schema/app.ts", "./src/db/schema/auth.ts"],
+  schema: [
+    "./src/db/schema/app.ts",
+    "./src/db/schema/auth.ts",
+  ],
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

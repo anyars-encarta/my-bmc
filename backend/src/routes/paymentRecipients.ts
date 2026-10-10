@@ -18,7 +18,7 @@ async function loadPayment(paymentId: string) {
   return payment ?? null;
 }
 
-async function finalizeApprovalIfReady(paymentId: string, approverId: string) {
+async function finalizeApprovalIfReady(paymentId: string, approverName: string) {
   const recipients = await db
     .select({ status: paymentRecipients.status })
     .from(paymentRecipients)
@@ -32,7 +32,7 @@ async function finalizeApprovalIfReady(paymentId: string, approverId: string) {
     .update(payments)
     .set({
       status: "approved",
-      approvedBy: approverId,
+      approvedBy: approverName,
       approvedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -279,7 +279,12 @@ router.post("/:recipientId/review", async (req, res, next) => {
     }
 
     await recalculatePaymentTotal(paymentId);
-    await finalizeApprovalIfReady(paymentId, req.user.id);
+    const approverName =
+      typeof req.user.name === "string" && req.user.name.trim()
+        ? req.user.name.trim()
+        : req.user.id;
+
+    await finalizeApprovalIfReady(paymentId, approverName);
 
     res.json({ data: updated });
   } catch (error) {

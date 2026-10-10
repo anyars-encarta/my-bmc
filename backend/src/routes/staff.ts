@@ -1,8 +1,13 @@
 import { Router } from "express";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 
 import { db } from "../db/index.js";
-import { insertStaffSchema, staff, updateStaffSchema } from "../db/schema/app.js";
+import {
+  insertStaffSchema,
+  paymentRecipients,
+  staff,
+  updateStaffSchema,
+} from "../db/schema/app.js";
 
 const router = Router();
 
@@ -72,6 +77,19 @@ router.patch("/:id", async (req, res, next) => {
 
 router.delete("/:id", async (req, res, next) => {
   try {
+    const [usage] = await db
+      .select({ total: count() })
+      .from(paymentRecipients)
+      .where(eq(paymentRecipients.staffId, req.params.id));
+
+    if (Number(usage?.total ?? 0) > 0) {
+      res.status(409).json({
+        error:
+          "Cannot delete staff linked to payment records. Set the staff status to inactive instead.",
+      });
+      return;
+    }
+
     const [deleted] = await db.delete(staff).where(eq(staff.id, req.params.id)).returning();
 
     if (!deleted) {
