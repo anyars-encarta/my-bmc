@@ -8,6 +8,9 @@ import {
   pgEnum,
   boolean,
   uniqueIndex,
+  date,
+  smallint,
+  char,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
@@ -16,6 +19,8 @@ import { z } from "zod";
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export const staffStatusEnum = pgEnum("staff_status", ["active", "inactive"]);
+export const staffCategoryEnum = pgEnum("staff_category", ["CLINICAL", "NON_CLINICAL"]);
+export const scheduleModeEnum = pgEnum("schedule_mode", ["FIXED_WEEKDAY", "ROSTERED"]);
 
 export const paymentStatusEnum = pgEnum("payment_status", [
   "draft",           // created, recipients still being added
@@ -47,11 +52,21 @@ export const staff = pgTable("staff", {
   momoName: varchar("momo_name", { length: 200 }),             // registered name on MoMo
   status: staffStatusEnum("status").notNull().default("active"),
   imageUrl: varchar("image_url", { length: 255 }),
+  staffCategory: staffCategoryEnum("staff_category").notNull().default("NON_CLINICAL"),
+  scheduleMode: scheduleModeEnum("schedule_mode").notNull().default("FIXED_WEEKDAY"),
+  defaultShiftTypeId: uuid("default_shift_type_id"),
+  jobRoleId: uuid("job_role_id"),
+  badgeNumber: varchar("badge_number", { length: 20 }),
+  hireDate: date("hire_date"),
+  terminationDate: date("termination_date"),
+  userId: text("user_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
   emailIdx: uniqueIndex("staff_email_idx").on(table.email),
   employeeIdIdx: uniqueIndex("staff_employee_id_idx").on(table.employeeId),
+  badgeIdx: uniqueIndex("staff_badge_idx").on(table.badgeNumber),
+  userIdIdx: uniqueIndex("staff_user_id_idx").on(table.userId),
 }));
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -126,6 +141,14 @@ export const facilitySetup = pgTable("facility_setup", {
   email: varchar("email", { length: 255 }),
   address: text("address"),
   logoUrl: varchar("logo_url", { length: 255 }),
+  timezone: varchar("timezone", { length: 60 }).notNull().default("UTC"),
+  currency: char("currency", { length: 3 }).notNull().default("GHS"),
+  locale: varchar("locale", { length: 10 }).notNull().default("en-GH"),
+  privacyPolicyVersion: varchar("privacy_policy_version", { length: 20 }),
+  financialYearStartMonth: smallint("financial_year_start_month").notNull().default(1),
+  nhiaFacilityCode: varchar("nhia_facility_code", { length: 30 }),
+  gpsDigitalAddress: varchar("gps_digital_address", { length: 20 }),
+  registrationNumber: varchar("registration_number", { length: 40 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
