@@ -409,7 +409,9 @@ router.post("/:id/disburse", async (req, res, next) => {
           staffId: recipient.staffId,
           momoNumber: recipient.staff.momoNumber,
           amount: String(recipient.amount),
-          referenceId: recipient.momoTransferReferenceId ?? undefined,
+          ...(recipient.momoTransferReferenceId
+            ? { referenceId: recipient.momoTransferReferenceId }
+            : {}),
           status: "success",
           transferStatus: "SUCCESSFUL",
           message: "Transfer already completed",

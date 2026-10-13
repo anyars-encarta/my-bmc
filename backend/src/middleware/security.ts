@@ -10,18 +10,23 @@ const securityMiddleware = async (
   if (process.env.NODE_ENV === "test") return next();
 
   try {
-    const role: RateLimitRole = req.user?.role || "guest";
+    const role: RateLimitRole =
+      req.user?.role === "SUPER_ADMIN"
+        ? "SUPER_ADMIN"
+        : req.user?.role === "ACCOUNTS"
+          ? "ACCOUNTS"
+          : "guest";
 
     let limit: number;
     let message: string;
 
     switch (role) {
-      case "admin":
+      case "SUPER_ADMIN":
         limit = 1000;
         message =
           "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.";
         break;
-      case "accounts":
+      case "ACCOUNTS":
         limit = 200;
         message =
           "User request limit exceeded (200 per minute). Please wait before making another request.";

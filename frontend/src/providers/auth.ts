@@ -1,6 +1,7 @@
 import type { AuthProvider } from "@refinedev/core";
 
 import { authClient } from "@/lib/auth-client";
+import { clearMeCache, fetchMe } from "./me";
 
 type AuthUser = {
   id: string;
@@ -40,7 +41,7 @@ export const authProvider: AuthProvider = {
         rememberMe: Boolean(rememberMe),
       },
       {
-        onError: (ctx) => ctx,
+        onError: () => undefined,
       },
     );
 
@@ -51,6 +52,7 @@ export const authProvider: AuthProvider = {
       };
     }
 
+    clearMeCache();
     return {
       success: true,
       redirectTo: "/dashboard",
@@ -59,7 +61,7 @@ export const authProvider: AuthProvider = {
   logout: async () => {
     const response = await authClient.signOut({
       fetchOptions: {
-        onError: (ctx) => ctx,
+        onError: () => undefined,
       },
     });
 
@@ -70,6 +72,7 @@ export const authProvider: AuthProvider = {
       };
     }
 
+    clearMeCache();
     return {
       success: true,
       redirectTo: "/login",
@@ -80,6 +83,7 @@ export const authProvider: AuthProvider = {
       const session = await getSessionData();
 
       if (session?.user && session?.session) {
+        await fetchMe(true);
         return {
           authenticated: true,
         };
@@ -118,7 +122,21 @@ export const authProvider: AuthProvider = {
     return { error };
   },
   forgotPassword: async ({ email }) => {
-    const response = await authClient.forgetPassword(
+    const clientWithForgotPassword = authClient as unknown as {
+      forgetPassword?: (
+        payload: { email: string; redirectTo?: string },
+        options?: { onError?: () => void },
+      ) => Promise<{ error?: { message?: string } }>;
+    };
+
+    if (!clientWithForgotPassword.forgetPassword) {
+      return {
+        success: false,
+        error: new Error("Password reset is not configured for this deployment."),
+      };
+    }
+
+    const response = await clientWithForgotPassword.forgetPassword(
       {
         email,
         redirectTo:
@@ -127,7 +145,7 @@ export const authProvider: AuthProvider = {
             : undefined,
       },
       {
-        onError: (ctx) => ctx,
+        onError: () => undefined,
       },
     );
 
@@ -143,17 +161,19 @@ export const authProvider: AuthProvider = {
     };
   },
   register: async ({ email, password, role, image, imageCldPubId }: RegisterParams) => {
+    const roleValue = role === "admin" ? "admin" : "accounts";
     const response = await authClient.signUp.email(
       {
         email,
         password,
         name: email,
-        role: role === "admin" ? "admin" : "accounts",
+        role: roleValue,
+        status: "active",
         image: typeof image === "string" ? image : undefined,
-        imageCldPubId: typeof imageCldPubId === "string" ? imageCldPubId : undefined,
+        imageCldPubId: typeof imageCldPubId === "string" ? imageCldPubId : "",
       },
       {
-        onError: (ctx) => ctx,
+        onError: () => undefined,
       },
     );
 
@@ -164,30 +184,38 @@ export const authProvider: AuthProvider = {
       };
     }
 
+    clearMeCache();
     return {
       success: true,
       redirectTo: "/users",
     };
   },
   getIdentity: async () => {
-    const session = await getSessionData();
-    const currentUser = session?.user;
+    const me = await fetchMe();
+    const currentUser = me?.user;
 
     if (!currentUser) {
       return null;
     }
 
+    const [firstName = currentUser.name, ...rest] = currentUser.name.split(" ");
+    const lastName = rest.join(" ");
+
     return {
       id: currentUser.id,
       email: currentUser.email,
+      firstName,
+      lastName,
       fullName: currentUser.name || currentUser.email,
-      avatar: currentUser.image || undefined,
-      role: currentUser.role || undefined,
+      avatar: undefined,
+      role: me?.roles?.[0] || undefined,
+      roles: me?.roles ?? [],
+      permissions: me?.permissions ?? [],
       status: currentUser.status || undefined,
     };
   },
   getPermissions: async () => {
-    const session = await getSessionData();
-    return session?.user?.role ?? null;
+    const me = await fetchMe();
+    return me?.permissions ?? null;
   },
 };

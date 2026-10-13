@@ -16,6 +16,7 @@ import { Layout } from "./components/refine-ui/layout/layout";
 import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
+import { IdleLock } from "./components/IdleLock";
 import { ApprovalQueueList, ApprovalReviewPage } from "./pages/approvals";
 import {
   CategoryCreate,
@@ -40,6 +41,7 @@ import EditUser from "./pages/users/edit";
 import ListUsers from "./pages/users/list";
 import ShowUser from "./pages/users/show";
 import { authProvider } from "./providers/auth";
+import { accessControlProvider } from "./providers/accessControl";
 import { dataProvider } from "./providers/data";
 
 const formatPathSegment = (value: string) =>
@@ -118,6 +120,7 @@ function App() {
             <Refine
               dataProvider={dataProvider}
               authProvider={authProvider}
+              accessControlProvider={accessControlProvider}
               notificationProvider={notificationProvider}
               routerProvider={routerProvider}
               resources={appResources.map((resource) => ({
@@ -207,6 +210,7 @@ function App() {
               </Routes>
 
               <Toaster />
+              <IdleLock />
               <RefineKbar />
               <UnsavedChangesNotifier />
             </Refine>
