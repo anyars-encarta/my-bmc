@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
-import type { NextFunction, Request, Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import securityMiddleware from "./middleware/security.js";
+import securityHeaders from "./middleware/securityHeaders.js";
 import requireAuth from "./middleware/requireAuth.js";
 import { auth } from "./lib/auth.js";
 import staffRoutes from "./routes/staff.js";
@@ -13,8 +13,12 @@ import paymentRecipientRoutes from "./routes/paymentRecipients.js";
 import setupRoutes from "./routes/setup.js";
 import momoRoutes from "./routes/momo.js";
 import userRoutes from "./routes/users.js";
+import v1Routes from "./routes/v1/index.js";
+import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
+import { problemHandler } from "./middleware/problemHandler.js";
 
 const app = express();
+app.use(attachRequestId);
 
 const normalizeOrigin = (value: string) => {
   const trimmed = value.trim().replace(/^['"]|['"]$/g, "").replace(/\/+$/, "");
@@ -78,12 +82,14 @@ app.use(
     credentials: true,
   }),
 );
+app.use(securityHeaders);
 
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(auditWriteMiddleware);
 
 app.use("/api", requireAuth);
 app.use("/api", securityMiddleware);
@@ -97,15 +103,13 @@ app.use("/api/users", userRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payments/:paymentId/recipients", paymentRecipientRoutes);
 app.use("/api/momo", momoRoutes);
+app.use("/api/v1", v1Routes);
 
 // Routes
 app.get("/", (req, res) => {
-  res.send("BMC System Backend server is running!");
+  res.send("System Backend server is running!");
 });
 
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("Unhandled API error:", error);
-  res.status(500).json({ error: "Internal server error" });
-});
+app.use(problemHandler);
 
 export default app;

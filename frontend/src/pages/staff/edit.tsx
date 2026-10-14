@@ -1,4 +1,10 @@
-import { staffStatusOptions } from "@/constants/options";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
+import { SubmitHandler } from "react-hook-form";
+import { BaseRecord, HttpError, useNotification } from "@refinedev/core";
+import { useForm } from "@refinedev/react-hook-form";
+
+import { staffCategoryOptions, staffStatusOptions, scheduleModeOptions } from "@/constants/options";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -16,16 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  EditView,
-  EditViewHeader,
-} from "@/components/refine-ui/views/edit-view";
-import { BaseRecord, HttpError } from "@refinedev/core";
-import { useForm } from "@refinedev/react-hook-form";
-import { SubmitHandler } from "react-hook-form";
-import { useNavigate } from "react-router";
+import { EditView, EditViewHeader } from "@/components/refine-ui/views/edit-view";
 import PageLoader from "@/components/PageLoader";
 import UploadWidget from "@/components/upload-widget";
+import { BACKEND_BASE_URL } from "@/constants";
+import { createAuthHeaders } from "@/providers/me";
+import type { JobRoleRecord, OrgUnitRecord, ShiftTypeRecord, StaffCategory, ScheduleMode } from "@/types/domain";
 import type { UploadWidgetValue } from "@/types";
 
 type StaffEditValues = {
@@ -37,13 +39,28 @@ type StaffEditValues = {
   momoNumber: string;
   momoName?: string;
   department?: string;
+  orgUnitId?: string;
   position?: string;
   phone?: string;
   status: string;
+  staffCategory: StaffCategory;
+  scheduleMode: ScheduleMode;
+  defaultShiftTypeId?: string;
+  jobRoleId?: string;
+  badgeNumber?: string;
+  hireDate?: string;
+  terminationDate?: string;
+  userId?: string;
 };
+
+const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
 export const StaffEdit = () => {
   const navigate = useNavigate();
+  const { open: notify } = useNotification();
+  const [orgUnits, setOrgUnits] = useState<OrgUnitRecord[]>([]);
+  const [jobRoles, setJobRoles] = useState<JobRoleRecord[]>([]);
+  const [shiftTypes, setShiftTypes] = useState<ShiftTypeRecord[]>([]);
 
   const form = useForm<BaseRecord, HttpError, StaffEditValues>({
     refineCoreProps: {},
@@ -56,19 +73,81 @@ export const StaffEdit = () => {
       momoNumber: "",
       momoName: "",
       department: "",
+      orgUnitId: "",
       position: "",
       phone: "",
       status: "active",
+      staffCategory: "NON_CLINICAL",
+      scheduleMode: "FIXED_WEEKDAY",
+      defaultShiftTypeId: "",
+      jobRoleId: "",
+      badgeNumber: "",
+      hireDate: "",
+      terminationDate: "",
+      userId: "",
     },
   });
 
   const {
     refineCore: { onFinish },
     formState: { isSubmitting },
+    watch,
   } = form;
 
+  const selectedCategory = watch("staffCategory");
+
+  useEffect(() => {
+    const loadReferences = async () => {
+      try {
+        const [orgUnitsRes, jobRolesRes, shiftTypesRes] = await Promise.all([
+          fetch(`${apiBase}/v1/org-units?limit=200`, {
+            credentials: "include",
+            headers: createAuthHeaders(),
+          }),
+          fetch(`${apiBase}/v1/job-roles?limit=200`, {
+            credentials: "include",
+            headers: createAuthHeaders(),
+          }),
+          fetch(`${apiBase}/v1/shift-types?limit=200`, {
+            credentials: "include",
+            headers: createAuthHeaders(),
+          }),
+        ]);
+
+        const [orgPayload, rolePayload, shiftPayload] = await Promise.all([
+          orgUnitsRes.json() as Promise<{ data?: OrgUnitRecord[] }>,
+          jobRolesRes.json() as Promise<{ data?: JobRoleRecord[] }>,
+          shiftTypesRes.json() as Promise<{ data?: ShiftTypeRecord[] }>,
+        ]);
+
+        setOrgUnits(orgPayload.data ?? []);
+        setJobRoles(rolePayload.data ?? []);
+        setShiftTypes(shiftPayload.data ?? []);
+      } catch (error) {
+        notify?.({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to load staff reference data.",
+        });
+      }
+    };
+
+    loadReferences();
+  }, [notify]);
+
+  const filteredJobRoles = jobRoles.filter((role) => role.staffCategory === selectedCategory);
+
   const onSubmit: SubmitHandler<StaffEditValues> = (values) => {
-    onFinish(values);
+    onFinish({
+      ...values,
+      orgUnitId: values.orgUnitId || undefined,
+      defaultShiftTypeId: values.defaultShiftTypeId || undefined,
+      jobRoleId: values.jobRoleId || undefined,
+      badgeNumber: values.badgeNumber || undefined,
+      hireDate: values.hireDate || undefined,
+      terminationDate: values.terminationDate || undefined,
+      userId: values.userId || undefined,
+      department: values.department || undefined,
+    });
   };
 
   return (
@@ -104,36 +183,52 @@ export const StaffEdit = () => {
           <TextField form={form} name="employeeId" label="Employee ID" />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
           <TextField form={form} name="momoName" label="MoMo Name" />
-          <TextField form={form} name="department" label="Department" />
-          <TextField form={form} name="position" label="Position" />
           <TextField form={form} name="phone" label="Phone" />
+          <TextField form={form} name="position" label="Position" />
+          <TextField form={form} name="department" label="Legacy Department (for migration reports)" required={false} />
+          <TextField form={form} name="badgeNumber" label="Badge Number" required={false} />
+          <TextField form={form} name="hireDate" label="Hire Date" type="date" required={false} />
+          <TextField form={form} name="terminationDate" label="Termination Date" type="date" required={false} />
+          <TextField form={form} name="userId" label="Linked User ID" required={false} />
 
-          <FormField
-            control={form.control}
+          <SelectField
+            form={form}
             name="status"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Status</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  value={field.value || "active"}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {staffStatusOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
+            label="Status"
+            options={staffStatusOptions.map((option) => ({ value: option.value, label: option.label }))}
+          />
+          <SelectField
+            form={form}
+            name="staffCategory"
+            label="Staff Category"
+            options={staffCategoryOptions.map((option) => ({ value: option.value, label: option.label }))}
+          />
+          <SelectField
+            form={form}
+            name="scheduleMode"
+            label="Schedule Mode"
+            options={scheduleModeOptions.map((option) => ({ value: option.value, label: option.label }))}
+          />
+          <SelectField
+            form={form}
+            name="orgUnitId"
+            label="Current Org Unit"
+            required={false}
+            options={orgUnits.map((option) => ({ value: option.id, label: `${option.name} (${option.code})` }))}
+          />
+          <SelectField
+            form={form}
+            name="jobRoleId"
+            label="Job Role"
+            required={false}
+            options={filteredJobRoles.map((option) => ({ value: option.id, label: option.name }))}
+          />
+          <SelectField
+            form={form}
+            name="defaultShiftTypeId"
+            label="Default Shift Type"
+            required={false}
+            options={shiftTypes.map((option) => ({ value: option.id, label: `${option.code} — ${option.name}` }))}
           />
 
           <div className="md:col-span-2 flex gap-2">
@@ -147,11 +242,7 @@ export const StaffEdit = () => {
                 "Save Staff"
               )}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate(-1)}
-            >
+            <Button type="button" variant="outline" onClick={() => navigate(-1)}>
               Cancel
             </Button>
           </div>
@@ -161,19 +252,20 @@ export const StaffEdit = () => {
   );
 };
 
-type FieldProps = {
+type TextFieldProps = {
   form: ReturnType<typeof useForm<BaseRecord, HttpError, StaffEditValues>>;
   name: keyof StaffEditValues;
   label: string;
   type?: string;
+  required?: boolean;
 };
 
-function TextField({ form, name, label, type = "text" }: FieldProps) {
+function TextField({ form, name, label, type = "text", required = true }: TextFieldProps) {
   return (
     <FormField
       control={form.control}
       name={name}
-      rules={{ required: `${label} is required` }}
+      rules={required ? { required: `${label} is required` } : undefined}
       render={({ field }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
@@ -185,6 +277,48 @@ function TextField({ form, name, label, type = "text" }: FieldProps) {
               placeholder={`Enter ${label.toLowerCase()}`}
             />
           </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+type SelectFieldProps = {
+  form: ReturnType<typeof useForm<BaseRecord, HttpError, StaffEditValues>>;
+  name: keyof StaffEditValues;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  required?: boolean;
+};
+
+function SelectField({ form, name, label, options, required = true }: SelectFieldProps) {
+  return (
+    <FormField
+      control={form.control}
+      name={name}
+      rules={required ? { required: `${label} is required` } : undefined}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <Select
+            onValueChange={(value) => field.onChange(value === "__none__" ? "" : value)}
+            value={(field.value as string | undefined) || "__none__"}
+          >
+            <FormControl>
+              <SelectTrigger>
+                <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent>
+              {!required ? <SelectItem value="__none__">None</SelectItem> : null}
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <FormMessage />
         </FormItem>
       )}

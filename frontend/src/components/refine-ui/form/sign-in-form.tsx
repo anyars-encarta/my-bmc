@@ -49,7 +49,7 @@ export const SignInForm = () => {
       open?.({
         type: "success",
         message: "Login successful",
-        description: "Welcome back to the BMC payments dashboard.",
+        description: "Welcome to Encarta Hospital Management Dashboard.",
       });
     } catch (error) {
       const message =
@@ -75,14 +75,13 @@ export const SignInForm = () => {
           <div className="sign-in-mobile-hero sign-in-card-enter lg:hidden">
             <div className="sign-in-mobile-copy">
               <span className="sign-in-hero-kicker w-fit border-cyan-200/80 bg-cyan-50 text-cyan-700 backdrop-blur-none">
-                BMC Finance Desk
+                Encarta Hospital Management Suite
               </span>
               <h2 className="sign-in-mobile-title">
-                Secure payment review starts here.
+                Secure hospital management starts here.
               </h2>
               <p className="sign-in-mobile-description">
-                Sign in to manage bulk disbursements, approvals, and facility
-                setup from one workspace.
+                Sign in to manage patient appointments and hospital administration all in one workspace.
               </p>
             </div>
 
@@ -102,13 +101,13 @@ export const SignInForm = () => {
               className={cn("px-0", "sign-in-fade-up", "sign-in-delay-1")}
             >
               <span className="sign-in-hero-kicker w-fit border-cyan-200/80 bg-cyan-50 text-cyan-700 backdrop-blur-none">
-                Payment Operations
+                Encarta Hospital Management Suite
               </span>
               <CardTitle className="sign-in-title">Sign in</CardTitle>
               <CardDescription
                 className={cn("text-muted-foreground", "font-medium")}
               >
-                Welcome back. Continue to the BMC payments dashboard.
+                Welcome back. Continue to the Encarta Hospital Management Dashboard.
               </CardDescription>
             </CardHeader>
 
@@ -242,22 +241,20 @@ export const SignInForm = () => {
 
         <aside className="sign-in-hero-pane">
           <div className="sign-in-hero-copy sign-in-fade-up sign-in-delay-2">
-            <p className="sign-in-hero-kicker">BMC Finance Desk</p>
+            <p className="sign-in-hero-kicker">Encarta Hospital Management Suite</p>
               <h2 className="text-4xl font-semibold leading-tight tracking-tight text-white">
-                Review, approve, and release bulk payments from one control
-                room.
+                Manage patient appointments and hospital administration efficiently.
               </h2>
             <p className="mt-4 text-sm leading-6 text-white/80">
-              Secure access keeps payment preparation, approvals, and facility
-              setup inside the authenticated workspace.
+              Secure access keeps patient appointments and hospital administration inside the authenticated workspace.
             </p>
 
             <div className="sign-in-hero-pills">
               <span className="sign-in-hero-pill">
-                Protected dashboard access
+                Protected hospital management dashboard access
               </span>
-              <span className="sign-in-hero-pill">Bulk payment controls</span>
-              <span className="sign-in-hero-pill">Fast approval workflow</span>
+              <span className="sign-in-hero-pill">Patient appointment controls</span>
+              <span className="sign-in-hero-pill">Fast administration workflow</span>
             </div>
           </div>
 
@@ -265,10 +262,10 @@ export const SignInForm = () => {
             <div className="sign-in-hero-orb sign-in-hero-orb-one" />
             <div className="sign-in-hero-orb sign-in-hero-orb-two" />
             <img
-              src="/money.gif"
+              src="/hospital.gif"
               height={1000}
               width={1000}
-              alt="Money animation"
+              alt="Hospital animation"
               className="sign-in-hero-image"
             />
           </div>

@@ -34,6 +34,16 @@ export const StaffList = () => {
         id: "momoNumber",
         header: "MoMo Number",
       }),
+      helper.accessor("staffCategory", {
+        id: "staffCategory",
+        header: "Category",
+        cell: ({ row }) => row.original.staffCategory || "-",
+      }),
+      helper.accessor("scheduleMode", {
+        id: "scheduleMode",
+        header: "Schedule",
+        cell: ({ row }) => row.original.scheduleMode || "-",
+      }),
       helper.accessor("status", {
         id: "status",
         header: "Status",
@@ -48,9 +58,9 @@ export const StaffList = () => {
         header: "Actions",
         cell: ({ row }) => (
           <div className="flex gap-2">
-            <EditButton recordItemId={row.original.id} size="sm" />
-            <ShowButton recordItemId={row.original.id} size="sm" />
-            <DeleteButton recordItemId={row.original.id} size="sm" />
+            <EditButton recordItemId={row.original.id} size="sm" className="cursor-pointer" />
+            <ShowButton recordItemId={row.original.id} size="sm" className="cursor-pointer" />
+            <DeleteButton recordItemId={row.original.id} size="sm" className="cursor-pointer" />
           </div>
         ),
         size: 280,

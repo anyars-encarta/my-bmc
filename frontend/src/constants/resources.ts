@@ -2,6 +2,7 @@ import {
   BanknoteArrowDown,
   ClipboardCheck,
   Coins,
+  Building2,
   LayoutDashboard,
   Layers3,
   Settings2,
@@ -26,6 +27,12 @@ export const appResources: AppResource[] = [
     list: "/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    name: "org-units",
+    list: "/org-units",
+    label: "Org Units",
+    icon: Building2,
   },
   {
     name: "staff",

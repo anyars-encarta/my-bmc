@@ -77,8 +77,8 @@ const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
 const requestRecipients = async <T,>(
   url: string,
-  signal?: AbortSignal,
   init?: RequestInit,
+  signal?: AbortSignal,
 ): Promise<T> => {
   const response = await fetch(url, {
     credentials: "include",
@@ -131,6 +131,7 @@ export const ApprovalReviewPage = () => {
 
     const nextPayment = await requestRecipients<ApprovalPayment>(
       `${apiBase}/payments/${paymentId}`,
+      undefined,
       signal,
     );
     setPayment(nextPayment);
@@ -141,6 +142,7 @@ export const ApprovalReviewPage = () => {
 
     const nextRecipients = await requestRecipients<ApprovalRecipient[]>(
       `${apiBase}/payments/${paymentId}/recipients`,
+      undefined,
       signal,
     );
     setRecipients(nextRecipients);

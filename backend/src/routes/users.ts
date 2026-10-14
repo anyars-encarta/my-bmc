@@ -149,7 +149,10 @@ router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const isSelf = req.user?.id === id;
-    const isAdmin = req.user?.role === "admin";
+    const isAdmin =
+      req.user?.legacyRole === "admin" ||
+      req.user?.roles?.includes("SUPER_ADMIN") ||
+      req.user?.roles?.includes("HOSPITAL_ADMIN");
 
     // Only admins can update other users
     if (!isSelf && !isAdmin) {
@@ -319,7 +322,11 @@ router.delete("/:id", async (req, res) => {
     const { id } = req.params;
 
     // Only admins can delete users
-    if (req.user?.role !== "admin") {
+    const canDelete =
+      req.user?.legacyRole === "admin" ||
+      req.user?.roles?.includes("SUPER_ADMIN") ||
+      req.user?.roles?.includes("HOSPITAL_ADMIN");
+    if (!canDelete) {
       return res.status(403).json({
         success: false,
         error: "Only administrators can delete users.",

@@ -1,0 +1,133 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BMC HAMS API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/me": {
+      "get": {
+        "summary": "Current authenticated profile",
+        "responses": {
+          "200": {
+            "description": "Current user profile and permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponseEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "summary": "List users",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
+          { "name": "sort", "in": "query", "schema": { "type": "string" } },
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "role", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponseEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "required": ["page", "limit", "total", "totalPages", "hasMore"],
+        "properties": {
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "total": { "type": "integer" },
+          "totalPages": { "type": "integer" },
+          "hasMore": { "type": "boolean" }
+        }
+      },
+      "ProblemError": {
+        "type": "object",
+        "required": ["type", "title", "status", "error", "message", "requestId"],
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "code": { "type": "string" },
+          "requestId": { "type": "string" },
+          "details": {}
+        }
+      },
+      "MePayload": {
+        "type": "object",
+        "required": ["user", "roles", "unitScopes", "permissions"],
+        "properties": {
+          "user": {
+            "type": "object",
+            "required": ["id", "name", "email", "status"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "email": { "type": "string", "format": "email" },
+              "status": { "type": "string" }
+            }
+          },
+          "roles": { "type": "array", "items": { "type": "string" } },
+          "unitScopes": { "type": "array", "items": { "type": "object" } },
+          "permissions": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "MeResponseEnvelope": {
+        "type": "object",
+        "required": ["data"],
+        "properties": {
+          "data": { "$ref": "#/components/schemas/MePayload" }
+        }
+      },
+      "UserListResponseEnvelope": {
+        "type": "object",
+        "required": ["data", "pagination"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "email", "status", "roles", "permissions"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "email": { "type": "string", "format": "email" },
+                "status": { "type": "string" },
+                "roles": { "type": "array", "items": { "type": "string" } },
+                "permissions": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      }
+    }
+  }
+}

@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth.js";
 import { db } from "../db/index.js";
 import { user } from "../db/schema/index.js";
+import { loadUserRoles } from "../lib/platform.js";
+import { forbidden, unauthorized } from "../lib/errors.js";
 
 const requireAuth = async (
   req: Request,
@@ -17,10 +19,7 @@ const requireAuth = async (
     });
 
     if (!session?.user) {
-      return res.status(401).json({
-        error: "Unauthorized",
-        message: "You must be logged in to access this resource.",
-      });
+      throw unauthorized("You must be logged in to access this resource.");
     }
 
     const [currentUser] = await db
@@ -30,33 +29,23 @@ const requireAuth = async (
       .limit(1);
 
     if (!currentUser || currentUser.status === "inactive") {
-      return res.status(403).json({
-        error: "Forbidden",
-        message: "Your account is inactive. Contact an administrator.",
-      });
+      throw forbidden("Your account is inactive. Contact an administrator.", "ACCOUNT_INACTIVE");
     }
 
-    if (currentUser.role !== "admin" && currentUser.role !== "accounts") {
-      return res.status(403).json({
-        error: "Forbidden",
-        message: "Your account role is not recognized.",
-      });
-    }
+    const roles = await loadUserRoles(session.user.id, currentUser.role);
 
     req.user = {
       id: session.user.id,
       email: session.user.email,
-      role: currentUser.role,
+      role: roles[0] ?? null,
+      roles,
+      legacyRole: currentUser.role,
       name: session.user.name,
     };
 
     next();
   } catch (error) {
-    console.error("Authentication middleware error:", error);
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Invalid or expired session. Please log in again.",
-    });
+    next(error);
   }
 };
 
