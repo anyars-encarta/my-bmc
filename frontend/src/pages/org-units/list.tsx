@@ -18,6 +18,7 @@ import { BACKEND_BASE_URL } from "@/constants";
 import { orgUnitTypeOptions } from "@/constants/options";
 import type { OrgUnitRecord } from "@/types/domain";
 import { createAuthHeaders } from "@/providers/me";
+import PageLoader from "@/components/PageLoader";
 
 type OrgUnitPayload = {
   parentId?: string | null;
@@ -181,7 +182,7 @@ export const OrgUnitList = () => {
               <div className="mt-4 flex flex-wrap gap-2">
                 {flatUnits.map((unit) => (
                   <Button key={unit.id} variant="outline" size="sm" className="cursor-pointer" onClick={() => startEdit(unit)}>
-                    Edit {unit.name}
+                    Edit ${unit.name}
                   </Button>
                 ))}
               </div>
@@ -276,7 +277,12 @@ export const OrgUnitList = () => {
             </label>
             <div className="flex gap-2 pt-2">
               <Button className="cursor-pointer" onClick={submit} disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : editingId ? "Update Unit" : "Create Unit"}
+                {isSubmitting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <PageLoader inline />
+                      Saving...
+                  </span>
+                ) : editingId ? "Update Unit" : "Create Unit"}
               </Button>
               {editingId ? (
                 <Button variant="outline" className="cursor-pointer" onClick={resetForm}>
