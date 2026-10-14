@@ -132,6 +132,8 @@ export interface SetupRecord {
   email?: string;
   address?: string;
   logoUrl?: string;
+  hosted: boolean;
+  hostingExpiryDate?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

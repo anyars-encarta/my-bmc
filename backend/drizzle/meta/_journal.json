@@ -57,6 +57,13 @@
       "when": 1792489860000,
       "tag": "0007_sprint2_org_staff",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791984368655,
+      "tag": "0008_bitter_ultimatum",
+      "breakpoints": true
     }
   ]
 }

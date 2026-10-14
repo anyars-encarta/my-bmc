@@ -40,17 +40,17 @@ export const SignInForm = () => {
     setErrorMessage(null);
     setSigningIn(true);
     try {
-      await login({
+      const result = await login({
         email,
         password,
         rememberMe,
       });
 
-      open?.({
-        type: "success",
-        message: "Login successful",
-        description: "Welcome to Encarta Hospital Management Dashboard.",
-      });
+      if (!result?.success) {
+        const message =
+          result?.error?.message || "Invalid email or password.";
+        throw new Error(message);
+      }
     } catch (error) {
       const message =
         error instanceof Error

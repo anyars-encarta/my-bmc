@@ -21,7 +21,10 @@ BEGIN
     );
 END
 $$;
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS audit_entity_idx ON audit_log(entity_type, entity_id, occurred_at DESC);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS audit_patient_idx ON audit_log(patient_id, occurred_at DESC) WHERE patient_id IS NOT NULL;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS audit_actor_idx ON audit_log(actor_user_id, occurred_at DESC);
