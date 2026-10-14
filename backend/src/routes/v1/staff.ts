@@ -1,25 +1,54 @@
-import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { insertStaffSchema, staff, updateStaffSchema } from "../../db/schema/index.js";
+import {
+  insertStaffSchema,
+  jobRole,
+  orgUnit,
+  staff,
+  staffAssignment,
+  staffLicense,
+  updateStaffSchema,
+} from "../../db/schema/index.js";
 import { badRequest, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
-import { requireAnyRole } from "../../lib/platform.js";
+import { isAppRole, requireAnyRole } from "../../lib/platform.js";
+import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
 
 const router = Router();
 
-const staffCreateSchema = insertStaffSchema.extend({
-  userId: z.string().optional(),
+const STAFF_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"] as const;
+
+const licenseCreateSchema = z.object({
+  licensingBody: z.enum(["MDC", "NMC", "PC", "HPC", "AHPC", "OTHER"]),
+  licenceNo: z.string().min(1).max(40),
+  issuedOn: z.string().date().optional(),
+  expiresOn: z.string().date(),
+  status: z.enum(["ACTIVE", "EXPIRED", "SUSPENDED", "REVOKED"]).default("ACTIVE"),
+  attachmentId: z.string().uuid().optional(),
+  note: z.string().max(300).optional(),
 });
 
-const parseRouteId = (value: string | string[] | undefined) => {
-  if (Array.isArray(value)) return value[0];
-  return value;
-};
+const staffCreateSchema = insertStaffSchema
+  .extend({
+    userId: z.string().optional(),
+    orgUnitId: z.string().uuid().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.staffCategory === "NON_CLINICAL" && value.scheduleMode !== "FIXED_WEEKDAY") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scheduleMode"],
+        message: "Non-clinical staff must use FIXED_WEEKDAY schedule mode.",
+      });
+    }
+  });
 
-const resolveSort = (field: string, descending: boolean) => {
+const parseRouteId = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+const mapSort = (field: string, descending: boolean) => {
   if (field === "firstName") return descending ? desc(staff.firstName) : asc(staff.firstName);
   if (field === "lastName") return descending ? desc(staff.lastName) : asc(staff.lastName);
   if (field === "email") return descending ? desc(staff.email) : asc(staff.email);
@@ -27,13 +56,95 @@ const resolveSort = (field: string, descending: boolean) => {
   return descending ? desc(staff.createdAt) : asc(staff.createdAt);
 };
 
+const canViewPayout = (roles: string[]) =>
+  roles.some((role) => ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"].includes(role));
+
+const sanitizeStaffRecord = (record: typeof staff.$inferSelect, roles: string[]) => {
+  if (canViewPayout(roles)) {
+    return record;
+  }
+
+  return {
+    ...record,
+    momoName: null,
+    momoNumber: "***********",
+  };
+};
+
+const parseAppRoles = (roles: string[] | undefined) =>
+  (roles ?? []).filter((role): role is Parameters<typeof resolveManagedUnitIds>[1][number] => isAppRole(role));
+
+const validateJobRoleCategory = async (jobRoleId: string | null | undefined, staffCategory: string | undefined) => {
+  if (!jobRoleId || !staffCategory) return;
+  const [role] = await db.select().from(jobRole).where(eq(jobRole.id, jobRoleId)).limit(1);
+  if (!role) {
+    throw validationError("Job role not found.", "JOB_ROLE_NOT_FOUND");
+  }
+  if (role.staffCategory !== staffCategory) {
+    throw validationError(
+      "Job role category must match staff category.",
+      "STAFF_JOB_ROLE_CATEGORY_MISMATCH",
+      { expected: staffCategory, actual: role.staffCategory },
+    );
+  }
+};
+
+const ensureStaffRules = async (payload: Partial<typeof staff.$inferInsert>) => {
+  const category = payload.staffCategory;
+  const mode = payload.scheduleMode;
+  if (category === "NON_CLINICAL" && mode && mode !== "FIXED_WEEKDAY") {
+    throw validationError(
+      "Non-clinical staff cannot be rostered.",
+      "STAFF_NONCLINICAL_FIXED",
+      { staffCategory: category, scheduleMode: mode },
+    );
+  }
+  await validateJobRoleCategory(payload.jobRoleId, category);
+};
+
+const attachCurrentOrgUnits = async <T extends { id: string }>(rows: T[]) => {
+  if (rows.length === 0) return rows.map((row) => ({ ...row, orgUnitId: null }));
+
+  const today = new Date().toISOString().slice(0, 10);
+  const assignments = await db
+    .select({
+      staffId: staffAssignment.staffId,
+      orgUnitId: staffAssignment.orgUnitId,
+      effectiveFrom: staffAssignment.effectiveFrom,
+    })
+    .from(staffAssignment)
+    .where(
+      and(
+        inArray(
+          staffAssignment.staffId,
+          rows.map((row) => row.id),
+        ),
+        lte(staffAssignment.effectiveFrom, today),
+        or(eq(staffAssignment.effectiveTo, null), gte(staffAssignment.effectiveTo, today)),
+      ),
+    )
+    .orderBy(desc(staffAssignment.effectiveFrom));
+
+  const orgByStaff = new Map<string, string>();
+  for (const assignment of assignments) {
+    if (!orgByStaff.has(assignment.staffId)) {
+      orgByStaff.set(assignment.staffId, assignment.orgUnitId);
+    }
+  }
+
+  return rows.map((row) => ({ ...row, orgUnitId: orgByStaff.get(row.id) ?? null }));
+};
+
 router.get("/", async (req, res, next) => {
   try {
     const query = parseListQuery(req, {
       sortable: ["firstName", "lastName", "email", "employeeId", "createdAt"],
-      filterable: ["status", "department", "staffCategory", "scheduleMode"],
+      filterable: ["status", "department", "staffCategory", "scheduleMode", "orgUnitId", "jobRoleId"],
       defaultSort: "-createdAt",
     });
+
+    const roles = req.user?.roles ?? [];
+    const managedIds = req.user?.id ? await resolveManagedUnitIds(req.user.id, parseAppRoles(roles)) : [];
 
     const filters = [];
     if (query.q) {
@@ -42,50 +153,55 @@ router.get("/", async (req, res, next) => {
           ilike(staff.firstName, `%${query.q}%`),
           ilike(staff.lastName, `%${query.q}%`),
           ilike(staff.email, `%${query.q}%`),
+          ilike(staff.employeeId, `%${query.q}%`),
         ),
       );
     }
 
+    let filterOrgUnitId: string | null = null;
     for (const filter of query.filters) {
       if (filter.operator !== "eq" || typeof filter.value !== "string") {
         continue;
       }
-
-      if (filter.field === "status") {
-        filters.push(eq(staff.status, filter.value as "active" | "inactive"));
-      }
-      if (filter.field === "department") {
-        filters.push(eq(staff.department, filter.value));
-      }
-      if (filter.field === "staffCategory") {
-        filters.push(eq(staff.staffCategory, filter.value as "CLINICAL" | "NON_CLINICAL"));
-      }
-      if (filter.field === "scheduleMode") {
-        filters.push(eq(staff.scheduleMode, filter.value as "FIXED_WEEKDAY" | "ROSTERED"));
-      }
+      if (filter.field === "status") filters.push(eq(staff.status, filter.value as "active" | "inactive"));
+      if (filter.field === "department") filters.push(eq(staff.department, filter.value));
+      if (filter.field === "staffCategory") filters.push(eq(staff.staffCategory, filter.value as "CLINICAL" | "NON_CLINICAL"));
+      if (filter.field === "scheduleMode") filters.push(eq(staff.scheduleMode, filter.value as "FIXED_WEEKDAY" | "ROSTERED"));
+      if (filter.field === "jobRoleId") filters.push(eq(staff.jobRoleId, filter.value));
+      if (filter.field === "orgUnitId") filterOrgUnitId = filter.value;
     }
 
     const where = filters.length > 0 ? and(...filters) : undefined;
     const sort = query.sort[0] ?? { field: "createdAt", descending: true };
-
     const [rows, totalRows] = await Promise.all([
-      db
-        .select()
-        .from(staff)
-        .where(where)
-        .orderBy(resolveSort(sort.field, sort.descending))
-        .limit(query.limit)
-        .offset(query.offset),
+      db.select().from(staff).where(where).orderBy(mapSort(sort.field, sort.descending)).limit(query.limit).offset(query.offset),
       db.select({ total: count() }).from(staff).where(where),
     ]);
 
-    res.json(toPageResponse(rows, query, Number(totalRows[0]?.total ?? 0)));
+    let withUnits = await attachCurrentOrgUnits(rows);
+
+    if (managedIds !== null) {
+      const allowed = new Set(managedIds);
+      withUnits = withUnits.filter((row) => row.orgUnitId && allowed.has(row.orgUnitId));
+    }
+
+    if (filterOrgUnitId) {
+      withUnits = withUnits.filter((row) => row.orgUnitId === filterOrgUnitId);
+    }
+
+    res.json(
+      toPageResponse(
+        withUnits.map((row) => sanitizeStaffRecord(row, roles)),
+        query,
+        managedIds === null && !filterOrgUnitId ? Number(totalRows[0]?.total ?? withUnits.length) : withUnits.length,
+      ),
+    );
   } catch (error) {
     next(error);
   }
 });
 
-router.post("/", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) => {
   try {
     const parsed = staffCreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -94,8 +210,21 @@ router.post("/", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"])
       });
     }
 
+    await ensureStaffRules(parsed.data);
+
     const [created] = await db.insert(staff).values(parsed.data).returning();
-    res.status(201).json({ data: created });
+
+    if (parsed.data.orgUnitId) {
+      await db.insert(staffAssignment).values({
+        staffId: created.id,
+        orgUnitId: parsed.data.orgUnitId,
+        assignmentType: "PRIMARY",
+        effectiveFrom: parsed.data.hireDate ?? new Date().toISOString().slice(0, 10),
+        reason: "INITIAL",
+      });
+    }
+
+    res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []) });
   } catch (error) {
     next(error);
   }
@@ -112,44 +241,289 @@ router.get("/:id", async (req, res, next) => {
     if (!record) {
       throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
     }
-    res.json({ data: record });
+
+    const [withUnit] = await attachCurrentOrgUnits([record]);
+    res.json({ data: sanitizeStaffRecord(withUnit, req.user?.roles ?? []) });
   } catch (error) {
     next(error);
   }
 });
 
-router.patch(
-  "/:id",
-  requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]),
-  async (req, res, next) => {
-    try {
-      const staffId = parseRouteId(req.params.id);
-      if (!staffId) {
-        throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
-      }
+router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
 
-      const parsed = updateStaffSchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw validationError("Validation failed.", "VALIDATION_FAILED", {
-          fieldErrors: parsed.error.flatten().fieldErrors,
+    const parsed = updateStaffSchema
+      .extend({ orgUnitId: z.string().uuid().optional() })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      throw validationError("Validation failed.", "VALIDATION_FAILED", {
+        fieldErrors: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    await ensureStaffRules(parsed.data);
+
+    const updatePayload = Object.fromEntries(
+      Object.entries(parsed.data).filter(([key, value]) => key !== "orgUnitId" && value !== undefined),
+    );
+
+    const [updated] = await db
+      .update(staff)
+      .set({ ...updatePayload, updatedAt: new Date() })
+      .where(eq(staff.id, staffId))
+      .returning();
+
+    if (!updated) {
+      throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    }
+
+    if (parsed.data.orgUnitId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const [current] = await db
+        .select()
+        .from(staffAssignment)
+        .where(
+          and(
+            eq(staffAssignment.staffId, staffId),
+            eq(staffAssignment.assignmentType, "PRIMARY"),
+            lte(staffAssignment.effectiveFrom, today),
+            or(eq(staffAssignment.effectiveTo, null), gte(staffAssignment.effectiveTo, today)),
+          ),
+        )
+        .orderBy(desc(staffAssignment.effectiveFrom))
+        .limit(1);
+
+      if (!current || current.orgUnitId !== parsed.data.orgUnitId) {
+        if (current && current.effectiveTo === null) {
+          await db
+            .update(staffAssignment)
+            .set({ effectiveTo: today })
+            .where(eq(staffAssignment.id, current.id));
+        }
+        await db.insert(staffAssignment).values({
+          staffId,
+          orgUnitId: parsed.data.orgUnitId,
+          assignmentType: "PRIMARY",
+          effectiveFrom: today,
+          reason: "TRANSFER",
         });
       }
+    }
 
-      const updatePayload = Object.fromEntries(
-        Object.entries(parsed.data).filter(([, value]) => value !== undefined),
-      );
+    const [withUnit] = await attachCurrentOrgUnits([updated]);
+    res.json({ data: sanitizeStaffRecord(withUnit, req.user?.roles ?? []) });
+  } catch (error) {
+    next(error);
+  }
+});
 
-      const [updated] = await db
-        .update(staff)
-        .set({ ...updatePayload, updatedAt: new Date() })
-        .where(eq(staff.id, staffId))
-        .returning();
+router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
 
-      if (!updated) {
-        throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    if (!reason) {
+      throw validationError("Deactivation reason is required.", "STAFF_DEACTIVATION_REASON_REQUIRED");
+    }
+
+    const [updated] = await db
+      .update(staff)
+      .set({ status: "inactive", terminationDate: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
+      .where(eq(staff.id, staffId))
+      .returning();
+
+    if (!updated) {
+      throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    }
+
+    res.json({ data: { ...updated, deactivationReason: reason } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:id/licenses", async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
+
+    const list = await db.select().from(staffLicense).where(eq(staffLicense.staffId, staffId)).orderBy(desc(staffLicense.expiresOn));
+    res.json({ data: list });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/licenses", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
+
+    const parsed = licenseCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw validationError("Validation failed.", "VALIDATION_FAILED", {
+        fieldErrors: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const [created] = await db.insert(staffLicense).values({ ...parsed.data, staffId }).returning();
+    res.status(201).json({ data: created });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch("/:id/licenses/:licenseId", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    const licenseId = parseRouteId(req.params.licenseId);
+    if (!staffId || !licenseId) {
+      throw badRequest("Staff ID and license ID are required.", "STAFF_LICENSE_ID_REQUIRED");
+    }
+
+    const parsed = licenseCreateSchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      throw validationError("Validation failed.", "VALIDATION_FAILED", {
+        fieldErrors: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const updateData = Object.fromEntries(
+      Object.entries(parsed.data).filter(([, value]) => value !== undefined),
+    );
+    const [updated] = await db
+      .update(staffLicense)
+      .set(updateData)
+      .where(and(eq(staffLicense.id, licenseId), eq(staffLicense.staffId, staffId)))
+      .returning();
+
+    if (!updated) {
+      throw notFound("License not found.", "STAFF_LICENSE_NOT_FOUND");
+    }
+
+    res.json({ data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  "/migrations/department-org-units/dry-run",
+  requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]),
+  async (_req, res, next) => {
+    try {
+      const staffRows = await db.select().from(staff).orderBy(asc(staff.department), asc(staff.lastName));
+      const existingUnits = await db.select().from(orgUnit);
+      const byName = new Map(existingUnits.map((unit) => [unit.name.trim().toLowerCase(), unit]));
+
+      const normalizedDepartments = new Map<
+        string,
+        { rawValue: string; staffCount: number; mappedOrgUnitId: string | null; unmappedStaffIds: string[] }
+      >();
+
+      for (const row of staffRows) {
+        const raw = (row.department ?? "").trim();
+        if (!raw) continue;
+        const key = raw.toLowerCase();
+        const existing = normalizedDepartments.get(key) ?? {
+          rawValue: raw,
+          staffCount: 0,
+          mappedOrgUnitId: byName.get(key)?.id ?? null,
+          unmappedStaffIds: [],
+        };
+        existing.staffCount += 1;
+        if (!existing.mappedOrgUnitId) {
+          existing.unmappedStaffIds.push(row.id);
+        }
+        normalizedDepartments.set(key, existing);
       }
 
-      res.json({ data: updated });
+      const report = Array.from(normalizedDepartments.values()).sort((a, b) =>
+        a.rawValue.localeCompare(b.rawValue),
+      );
+      res.json({
+        data: {
+          totalDepartments: report.length,
+          unmappedDepartments: report.filter((row) => !row.mappedOrgUnitId).length,
+          report,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/migrations/department-org-units/apply",
+  requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]),
+  async (_req, res, next) => {
+    try {
+      const staffRows = await db.select().from(staff).where(eq(staff.status, "active"));
+      const existingUnits = await db.select().from(orgUnit);
+      const byName = new Map(existingUnits.map((unit) => [unit.name.trim().toLowerCase(), unit]));
+      const createdUnitIds: string[] = [];
+      const today = new Date().toISOString().slice(0, 10);
+
+      await db.transaction(async (tx) => {
+        for (const row of staffRows) {
+          const department = (row.department ?? "").trim();
+          if (!department) continue;
+          const key = department.toLowerCase();
+          let unit = byName.get(key);
+
+          if (!unit) {
+            const code = department
+              .toUpperCase()
+              .replace(/[^A-Z0-9]+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 30) || `UNIT_${createdUnitIds.length + 1}`;
+            const [createdUnit] = await tx
+              .insert(orgUnit)
+              .values({
+                code,
+                name: department,
+                unitType: "DEPARTMENT",
+                isClinical: false,
+                operates24h: false,
+                active: true,
+              })
+              .returning();
+            unit = createdUnit;
+            byName.set(key, unit);
+            createdUnitIds.push(unit.id);
+          }
+
+          const [existingPrimary] = await tx
+            .select()
+            .from(staffAssignment)
+            .where(and(eq(staffAssignment.staffId, row.id), eq(staffAssignment.assignmentType, "PRIMARY")))
+            .limit(1);
+
+          if (!existingPrimary) {
+            await tx.insert(staffAssignment).values({
+              staffId: row.id,
+              orgUnitId: unit.id,
+              assignmentType: "PRIMARY",
+              effectiveFrom: row.hireDate ?? today,
+              reason: "INITIAL",
+            });
+          }
+        }
+      });
+
+      res.json({ data: { createdUnits: createdUnitIds.length, message: "Department migration applied." } });
     } catch (error) {
       next(error);
     }

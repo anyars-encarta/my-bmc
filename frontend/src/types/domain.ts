@@ -1,4 +1,6 @@
 export type StaffStatus = "active" | "inactive";
+export type StaffCategory = "CLINICAL" | "NON_CLINICAL";
+export type ScheduleMode = "FIXED_WEEKDAY" | "ROSTERED";
 
 export type PaymentStatus =
   | "draft"
@@ -20,9 +22,59 @@ export interface StaffRecord {
   momoNumber: string;
   momoName?: string;
   department?: string;
+  orgUnitId?: string | null;
+  jobRoleId?: string | null;
+  defaultShiftTypeId?: string | null;
+  badgeNumber?: string | null;
+  hireDate?: string | null;
+  terminationDate?: string | null;
+  userId?: string | null;
+  staffCategory?: StaffCategory;
+  scheduleMode?: ScheduleMode;
   position?: string;
   phone?: string;
   status: StaffStatus;
+}
+
+export interface OrgUnitRecord {
+  id: string;
+  parentId?: string | null;
+  code: string;
+  name: string;
+  unitType: "DIVISION" | "DEPARTMENT" | "UNIT" | "WARD" | "CLINIC" | "THEATRE" | "SERVICE_POINT";
+  isClinical: boolean;
+  operates24h: boolean;
+  active: boolean;
+  headStaffId?: string | null;
+  children?: OrgUnitRecord[];
+}
+
+export interface ShiftTypeRecord {
+  id: string;
+  code: string;
+  name: string;
+  category: "STANDARD" | "MORNING" | "AFTERNOON" | "NIGHT";
+  startTime: string;
+  endTime: string;
+  active: boolean;
+}
+
+export interface JobRoleRecord {
+  id: string;
+  code: string;
+  name: string;
+  staffCategory: StaffCategory;
+  requiresLicense: boolean;
+}
+
+export interface StaffLicenseRecord {
+  id: string;
+  staffId: string;
+  licensingBody: "MDC" | "NMC" | "PC" | "HPC" | "AHPC" | "OTHER";
+  licenceNo: string;
+  issuedOn?: string | null;
+  expiresOn: string;
+  status: "ACTIVE" | "EXPIRED" | "SUSPENDED" | "REVOKED";
 }
 
 export interface CategoryRecord {

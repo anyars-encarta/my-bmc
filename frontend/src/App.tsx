@@ -28,6 +28,7 @@ import { DashboardPage } from "./pages/dashboard";
 import { DisbursementList } from "./pages/disbursements";
 import { ForgotPassword } from "./pages/forgot-password";
 import { Login } from "./pages/login";
+import { OrgUnitList } from "./pages/org-units";
 import {
   PaymentCreate,
   PaymentEdit,
@@ -173,6 +174,7 @@ function App() {
                     <Route path="edit/:id" element={<StaffEdit />} />
                     <Route path="show/:id" element={<StaffShow />} />
                   </Route>
+                  <Route path="/org-units" element={<OrgUnitList />} />
                   <Route path="/categories">
                     <Route index element={<CategoryList />} />
                     <Route path="create" element={<CategoryCreate />} />

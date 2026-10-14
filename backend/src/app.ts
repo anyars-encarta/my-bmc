@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
 import securityMiddleware from "./middleware/security.js";
+import securityHeaders from "./middleware/securityHeaders.js";
 import requireAuth from "./middleware/requireAuth.js";
 import { auth } from "./lib/auth.js";
 import staffRoutes from "./routes/staff.js";
@@ -81,6 +82,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use(securityHeaders);
 
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
