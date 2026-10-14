@@ -262,8 +262,8 @@ export const DashboardPage = () => {
           <CardContent>
             <Tabs defaultValue="officer" className="w-full">
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="officer">Officer</TabsTrigger>
-                <TabsTrigger value="approver">Approver</TabsTrigger>
+                <TabsTrigger value="officer" className="cursor-pointer">Officer</TabsTrigger>
+                <TabsTrigger value="approver" className="cursor-pointer">Approver</TabsTrigger>
               </TabsList>
               <TabsContent value="officer" className="space-y-3 pt-3">
                 <p className="text-sm text-muted-foreground">
