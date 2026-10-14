@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -39,6 +39,41 @@ const buildTree = (rows: Array<typeof orgUnit.$inferSelect>) => {
   }
 
   return roots;
+};
+
+const ensureValidParent = async (unitId: string, parentId: string | null) => {
+  if (parentId === null) {
+    return;
+  }
+  if (parentId === unitId) {
+    throw validationError("An org unit cannot be its own parent.", "ORG_UNIT_PARENT_INVALID");
+  }
+
+  const units = await db.select({ id: orgUnit.id, parentId: orgUnit.parentId }).from(orgUnit);
+  if (!units.some((unit) => unit.id === parentId)) {
+    throw validationError("Parent org unit not found.", "ORG_UNIT_PARENT_INVALID");
+  }
+
+  const childrenByParent = new Map<string, string[]>();
+  for (const unit of units) {
+    if (!unit.parentId) continue;
+    const current = childrenByParent.get(unit.parentId) ?? [];
+    current.push(unit.id);
+    childrenByParent.set(unit.parentId, current);
+  }
+
+  const stack = [...(childrenByParent.get(unitId) ?? [])];
+  const descendants = new Set<string>();
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || descendants.has(current)) continue;
+    descendants.add(current);
+    stack.push(...(childrenByParent.get(current) ?? []));
+  }
+
+  if (descendants.has(parentId)) {
+    throw validationError("Parent org unit cannot be a descendant.", "ORG_UNIT_PARENT_INVALID");
+  }
 };
 
 router.get("/", async (req, res, next) => {
@@ -162,6 +197,10 @@ router.patch("/:id", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGE
     const updateData = Object.fromEntries(
       Object.entries(parsed.data).filter(([, value]) => value !== undefined),
     );
+    if ("parentId" in updateData) {
+      await ensureValidParent(unitId, (updateData.parentId as string | null | undefined) ?? null);
+    }
+
     const [updated] = await db.update(orgUnit).set(updateData).where(eq(orgUnit.id, unitId)).returning();
     if (!updated) {
       throw notFound("Org unit not found.", "ORG_UNIT_NOT_FOUND");
@@ -201,7 +240,7 @@ router.get("/:id/staff", async (req, res, next) => {
         and(
           eq(staffAssignment.orgUnitId, unitId),
           lte(staffAssignment.effectiveFrom, onDate),
-          or(eq(staffAssignment.effectiveTo, null), gte(staffAssignment.effectiveTo, onDate)),
+          or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, onDate)),
         ),
       )
       .orderBy(asc(staff.lastName), asc(staff.firstName));

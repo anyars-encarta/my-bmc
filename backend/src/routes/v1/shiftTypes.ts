@@ -107,12 +107,19 @@ router.patch("/:id", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGE
       });
     }
 
+    const [existing] = await db.select().from(shiftType).where(eq(shiftType.id, shiftId)).limit(1);
+    if (!existing) {
+      throw notFound("Shift type not found.", "SHIFT_TYPE_NOT_FOUND");
+    }
+
     const updateData = Object.fromEntries(
       Object.entries(parsed.data).filter(([, value]) => value !== undefined),
     ) as Record<string, unknown>;
 
-    if (updateData.startTime && updateData.endTime) {
-      updateData.crossesMidnight = String(updateData.endTime) <= String(updateData.startTime);
+    if (updateData.startTime !== undefined || updateData.endTime !== undefined) {
+      const nextStart = typeof updateData.startTime === "string" ? updateData.startTime : existing.startTime;
+      const nextEnd = typeof updateData.endTime === "string" ? updateData.endTime : existing.endTime;
+      updateData.crossesMidnight = nextEnd <= nextStart;
     }
 
     const [updated] = await db.update(shiftType).set(updateData).where(eq(shiftType.id, shiftId)).returning();

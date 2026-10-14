@@ -45,9 +45,9 @@ type StaffEditValues = {
   status: string;
   staffCategory: StaffCategory;
   scheduleMode: ScheduleMode;
-  defaultShiftTypeId?: string;
-  jobRoleId?: string;
-  badgeNumber?: string;
+  defaultShiftTypeId?: string | null;
+  jobRoleId?: string | null;
+  badgeNumber?: string | null;
   hireDate?: string;
   terminationDate?: string;
   userId?: string;
@@ -97,32 +97,43 @@ export const StaffEdit = () => {
   const selectedCategory = watch("staffCategory");
 
   useEffect(() => {
+    const fetchPaged = async <T,>(resourcePath: string) => {
+      const records: T[] = [];
+      let page = 1;
+      while (true) {
+        const response = await fetch(`${apiBase}/v1/${resourcePath}?page=${page}&limit=200`, {
+          credentials: "include",
+          headers: createAuthHeaders(),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to load ${resourcePath}: ${response.status}`);
+        }
+
+        const payload = (await response.json()) as {
+          data?: T[];
+          pagination?: { hasMore?: boolean };
+        };
+
+        records.push(...(payload.data ?? []));
+        if (!payload.pagination?.hasMore) {
+          break;
+        }
+        page += 1;
+      }
+      return records;
+    };
+
     const loadReferences = async () => {
       try {
-        const [orgUnitsRes, jobRolesRes, shiftTypesRes] = await Promise.all([
-          fetch(`${apiBase}/v1/org-units?limit=200`, {
-            credentials: "include",
-            headers: createAuthHeaders(),
-          }),
-          fetch(`${apiBase}/v1/job-roles?limit=200`, {
-            credentials: "include",
-            headers: createAuthHeaders(),
-          }),
-          fetch(`${apiBase}/v1/shift-types?limit=200`, {
-            credentials: "include",
-            headers: createAuthHeaders(),
-          }),
+        const [allOrgUnits, allJobRoles, allShiftTypes] = await Promise.all([
+          fetchPaged<OrgUnitRecord>("org-units"),
+          fetchPaged<JobRoleRecord>("job-roles"),
+          fetchPaged<ShiftTypeRecord>("shift-types"),
         ]);
 
-        const [orgPayload, rolePayload, shiftPayload] = await Promise.all([
-          orgUnitsRes.json() as Promise<{ data?: OrgUnitRecord[] }>,
-          jobRolesRes.json() as Promise<{ data?: JobRoleRecord[] }>,
-          shiftTypesRes.json() as Promise<{ data?: ShiftTypeRecord[] }>,
-        ]);
-
-        setOrgUnits(orgPayload.data ?? []);
-        setJobRoles(rolePayload.data ?? []);
-        setShiftTypes(shiftPayload.data ?? []);
+        setOrgUnits(allOrgUnits);
+        setJobRoles(allJobRoles);
+        setShiftTypes(allShiftTypes);
       } catch (error) {
         notify?.({
           type: "error",
@@ -140,9 +151,9 @@ export const StaffEdit = () => {
     onFinish({
       ...values,
       orgUnitId: values.orgUnitId || undefined,
-      defaultShiftTypeId: values.defaultShiftTypeId || undefined,
-      jobRoleId: values.jobRoleId || undefined,
-      badgeNumber: values.badgeNumber || undefined,
+      defaultShiftTypeId: values.defaultShiftTypeId || null,
+      jobRoleId: values.jobRoleId || null,
+      badgeNumber: values.badgeNumber || null,
       hireDate: values.hireDate || undefined,
       terminationDate: values.terminationDate || undefined,
       userId: values.userId || undefined,

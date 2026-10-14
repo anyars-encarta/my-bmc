@@ -3,15 +3,24 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { consent } from "../../db/schema/index.js";
-import { badRequest, validationError } from "../../lib/errors.js";
+import { consent, staff } from "../../db/schema/index.js";
+import { badRequest, forbidden, validationError } from "../../lib/errors.js";
 
 const router = Router();
 
 const consentCreateSchema = z.object({
   subjectType: z.enum(["PATIENT", "STAFF"]),
   subjectId: z.string().uuid(),
-  consentType: z.string().min(1).max(30),
+  consentType: z.enum([
+    "TREATMENT",
+    "DATA_PROCESSING",
+    "SMS_CONTACT",
+    "INSURER_SHARING",
+    "RESEARCH",
+    "PHOTOGRAPHY",
+    "BIOMETRIC_ATTENDANCE",
+    "STAFF_DATA_PROCESSING",
+  ]),
   status: z.enum(["GRANTED", "WITHDRAWN", "DECLINED"]),
   policyVersion: z.string().min(1).max(20),
   captureMethod: z.enum(["PAPER", "ELECTRONIC", "VERBAL_WITNESSED"]),
@@ -21,6 +30,48 @@ const consentCreateSchema = z.object({
   evidenceAttachmentId: z.string().uuid().nullable().optional(),
   note: z.string().nullable().optional(),
 });
+
+const CONSENT_READ_ROLES = [
+  "SUPER_ADMIN",
+  "HOSPITAL_ADMIN",
+  "HR_MANAGER",
+  "REGISTRAR",
+  "RECORDS_OFFICER",
+  "DOCTOR",
+  "NURSE",
+  "DPO",
+] as const;
+const CONSENT_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "REGISTRAR"] as const;
+
+const hasRole = (roles: string[], allowed: readonly string[]) =>
+  roles.some((role) => allowed.includes(role));
+
+const enforceSubjectAccess = async (
+  user: { id?: string; roles?: string[] } | undefined,
+  subjectType: "PATIENT" | "STAFF",
+  subjectId: string,
+  mode: "read" | "write",
+) => {
+  const roles = user?.roles ?? [];
+  const allowedByRole =
+    mode === "write" ? hasRole(roles, CONSENT_WRITE_ROLES) : hasRole(roles, CONSENT_READ_ROLES);
+  if (allowedByRole) {
+    return;
+  }
+
+  if (subjectType === "STAFF" && user?.id) {
+    const [selfStaff] = await db
+      .select({ id: staff.id })
+      .from(staff)
+      .where(and(eq(staff.id, subjectId), eq(staff.userId, user.id)))
+      .limit(1);
+    if (selfStaff) {
+      return;
+    }
+  }
+
+  throw forbidden("Not authorized to access consent for this subject.", "CONSENT_SUBJECT_FORBIDDEN");
+};
 
 router.get("/latest", async (req, res, next) => {
   try {
@@ -38,6 +89,14 @@ router.get("/latest", async (req, res, next) => {
         "CONSENT_QUERY_INVALID",
       );
     }
+    const parsedSubjectId = z.string().uuid().safeParse(subjectId);
+    if (!parsedSubjectId.success) {
+      throw validationError("subjectId must be a valid UUID.", "CONSENT_QUERY_INVALID", {
+        fieldErrors: { subjectId: ["subjectId must be a valid UUID."] },
+      });
+    }
+
+    await enforceSubjectAccess(req.user, subjectType, parsedSubjectId.data, "read");
 
     const [latest] = await db
       .select()
@@ -45,7 +104,7 @@ router.get("/latest", async (req, res, next) => {
       .where(
         and(
           eq(consent.subjectType, subjectType),
-          eq(consent.subjectId, subjectId),
+          eq(consent.subjectId, parsedSubjectId.data),
           eq(consent.consentType, consentType),
         ),
       )
@@ -68,6 +127,8 @@ router.post("/", async (req, res, next) => {
     }
 
     const record = parsed.data;
+    await enforceSubjectAccess(req.user, record.subjectType, record.subjectId, "write");
+
     const [created] = await db
       .insert(consent)
       .values({

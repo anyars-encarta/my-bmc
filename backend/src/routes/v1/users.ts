@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { db } from "../../db/index.js";
 import { appUserRole, user } from "../../db/schema/index.js";
-import { badRequest, conflict, notFound, validationError } from "../../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import { APP_ROLES, isAppRole, requireAnyRole, resolveRolePermissions } from "../../lib/platform.js";
 
@@ -236,6 +236,9 @@ router.post("/:id/roles", requireAnyRole([...LIST_ROLES]), async (req, res, next
         fieldErrors: parsed.error.flatten().fieldErrors,
       });
     }
+    if (parsed.data.role === "SUPER_ADMIN" && !((req.user?.roles ?? []).includes("SUPER_ADMIN"))) {
+      throw forbidden("Only SUPER_ADMIN can assign SUPER_ADMIN role.", "ROLE_ASSIGNMENT_FORBIDDEN");
+    }
 
     const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.id, userId)).limit(1);
     if (!existing) {
@@ -270,6 +273,9 @@ router.patch("/:id/roles", requireAnyRole([...LIST_ROLES]), async (req, res, nex
       throw validationError("Validation failed.", "VALIDATION_FAILED", {
         fieldErrors: parsed.error.flatten().fieldErrors,
       });
+    }
+    if (parsed.data.roles.includes("SUPER_ADMIN") && !((req.user?.roles ?? []).includes("SUPER_ADMIN"))) {
+      throw forbidden("Only SUPER_ADMIN can assign SUPER_ADMIN role.", "ROLE_ASSIGNMENT_FORBIDDEN");
     }
 
     const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.id, userId)).limit(1);
