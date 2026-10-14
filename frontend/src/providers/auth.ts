@@ -83,7 +83,20 @@ export const authProvider: AuthProvider = {
       const session = await getSessionData();
 
       if (session?.user && session?.session) {
-        await fetchMe(true);
+        try {
+          const me = await fetchMe(true);
+          if (!me) {
+            return {
+              authenticated: false,
+              redirectTo: "/login",
+              logout: true,
+            };
+          }
+        } catch {
+          return {
+            authenticated: true,
+          };
+        }
         return {
           authenticated: true,
         };

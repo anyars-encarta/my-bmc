@@ -1,42 +1,12 @@
-/* eslint-disable */
-// Generated from backend/openapi/openapi.json via `npm run types:emit`.
+import type { components, paths } from "./api.generated";
 
-export type ApiPagination = {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  hasMore: boolean;
+export type ApiPagination = components["schemas"]["Pagination"];
+export type ApiProblem = components["schemas"]["ProblemError"];
+
+export type MeResponse = paths["/me"]["get"]["responses"][200]["content"]["application/json"]["data"];
+
+export type MePayload = Omit<components["schemas"]["MePayload"], "unitScopes"> & {
+  unitScopes: MeResponse["unitScopes"];
 };
 
-export type ApiProblem = {
-  type: string;
-  title: string;
-  status: number;
-  error: string;
-  message: string;
-  code?: string;
-  requestId: string;
-  details?: unknown;
-};
-
-export type MePayload = {
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    status: string;
-  };
-  roles: string[];
-  unitScopes: Array<Record<string, unknown>>;
-  permissions: string[];
-};
-
-export type UserListItem = {
-  id: string;
-  name: string;
-  email: string;
-  status: string;
-  roles: string[];
-  permissions: string[];
-};
+export type UserListItem = components["schemas"]["UserListResponseEnvelope"]["data"][number];

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -12,7 +12,7 @@ import {
   staffLicense,
   updateStaffSchema,
 } from "../../db/schema/index.js";
-import { badRequest, notFound, validationError } from "../../lib/errors.js";
+import { badRequest, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import { isAppRole, requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
@@ -120,7 +120,7 @@ const attachCurrentOrgUnits = async <T extends { id: string }>(rows: T[]) => {
           rows.map((row) => row.id),
         ),
         lte(staffAssignment.effectiveFrom, today),
-        or(eq(staffAssignment.effectiveTo, null), gte(staffAssignment.effectiveTo, today)),
+        or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, today)),
       ),
     )
     .orderBy(desc(staffAssignment.effectiveFrom));
@@ -133,6 +133,43 @@ const attachCurrentOrgUnits = async <T extends { id: string }>(rows: T[]) => {
   }
 
   return rows.map((row) => ({ ...row, orgUnitId: orgByStaff.get(row.id) ?? null }));
+};
+
+const ensureManagedStaffAccess = async (
+  user: { id?: string; roles?: string[] } | undefined,
+  staffId: string,
+) => {
+  const [existing] = await db.select({ id: staff.id }).from(staff).where(eq(staff.id, staffId)).limit(1);
+  if (!existing) {
+    throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+  }
+
+  const managedIds = user?.id ? await resolveManagedUnitIds(user.id, parseAppRoles(user.roles)) : [];
+  if (managedIds === null) {
+    return;
+  }
+  if (managedIds.length === 0) {
+    throw forbidden("You do not have access to this staff member.", "STAFF_FORBIDDEN");
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [currentAssignment] = await db
+    .select({ orgUnitId: staffAssignment.orgUnitId })
+    .from(staffAssignment)
+    .where(
+      and(
+        eq(staffAssignment.staffId, staffId),
+        eq(staffAssignment.assignmentType, "PRIMARY"),
+        lte(staffAssignment.effectiveFrom, today),
+        or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, today)),
+      ),
+    )
+    .orderBy(desc(staffAssignment.effectiveFrom))
+    .limit(1);
+
+  if (!currentAssignment || !managedIds.includes(currentAssignment.orgUnitId)) {
+    throw forbidden("You do not have access to this staff member.", "STAFF_FORBIDDEN");
+  }
 };
 
 router.get("/", async (req, res, next) => {
@@ -171,29 +208,54 @@ router.get("/", async (req, res, next) => {
       if (filter.field === "orgUnitId") filterOrgUnitId = filter.value;
     }
 
-    const where = filters.length > 0 ? and(...filters) : undefined;
+    const today = new Date().toISOString().slice(0, 10);
+    const whereParts = [...filters];
+    if (managedIds !== null) {
+      if (managedIds.length === 0) {
+        res.json(toPageResponse([], query, 0));
+        return;
+      }
+
+      whereParts.push(
+        sql`exists (
+          select 1
+          from ${staffAssignment}
+          where ${staffAssignment.staffId} = ${staff.id}
+            and ${staffAssignment.assignmentType} = 'PRIMARY'
+            and ${staffAssignment.effectiveFrom} <= ${today}
+            and (${staffAssignment.effectiveTo} is null or ${staffAssignment.effectiveTo} >= ${today})
+            and ${staffAssignment.orgUnitId} in (${sql.join(managedIds.map((id) => sql`${id}`), sql`, `)})
+        )`,
+      );
+    }
+    if (filterOrgUnitId) {
+      whereParts.push(
+        sql`exists (
+          select 1
+          from ${staffAssignment}
+          where ${staffAssignment.staffId} = ${staff.id}
+            and ${staffAssignment.assignmentType} = 'PRIMARY'
+            and ${staffAssignment.effectiveFrom} <= ${today}
+            and (${staffAssignment.effectiveTo} is null or ${staffAssignment.effectiveTo} >= ${today})
+            and ${staffAssignment.orgUnitId} = ${filterOrgUnitId}
+        )`,
+      );
+    }
+
+    const where = whereParts.length > 0 ? and(...whereParts) : undefined;
     const sort = query.sort[0] ?? { field: "createdAt", descending: true };
     const [rows, totalRows] = await Promise.all([
       db.select().from(staff).where(where).orderBy(mapSort(sort.field, sort.descending)).limit(query.limit).offset(query.offset),
       db.select({ total: count() }).from(staff).where(where),
     ]);
 
-    let withUnits = await attachCurrentOrgUnits(rows);
-
-    if (managedIds !== null) {
-      const allowed = new Set(managedIds);
-      withUnits = withUnits.filter((row) => row.orgUnitId && allowed.has(row.orgUnitId));
-    }
-
-    if (filterOrgUnitId) {
-      withUnits = withUnits.filter((row) => row.orgUnitId === filterOrgUnitId);
-    }
+    const withUnits = await attachCurrentOrgUnits(rows);
 
     res.json(
       toPageResponse(
         withUnits.map((row) => sanitizeStaffRecord(row, roles)),
         query,
-        managedIds === null && !filterOrgUnitId ? Number(totalRows[0]?.total ?? withUnits.length) : withUnits.length,
+        Number(totalRows[0]?.total ?? withUnits.length),
       ),
     );
   } catch (error) {
@@ -212,17 +274,22 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
 
     await ensureStaffRules(parsed.data);
 
-    const [created] = await db.insert(staff).values(parsed.data).returning();
-
-    if (parsed.data.orgUnitId) {
-      await db.insert(staffAssignment).values({
-        staffId: created.id,
-        orgUnitId: parsed.data.orgUnitId,
-        assignmentType: "PRIMARY",
-        effectiveFrom: parsed.data.hireDate ?? new Date().toISOString().slice(0, 10),
-        reason: "INITIAL",
-      });
-    }
+    const created = await db.transaction(async (tx) => {
+      const [createdStaff] = await tx.insert(staff).values(parsed.data).returning();
+      if (!createdStaff) {
+        throw badRequest("Unable to create staff member.", "STAFF_CREATE_FAILED");
+      }
+      if (parsed.data.orgUnitId) {
+        await tx.insert(staffAssignment).values({
+          staffId: createdStaff.id,
+          orgUnitId: parsed.data.orgUnitId,
+          assignmentType: "PRIMARY",
+          effectiveFrom: parsed.data.hireDate ?? new Date().toISOString().slice(0, 10),
+          reason: "INITIAL",
+        });
+      }
+      return createdStaff;
+    });
 
     res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []) });
   } catch (error) {
@@ -237,13 +304,15 @@ router.get("/:id", async (req, res, next) => {
       throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
     }
 
+    await ensureManagedStaffAccess(req.user, staffId);
+
     const [record] = await db.select().from(staff).where(eq(staff.id, staffId)).limit(1);
     if (!record) {
       throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
     }
 
     const [withUnit] = await attachCurrentOrgUnits([record]);
-    res.json({ data: sanitizeStaffRecord(withUnit, req.user?.roles ?? []) });
+    res.json({ data: sanitizeStaffRecord(withUnit ?? { ...record, orgUnitId: null }, req.user?.roles ?? []) });
   } catch (error) {
     next(error);
   }
@@ -265,7 +334,16 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       });
     }
 
-    await ensureStaffRules(parsed.data);
+    const [existing] = await db.select().from(staff).where(eq(staff.id, staffId)).limit(1);
+    if (!existing) {
+      throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    }
+
+    const mergedForValidation = {
+      ...existing,
+      ...Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value !== undefined)),
+    };
+    await ensureStaffRules(mergedForValidation);
 
     const updatePayload = Object.fromEntries(
       Object.entries(parsed.data).filter(([key, value]) => key !== "orgUnitId" && value !== undefined),
@@ -291,7 +369,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
             eq(staffAssignment.staffId, staffId),
             eq(staffAssignment.assignmentType, "PRIMARY"),
             lte(staffAssignment.effectiveFrom, today),
-            or(eq(staffAssignment.effectiveTo, null), gte(staffAssignment.effectiveTo, today)),
+            or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, today)),
           ),
         )
         .orderBy(desc(staffAssignment.effectiveFrom))
@@ -315,7 +393,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
     }
 
     const [withUnit] = await attachCurrentOrgUnits([updated]);
-    res.json({ data: sanitizeStaffRecord(withUnit, req.user?.roles ?? []) });
+    res.json({ data: sanitizeStaffRecord(withUnit ?? { ...updated, orgUnitId: null }, req.user?.roles ?? []) });
   } catch (error) {
     next(error);
   }
@@ -355,6 +433,8 @@ router.get("/:id/licenses", async (req, res, next) => {
     if (!staffId) {
       throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
     }
+
+    await ensureManagedStaffAccess(req.user, staffId);
 
     const list = await db.select().from(staffLicense).where(eq(staffLicense.staffId, staffId)).orderBy(desc(staffLicense.expiresOn));
     res.json({ data: list });
@@ -473,6 +553,7 @@ router.post(
       const staffRows = await db.select().from(staff).where(eq(staff.status, "active"));
       const existingUnits = await db.select().from(orgUnit);
       const byName = new Map(existingUnits.map((unit) => [unit.name.trim().toLowerCase(), unit]));
+      const existingCodes = new Set(existingUnits.map((unit) => unit.code.toUpperCase()));
       const createdUnitIds: string[] = [];
       const today = new Date().toISOString().slice(0, 10);
 
@@ -484,11 +565,20 @@ router.post(
           let unit = byName.get(key);
 
           if (!unit) {
-            const code = department
+            const baseCode =
+              department
               .toUpperCase()
               .replace(/[^A-Z0-9]+/g, "_")
               .replace(/^_+|_+$/g, "")
               .slice(0, 30) || `UNIT_${createdUnitIds.length + 1}`;
+            let code = baseCode;
+            let suffix = 2;
+            while (existingCodes.has(code)) {
+              const suffixText = `_${suffix}`;
+              code = `${baseCode.slice(0, Math.max(1, 30 - suffixText.length))}${suffixText}`;
+              suffix += 1;
+            }
+
             const [createdUnit] = await tx
               .insert(orgUnit)
               .values({
@@ -500,8 +590,12 @@ router.post(
                 active: true,
               })
               .returning();
+            if (!createdUnit) {
+              throw badRequest("Unable to create org unit for department migration.", "ORG_UNIT_CREATE_FAILED");
+            }
             unit = createdUnit;
             byName.set(key, unit);
+            existingCodes.add(code);
             createdUnitIds.push(unit.id);
           }
 

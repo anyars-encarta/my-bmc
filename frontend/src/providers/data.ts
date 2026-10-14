@@ -99,9 +99,9 @@ const toError = (response: Response, payload: unknown) => {
 
 const requestJson = async <T>(input: string, init?: RequestInit) => {
   const response = await fetch(input, {
+    ...init,
     credentials: "include",
     headers: createAuthHeaders(init?.headers),
-    ...init,
   });
 
   const text = await response.text();

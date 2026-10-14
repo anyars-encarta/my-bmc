@@ -3,6 +3,7 @@ import { Router } from "express";
 
 import { db } from "../../db/index.js";
 import { auditLog } from "../../db/schema/index.js";
+import { validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
@@ -42,11 +43,27 @@ router.get(
         }
 
         if (filter.field === "occurredAt" && filter.operator === "gte" && typeof filter.value === "string") {
-          whereParts.push(gte(auditLog.occurredAt, new Date(filter.value)));
+          const value = new Date(filter.value);
+          if (Number.isNaN(value.getTime())) {
+            throw validationError("occurredAt filter must be a valid date.", "LIST_FILTER_INVALID", {
+              field: "occurredAt",
+              operator: filter.operator,
+              value: filter.value,
+            });
+          }
+          whereParts.push(gte(auditLog.occurredAt, value));
         }
 
         if (filter.field === "occurredAt" && filter.operator === "lte" && typeof filter.value === "string") {
-          whereParts.push(lte(auditLog.occurredAt, new Date(filter.value)));
+          const value = new Date(filter.value);
+          if (Number.isNaN(value.getTime())) {
+            throw validationError("occurredAt filter must be a valid date.", "LIST_FILTER_INVALID", {
+              field: "occurredAt",
+              operator: filter.operator,
+              value: filter.value,
+            });
+          }
+          whereParts.push(lte(auditLog.occurredAt, value));
         }
       }
 

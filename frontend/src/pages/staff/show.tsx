@@ -20,6 +20,7 @@ import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
 import type { StaffLicenseRecord, StaffRecord } from "@/types/domain";
 import { licensingBodyOptions } from "@/constants/options";
+import PageLoader from "@/components/PageLoader";
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
@@ -220,8 +221,13 @@ export const StaffShow = () => {
               </Select>
             </div>
           </div>
-          <Button onClick={createLicense} disabled={savingLicense}>
-            {savingLicense ? "Saving..." : "Add License"}
+          <Button className="cursor-pointer" onClick={createLicense} disabled={savingLicense}>
+            {savingLicense ? (
+              <span className="inline-flex items-center gap-2">
+                <PageLoader inline />
+                Adding...
+              </span>
+            ) : "Add License"}
           </Button>
 
           <div className="space-y-2">

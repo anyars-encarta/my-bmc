@@ -14,7 +14,8 @@ const addDays = (date: Date, days: number) => {
 };
 
 export const runLicenceExpiryJob = async () => {
-  const today = new Date();
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const maxDate = addDays(today, Math.max(...DAYS_TO_NOTIFY));
   const todayIso = isoDate(today);
   const maxIso = isoDate(maxDate);

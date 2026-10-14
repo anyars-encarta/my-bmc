@@ -208,7 +208,6 @@ export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunc
     }
 
     try {
-      await ensureAuditPartitions();
       const { entityType, entityId } = parseEntity(req.path);
 
       await db.insert(auditLog).values({

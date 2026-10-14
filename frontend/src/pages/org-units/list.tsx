@@ -182,7 +182,7 @@ export const OrgUnitList = () => {
               <div className="mt-4 flex flex-wrap gap-2">
                 {flatUnits.map((unit) => (
                   <Button key={unit.id} variant="outline" size="sm" className="cursor-pointer" onClick={() => startEdit(unit)}>
-                    Edit ${unit.name}
+                    Edit {unit.name}
                   </Button>
                 ))}
               </div>

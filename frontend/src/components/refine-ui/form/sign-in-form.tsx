@@ -87,10 +87,10 @@ export const SignInForm = () => {
 
             <div className="sign-in-mobile-media">
               <img
-                src="/money.gif"
+                src="/hospital.gif"
                 height={720}
                 width={720}
-                alt="Money animation"
+                alt="Hospital animation"
                 className="sign-in-mobile-image"
               />
             </div>

@@ -22,6 +22,7 @@ const meUrl = `${BACKEND_BASE_URL}/v1/me`;
 
 let meCache: MeResponse | null = null;
 let mePromise: Promise<MeResponse | null> | null = null;
+let meGeneration = 0;
 
 const readAccessToken = () => {
   if (typeof window === "undefined") return null;
@@ -43,6 +44,7 @@ export const createAuthHeaders = (base?: HeadersInit) => {
 };
 
 export const clearMeCache = () => {
+  meGeneration += 1;
   meCache = null;
   mePromise = null;
 };
@@ -56,25 +58,35 @@ export const fetchMe = async (force = false): Promise<MeResponse | null> => {
     return mePromise;
   }
 
-  mePromise = fetch(meUrl, {
+  const requestGeneration = meGeneration;
+  const request = fetch(meUrl, {
     credentials: "include",
     headers: createAuthHeaders(),
   })
     .then(async (response) => {
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
+          if (meGeneration === requestGeneration) {
+            meCache = null;
+          }
           return null;
         }
         throw new Error(`Failed to load /me: ${response.status}`);
       }
 
       const payload = (await response.json()) as { data?: MeResponse };
+      if (meGeneration !== requestGeneration) {
+        return meCache;
+      }
       meCache = payload.data ?? null;
       return meCache;
     })
     .finally(() => {
-      mePromise = null;
+      if (mePromise === request && meGeneration === requestGeneration) {
+        mePromise = null;
+      }
     });
+  mePromise = request;
 
   return mePromise;
 };
