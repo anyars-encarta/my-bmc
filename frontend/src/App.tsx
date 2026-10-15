@@ -53,7 +53,8 @@ const HostingRenewalPage = lazy(
   () => import("./pages/hosting-renewal/hosting"),
 );
 
-const getPublicApiBase = () => BACKEND_BASE_URL.replace(/\/+$/, "");
+const getPublicApiBase = () =>
+  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 const formatPathSegment = (value: string) =>
   value.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -234,9 +235,6 @@ function App() {
                       <Authenticated
                         key="protected-routes"
                         redirectOnFail="/login"
-                        fallback={
-                          <RouteLoading label="Checking session..." />
-                        }
                       >
                         <>
                           <HostingCriticalInfoModal />

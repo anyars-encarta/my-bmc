@@ -1,5 +1,6 @@
 import type { AuthProvider } from "@refinedev/core";
 
+import { BACKEND_BASE_URL } from "@/constants";
 import { authClient } from "@/lib/auth-client";
 import { clearMeCache, fetchMe } from "./me";
 
@@ -27,9 +28,23 @@ type RegisterParams = {
   imageCldPubId?: string | null;
 };
 
+const sessionUrl = `${BACKEND_BASE_URL.replace(/\/+$/, "")}/auth/get-session`;
+
 const getSessionData = async (): Promise<AuthSessionData | null> => {
-  const response = await authClient.getSession();
-  return (response?.data as AuthSessionData | null) ?? null;
+  const response = await fetch(sessionUrl, {
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as AuthSessionData | null;
+  return payload ?? null;
 };
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -48,6 +63,8 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 };
 
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const authProvider: AuthProvider = {
   login: async ({ email, password, rememberMe }) => {
     const response = await authClient.signIn.email(
@@ -65,6 +82,20 @@ export const authProvider: AuthProvider = {
       return {
         success: false,
         error: new Error(response.error.message || "Invalid email or password."),
+      };
+    }
+
+    let session: AuthSessionData | null = null;
+    try {
+      session = await withTimeout(getSessionData(), 5000);
+    } catch {
+      session = null;
+    }
+
+    if (!session?.user || !session?.session) {
+      return {
+        success: false,
+        error: new Error("Login did not establish a session. Please try again."),
       };
     }
 
@@ -96,28 +127,23 @@ export const authProvider: AuthProvider = {
   },
   check: async () => {
     try {
-      let session: AuthSessionData | null = null;
-      try {
-        session = await withTimeout(getSessionData(), 5000);
-      } catch {
-        session = null;
-      }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        let session: AuthSessionData | null = null;
+        try {
+          session = await withTimeout(getSessionData(), 3000);
+        } catch {
+          session = null;
+        }
 
-      if (session?.user && session?.session) {
-        return {
-          authenticated: true,
-        };
-      }
-
-      try {
-        const me = await withTimeout(fetchMe(true), 5000);
-        if (me?.user?.id) {
+        if (session?.user && session?.session) {
           return {
             authenticated: true,
           };
         }
-      } catch {
-        // handled by unauthenticated return below
+
+        if (attempt < 2) {
+          await wait(400);
+        }
       }
 
       return {

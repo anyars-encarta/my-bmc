@@ -14,6 +14,7 @@ import setupRoutes from "./routes/setup.js";
 import momoRoutes from "./routes/momo.js";
 import userRoutes from "./routes/users.js";
 import v1Routes from "./routes/v1/index.js";
+import hostingRenewalPublicRoutes from "./routes/hostingRenewalPublic.js";
 import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
 import { problemHandler } from "./middleware/problemHandler.js";
 
@@ -90,6 +91,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
+app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
 
 app.use("/api", requireAuth);
 app.use("/api", securityMiddleware);

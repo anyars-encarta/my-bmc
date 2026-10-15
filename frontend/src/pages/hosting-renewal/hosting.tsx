@@ -31,7 +31,8 @@ const formatDisplayDate = (isoDate: string) => {
   return `${day}/${month}/${year}`;
 };
 
-const getPublicApiBase = () => BACKEND_BASE_URL.replace(/\/+$/, "");
+const getPublicApiBase = () =>
+  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 type HostingInfo = {
   businessName: string | null;

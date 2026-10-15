@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { useIsAuthenticated } from "@refinedev/core";
 
 import {
   AlertDialog,
@@ -46,8 +45,6 @@ const getDaysUntilExpiry = (hostingExpiryDate: string | null | undefined) => {
 };
 
 const HostingCriticalInfoModal = () => {
-  const { data: authResult, isLoading: authLoading } = useIsAuthenticated();
-  const isAuthenticated = authResult?.authenticated === true;
   const navigate = useNavigate();
   const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(
     null,
@@ -60,13 +57,6 @@ const HostingCriticalInfoModal = () => {
   const hasHandledExpiredHosting = useRef(false);
 
   useEffect(() => {
-    if (authLoading || !isAuthenticated) {
-      setSystemSettings(null);
-      setHasFetchedSettings(false);
-      setInitialized(false);
-      return;
-    }
-
     let isActive = true;
     setHasFetchedSettings(false);
     setInitialized(false);
@@ -95,14 +85,14 @@ const HostingCriticalInfoModal = () => {
     return () => {
       isActive = false;
     };
-  }, [authLoading, isAuthenticated]);
+  }, []);
 
   const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate);
 
   const isHostingExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
 
   useEffect(() => {
-    if (!isAuthenticated || initialized || !hasFetchedSettings) {
+    if (initialized || !hasFetchedSettings) {
       return;
     }
 
@@ -160,12 +150,7 @@ const HostingCriticalInfoModal = () => {
     isHostingExpired,
     navigate,
     systemSettings,
-    isAuthenticated,
   ]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
 
   const canDismiss = actionCompleted;
   const isTemporalHostingModal = modalVariant === "temporal-hosting";
