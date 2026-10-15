@@ -35,8 +35,8 @@ const getPublicApiBase = () =>
   BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 type HostingInfo = {
-  businessName: string | null;
-  businessLogo: string | null;
+  facilityName: string | null;
+  logoUrl: string | null;
   businessEmail: string | null;
   monthlyRenewalFee: string | null;
   hosted: boolean;
@@ -109,13 +109,35 @@ const HostingRenewal = () => {
 
       try {
         const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/info`);
-        const payload = (await response.json()) as { success?: boolean; data?: HostingInfo; error?: string };
+        const payload = (await response.json()) as {
+          success?: boolean;
+          data?: Partial<
+            HostingInfo & {
+              businessName: string | null;
+              businessLogo: string | null;
+            }
+          >;
+          error?: string;
+        };
 
         if (!response.ok || !payload.success) {
           throw new Error(payload.error || "Failed to load hosting info");
         }
 
-        setInfo(payload.data ?? null);
+        const data = payload.data;
+        if (!data) {
+          setInfo(null);
+          return;
+        }
+
+        setInfo({
+          facilityName: data.facilityName ?? data.businessName ?? null,
+          logoUrl: data.logoUrl ?? data.businessLogo ?? null,
+          businessEmail: data.businessEmail ?? null,
+          monthlyRenewalFee: data.monthlyRenewalFee ?? null,
+          hosted: data.hosted ?? false,
+          hostingExpiryDate: data.hostingExpiryDate ?? null,
+        });
       } catch (error) {
         setInfoError(error instanceof Error ? error.message : "Failed to load hosting info");
       } finally {
@@ -204,7 +226,7 @@ const HostingRenewal = () => {
     setSubmitState({ status: "submitting" });
 
     const email = info?.businessEmail || "billing@business.local";
-    const [firstName, ...restName] = (info?.businessName || "Business").split(" ").filter(Boolean);
+    const [firstName, ...restName] = (info?.facilityName || "Business").split(" ").filter(Boolean);
     const lastName = restName.join(" ") || undefined;
 
     void openPaystackCheckout({
@@ -261,7 +283,7 @@ const HostingRenewal = () => {
     confirmRenewal,
     exchangeRate.status,
     info?.businessEmail,
-    info?.businessName,
+    info?.facilityName,
     paystackPublicKey,
     paystackReference,
     paymentAmount,
@@ -330,7 +352,7 @@ const HostingRenewal = () => {
               ) : null}
             </div>
             <p className="text-xs text-muted-foreground text-center">
-              The buisness hosting status and expiry date were updated in the background.
+              The facility hosting status and expiry date were updated in the background.
             </p>
           </CardContent>
         </Card>
@@ -344,17 +366,17 @@ const HostingRenewal = () => {
         <CardHeader className="text-center">
           <div className="mb-4 flex flex-col items-center justify-center gap-3 border-b pb-4 text-center">
             <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-md border bg-muted">
-              {info?.businessLogo ? (
-                <img src={info.businessLogo} alt={info.businessName ?? "Business"} className="h-full w-full object-contain" />
+              {info?.logoUrl ? (
+                <img src={info.logoUrl} alt={info.facilityName ?? "Business"} className="h-full w-full object-contain" />
               ) : (
                 <span className="text-sm text-muted-foreground">Logo</span>
               )}
             </div>
-            <p className="text-xl font-semibold tracking-wider">{info?.businessName || "Business"}</p>
+            <p className="text-xl font-semibold tracking-wider">{info?.facilityName || "Business"}</p>
           </div>
           <CardTitle className="text-2xl">Hosting Renewal</CardTitle>
           <CardDescription>
-            Pay the converted amount below to renew hosting for your business.
+            Pay the converted amount below to renew hosting for your facility.
           </CardDescription>
         </CardHeader>
 
@@ -377,7 +399,7 @@ const HostingRenewal = () => {
               />
               {monthlyDollarRate === null ? (
                 <p className="text-xs text-destructive">
-                  Monthly renewal fee has not been configured in business settings.
+                  Monthly renewal fee has not been configured in facility settings.
                 </p>
               ) : null}
             </div>

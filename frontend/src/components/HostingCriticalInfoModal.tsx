@@ -10,9 +10,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { apiGet } from "@/lib/api";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { BACKEND_BASE_URL } from "@/constants";
 
 import { Separator } from "./ui/separator";
 import { formatDate } from "@/lib/timeFormat";
@@ -22,33 +22,36 @@ type HostingModalVariant = "temporal-hosting" | "hosting-expiry" | null;
 
 const MILLISECONDS_IN_A_DAY = 1000 * 60 * 60 * 24;
 
+const getPublicApiBase = () =>
+  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
+
 const getDaysUntilExpiry = (hostingExpiryDate: string | null | undefined) => {
   if (!hostingExpiryDate) {
     return null;
   }
 
-  const expiryDate = new Date(`${hostingExpiryDate}T00:00:00`);
+  const expiryDate = new Date(`${hostingExpiryDate}T00:00:00Z`);
   if (Number.isNaN(expiryDate.getTime())) {
     return null;
   }
 
   const today = new Date();
-  const todayStart = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
+  const todayStartUtc = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
   );
 
   return Math.floor(
-    (expiryDate.getTime() - todayStart.getTime()) / MILLISECONDS_IN_A_DAY,
+    (expiryDate.getTime() - todayStartUtc.getTime()) / MILLISECONDS_IN_A_DAY,
   );
 };
 
-const HostingCriticalInfoModal = () => {
+type HostingCriticalInfoModalProps = {
+  setupInfo?: SetupRecord | null;
+};
+
+const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModalProps) => {
   const navigate = useNavigate();
-  const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(
-    null,
-  );
+  const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(setupInfo);
   const [hasFetchedSettings, setHasFetchedSettings] = useState(false);
   const [open, setOpen] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -58,16 +61,41 @@ const HostingCriticalInfoModal = () => {
 
   useEffect(() => {
     let isActive = true;
+
+    if (setupInfo) {
+      setSystemSettings(setupInfo);
+      setHasFetchedSettings(true);
+      setInitialized(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
     setHasFetchedSettings(false);
     setInitialized(false);
 
     const loadSystemSettings = async () => {
       try {
-        const response = await apiGet<{ data: SetupRecord }>(
-          "/settings/business",
+        const response = await fetch(
+          `${getPublicApiBase()}/public/hosting-renewal/info`,
         );
+
+        if (!response.ok) {
+          throw new Error("Failed to load hosting info");
+        }
+
+        const payload = (await response.json()) as {
+          success?: boolean;
+          data?: SetupRecord;
+          error?: string;
+        };
+
+        if (!payload.success) {
+          throw new Error(payload.error || "Failed to load hosting info");
+        }
+
         if (isActive) {
-          setSystemSettings(response.data ?? null);
+          setSystemSettings(payload.data ?? null);
         }
       } catch {
         if (isActive) {
@@ -85,7 +113,7 @@ const HostingCriticalInfoModal = () => {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [setupInfo]);
 
   const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate);
 

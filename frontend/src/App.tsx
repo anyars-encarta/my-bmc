@@ -237,7 +237,7 @@ function App() {
                         redirectOnFail="/login"
                       >
                         <>
-                          <HostingCriticalInfoModal />
+                          <HostingCriticalInfoModal setupInfo={info} />
                           <Layout>
                             <Outlet />
                           </Layout>
