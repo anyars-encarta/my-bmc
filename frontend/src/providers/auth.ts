@@ -32,6 +32,22 @@ const getSessionData = async (): Promise<AuthSessionData | null> => {
   return (response?.data as AuthSessionData | null) ?? null;
 };
 
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("AUTH_CHECK_TIMEOUT")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 export const authProvider: AuthProvider = {
   login: async ({ email, password, rememberMe }) => {
     const response = await authClient.signIn.email(
@@ -80,38 +96,38 @@ export const authProvider: AuthProvider = {
   },
   check: async () => {
     try {
-      const session = await getSessionData();
+      let session: AuthSessionData | null = null;
+      try {
+        session = await withTimeout(getSessionData(), 5000);
+      } catch {
+        session = null;
+      }
 
       if (session?.user && session?.session) {
-        try {
-          const me = await fetchMe(true);
-          if (!me) {
-            return {
-              authenticated: false,
-              redirectTo: "/login",
-              logout: true,
-            };
-          }
-        } catch {
-          return {
-            authenticated: true,
-          };
-        }
         return {
           authenticated: true,
         };
       }
 
+      try {
+        const me = await withTimeout(fetchMe(true), 5000);
+        if (me?.user?.id) {
+          return {
+            authenticated: true,
+          };
+        }
+      } catch {
+        // handled by unauthenticated return below
+      }
+
       return {
         authenticated: false,
         redirectTo: "/login",
-        logout: true,
       };
     } catch (error) {
       return {
         authenticated: false,
         redirectTo: "/login",
-        logout: true,
         error: error instanceof Error ? error : new Error("Authentication check failed."),
       };
     }
@@ -204,14 +220,47 @@ export const authProvider: AuthProvider = {
     };
   },
   getIdentity: async () => {
-    const me = await fetchMe();
-    const currentUser = me?.user;
-
-    if (!currentUser) {
-      return null;
+    let me = null as Awaited<ReturnType<typeof fetchMe>>;
+    try {
+      me = await fetchMe();
+    } catch {
+      me = null;
     }
 
-    const [firstName = currentUser.name, ...rest] = currentUser.name.split(" ");
+    const currentUser = me?.user;
+    if (!currentUser) {
+      const session = await getSessionData();
+      const sessionUser = session?.user;
+      if (!sessionUser?.id || !sessionUser.email) {
+        return null;
+      }
+
+      const fallbackName =
+        typeof sessionUser.name === "string" && sessionUser.name.trim().length > 0
+          ? sessionUser.name.trim()
+          : sessionUser.email;
+      const [firstName = fallbackName, ...rest] = fallbackName.split(" ");
+      const lastName = rest.join(" ");
+
+      return {
+        id: sessionUser.id,
+        email: sessionUser.email,
+        firstName,
+        lastName,
+        fullName: fallbackName,
+        avatar: typeof sessionUser.image === "string" ? sessionUser.image : undefined,
+        role: sessionUser.role || undefined,
+        roles: [],
+        permissions: [],
+        status: sessionUser.status || undefined,
+      };
+    }
+
+    const safeName =
+      typeof currentUser.name === "string" && currentUser.name.trim().length > 0
+        ? currentUser.name.trim()
+        : currentUser.email;
+    const [firstName = safeName, ...rest] = safeName.split(" ");
     const lastName = rest.join(" ");
 
     return {
@@ -219,7 +268,7 @@ export const authProvider: AuthProvider = {
       email: currentUser.email,
       firstName,
       lastName,
-      fullName: currentUser.name || currentUser.email,
+      fullName: safeName,
       avatar: undefined,
       role: me?.roles?.[0] || undefined,
       roles: me?.roles ?? [],
@@ -228,7 +277,11 @@ export const authProvider: AuthProvider = {
     };
   },
   getPermissions: async () => {
-    const me = await fetchMe();
-    return me?.permissions ?? null;
+    try {
+      const me = await fetchMe();
+      return me?.permissions ?? null;
+    } catch {
+      return null;
+    }
   },
 };

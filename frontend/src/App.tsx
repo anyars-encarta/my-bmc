@@ -47,9 +47,7 @@ import { dataProvider } from "./providers/data";
 import { SetupRecord } from "./types/domain";
 import { BACKEND_BASE_URL } from "./constants";
 import { RouteLoading } from "./components/refine-ui/layout/route-loading";
-import { ProtectedRoute } from "./components/auth/protected-route";
 import HostingCriticalInfoModal from "./components/HostingCriticalInfoModal";
-import { AuthProvider } from "./contexts/auth-context";
 
 const HostingRenewalPage = lazy(
   () => import("./pages/hosting-renewal/hosting"),
@@ -103,6 +101,10 @@ function App() {
         const response = await fetch(
           `${getPublicApiBase()}/public/hosting-renewal/info`,
         );
+        if (response.status === 401 || response.status === 403) {
+          setInfo(null);
+          return;
+        }
         const payload = (await response.json()) as {
           success?: boolean;
           data?: SetupRecord;
@@ -126,10 +128,8 @@ function App() {
               }
             : null,
         );
-      } catch (error) {
-        console.error(
-          error instanceof Error ? error.message : "Failed to load splash info",
-        );
+      } catch {
+        setInfo(null);
       }
     };
 
@@ -176,11 +176,10 @@ function App() {
 
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <RefineKbarProvider>
-            <DevtoolsProvider>
-              <Refine
+      <BrowserRouter>
+        <RefineKbarProvider>
+          <DevtoolsProvider>
+            <Refine
                 dataProvider={dataProvider}
                 authProvider={authProvider}
                 accessControlProvider={accessControlProvider}
@@ -225,73 +224,74 @@ function App() {
                       </Authenticated>
                     }
                   >
-                    <Route path="/login" element={<Login />} />
+                    <Route path="login" element={<Login />} />
                   </Route>
 
-                  <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="forgot-password" element={<ForgotPassword />} />
 
-                  <Route element={<ProtectedRoute />}>
-                    <Route
-                      element={
-                        <Authenticated
-                          key="protected-routes"
-                          redirectOnFail="/login"
-                        >
-                          <>
-                            <HostingCriticalInfoModal />
-                            <Layout>
-                              <Outlet />
-                            </Layout>
-                          </>
-                        </Authenticated>
-                      }
-                    >
+                  <Route
+                    element={
+                      <Authenticated
+                        key="protected-routes"
+                        redirectOnFail="/login"
+                        fallback={
+                          <RouteLoading label="Checking session..." />
+                        }
+                      >
+                        <>
+                          <HostingCriticalInfoModal />
+                          <Layout>
+                            <Outlet />
+                          </Layout>
+                        </>
+                      </Authenticated>
+                    }
+                  >
                       <Route
                         index
                         element={<NavigateToResource resource="dashboard" />}
                       />
-                      <Route path="/dashboard" element={<DashboardPage />} />
-                      <Route path="/staff">
+                      <Route path="dashboard" element={<DashboardPage />} />
+                      <Route path="staff">
                         <Route index element={<StaffList />} />
                         <Route path="create" element={<StaffCreate />} />
                         <Route path="edit/:id" element={<StaffEdit />} />
                         <Route path="show/:id" element={<StaffShow />} />
                       </Route>
-                      <Route path="/org-units" element={<OrgUnitList />} />
-                      <Route path="/categories">
+                      <Route path="org-units" element={<OrgUnitList />} />
+                      <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />
                         <Route path="edit/:id" element={<CategoryEdit />} />
                         <Route path="show/:id" element={<CategoryShow />} />
                       </Route>
-                      <Route path="/payments">
+                      <Route path="payments">
                         <Route index element={<PaymentList />} />
                         <Route path="create" element={<PaymentCreate />} />
                         <Route path="edit/:id" element={<PaymentEdit />} />
                         <Route path="show/:id" element={<PaymentShow />} />
                       </Route>
-                      <Route path="/setup">
+                      <Route path="setup">
                         <Route index element={<SetupShow />} />
                         <Route path="create" element={<SetupCreate />} />
                         <Route path="edit/:id" element={<SetupEdit />} />
                         <Route path="show/:id" element={<SetupShow />} />
                       </Route>
-                      <Route path="/users">
+                      <Route path="users">
                         <Route index element={<ListUsers />} />
                         <Route path="create" element={<CreateUser />} />
                         <Route path="edit/:id" element={<EditUser />} />
                         <Route path="show/:id" element={<ShowUser />} />
                       </Route>
-                      <Route path="/approvals">
+                      <Route path="approvals">
                         <Route index element={<ApprovalQueueList />} />
                         <Route path=":id" element={<ApprovalReviewPage />} />
                       </Route>
                       <Route
-                        path="/disbursements"
+                        path="disbursements"
                         element={<DisbursementList />}
                       />
                       <Route path="*" element={<ErrorComponent />} />
-                    </Route>
                   </Route>
                 </Routes>
 
@@ -301,10 +301,9 @@ function App() {
                 <UnsavedChangesNotifier />
               </Refine>
               <DevtoolsPanel />
-            </DevtoolsProvider>
-          </RefineKbarProvider>
-        </BrowserRouter>
-      </AuthProvider>
+          </DevtoolsProvider>
+        </RefineKbarProvider>
+      </BrowserRouter>
     </ThemeProvider>
   );
 }

@@ -130,7 +130,7 @@ export const SignInForm = () => {
                   <Input
                     id="email"
                     type="email"
-                    placeholder="name@school.edu"
+                    placeholder="name@hospital.org"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}

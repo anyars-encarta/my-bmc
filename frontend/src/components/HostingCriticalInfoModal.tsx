@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { useIsAuthenticated } from "@refinedev/core";
 
 import {
   AlertDialog,
@@ -11,7 +12,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { apiGet } from "@/lib/api";
-import { useAuth } from "@/contexts/use-auth";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
@@ -46,7 +46,8 @@ const getDaysUntilExpiry = (hostingExpiryDate: string | null | undefined) => {
 };
 
 const HostingCriticalInfoModal = () => {
-  const { user } = useAuth();
+  const { data: authResult, isLoading: authLoading } = useIsAuthenticated();
+  const isAuthenticated = authResult?.authenticated === true;
   const navigate = useNavigate();
   const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(
     null,
@@ -59,7 +60,10 @@ const HostingCriticalInfoModal = () => {
   const hasHandledExpiredHosting = useRef(false);
 
   useEffect(() => {
-    if (!user) {
+    if (authLoading || !isAuthenticated) {
+      setSystemSettings(null);
+      setHasFetchedSettings(false);
+      setInitialized(false);
       return;
     }
 
@@ -91,14 +95,14 @@ const HostingCriticalInfoModal = () => {
     return () => {
       isActive = false;
     };
-  }, [user]);
+  }, [authLoading, isAuthenticated]);
 
   const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate);
 
   const isHostingExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
 
   useEffect(() => {
-    if (!user || initialized || !hasFetchedSettings) {
+    if (!isAuthenticated || initialized || !hasFetchedSettings) {
       return;
     }
 
@@ -156,10 +160,10 @@ const HostingCriticalInfoModal = () => {
     isHostingExpired,
     navigate,
     systemSettings,
-    user,
+    isAuthenticated,
   ]);
 
-  if (!user) {
+  if (!isAuthenticated) {
     return null;
   }
 
