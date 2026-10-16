@@ -18,7 +18,13 @@ import {
 import { useShow, useNotification } from "@refinedev/core";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
-import type { StaffLicenseRecord, StaffRecord } from "@/types/domain";
+import type {
+  JobRoleRecord,
+  OrgUnitRecord,
+  ShiftTypeRecord,
+  StaffLicenseRecord,
+  StaffRecord,
+} from "@/types/domain";
 import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
 
@@ -38,6 +44,9 @@ export const StaffShow = () => {
   const { result: record } = useShow<StaffRecord>({});
   const { open: notify } = useNotification();
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
+  const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});
+  const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
+  const [shiftTypeLabels, setShiftTypeLabels] = useState<Record<string, string>>({});
   const [savingLicense, setSavingLicense] = useState(false);
   const [newLicense, setNewLicense] = useState<NewLicense>({
     licensingBody: "MDC",
@@ -64,10 +73,72 @@ export const StaffShow = () => {
     setLicenses(payload.data ?? []);
   };
 
+  const fetchPaged = async <T,>(resourcePath: string) => {
+    const records: T[] = [];
+    let page = 1;
+
+    while (true) {
+      const response = await fetch(`${apiBase}/v1/${resourcePath}?page=${page}&limit=200`, {
+        credentials: "include",
+        headers: createAuthHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load ${resourcePath}: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        data?: T[];
+        pagination?: { hasMore?: boolean };
+      };
+
+      records.push(...(payload.data ?? []));
+      if (!payload.pagination?.hasMore) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return records;
+  };
+
+  const loadReferenceLabels = async () => {
+    try {
+      const [allOrgUnits, allJobRoles, allShiftTypes] = await Promise.all([
+        fetchPaged<OrgUnitRecord>("org-units"),
+        fetchPaged<JobRoleRecord>("job-roles"),
+        fetchPaged<ShiftTypeRecord>("shift-types"),
+      ]);
+
+      setOrgUnitLabels(
+        Object.fromEntries(
+          allOrgUnits.map((unit) => [unit.id, `${unit.name} (${unit.code})`]),
+        ),
+      );
+      setJobRoleLabels(
+        Object.fromEntries(allJobRoles.map((role) => [role.id, role.name])),
+      );
+      setShiftTypeLabels(
+        Object.fromEntries(
+          allShiftTypes.map((shiftType) => [shiftType.id, shiftType.name]),
+        ),
+      );
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to load staff reference data.",
+      });
+    }
+  };
+
   useEffect(() => {
     loadLicenses().catch((error) => {
       notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to load licenses." });
     });
+    loadReferenceLabels();
   }, [notify, staffId]);
 
   const createLicense = async () => {
@@ -127,14 +198,35 @@ export const StaffShow = () => {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <DataItem label="Employee ID" value={record?.employeeId} />
           <DataItem label="Email" value={record?.email} />
-          <DataItem label="Org Unit ID" value={record?.orgUnitId ?? undefined} />
+          <DataItem
+            label="Org Unit"
+            value={
+              record?.orgUnitId
+                ? orgUnitLabels[record.orgUnitId] ?? "Unassigned"
+                : "Unassigned"
+            }
+          />
           <DataItem label="Department" value={record?.department} />
           <DataItem label="Position" value={record?.position} />
           <DataItem label="Phone" value={record?.phone} />
           <DataItem label="Staff Category" value={record?.staffCategory} />
           <DataItem label="Schedule Mode" value={record?.scheduleMode} />
-          <DataItem label="Job Role ID" value={record?.jobRoleId ?? undefined} />
-          <DataItem label="Default Shift ID" value={record?.defaultShiftTypeId ?? undefined} />
+          <DataItem
+            label="Job Role"
+            value={
+              record?.jobRoleId
+                ? jobRoleLabels[record.jobRoleId] ?? "Not assigned"
+                : "Not assigned"
+            }
+          />
+          <DataItem
+            label="Default Shift Type"
+            value={
+              record?.defaultShiftTypeId
+                ? shiftTypeLabels[record.defaultShiftTypeId] ?? "Not assigned"
+                : "Not assigned"
+            }
+          />
           <DataItem label="Badge Number" value={record?.badgeNumber ?? undefined} />
           <DataItem label="MoMo Number" value={record?.momoNumber} />
           <DataItem label="MoMo Name" value={record?.momoName} />

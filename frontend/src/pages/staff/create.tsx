@@ -200,7 +200,6 @@ export const StaffCreate = () => {
           <TextField form={form} name="badgeNumber" label="Badge Number" required={false} />
           <TextField form={form} name="hireDate" label="Hire Date" type="date" required={false} />
           <TextField form={form} name="terminationDate" label="Termination Date" type="date" required={false} />
-          <TextField form={form} name="userId" label="Linked User ID" required={false} />
 
           <SelectField
             form={form}

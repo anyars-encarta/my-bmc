@@ -22,7 +22,7 @@ export const PaymentShow = () => {
           <CardTitle>{record?.title || "Payment"}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <DataItem label="Category" value={record?.category?.name || record?.categoryId} />
+          <DataItem label="Category" value={record?.category?.name || "-"} />
           <DataItem label="Period" value={record?.period} />
           <DataItem label="Payment Officer" value={record?.createdBy} />
           <DataItem label="Approving Officer" value={record?.approvingOfficer} />

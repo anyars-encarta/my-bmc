@@ -153,7 +153,7 @@ export const PaymentForm = ({
           <TextField
             form={form}
             name="momoReferenceId"
-            label="MoMo Reference ID"
+            label="MoMo Reference"
           />
 
           <FormField

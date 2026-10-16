@@ -29,9 +29,9 @@ export const CategoryShow = () => {
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <h4 className="mb-2 text-sm font-medium">Category ID</h4>
+              <h4 className="mb-2 text-sm font-medium">Category Name</h4>
               <p className="text-sm text-muted-foreground">
-                {record?.id || "-"}
+                {record?.name || "-"}
               </p>
             </div>
             <div>
