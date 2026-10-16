@@ -72,7 +72,7 @@ export const SignInForm = () => {
     <div className="auth-shell">
       <div className="auth-grid">
         <div className="sign-in-panel">
-          <div className="sign-in-mobile-hero sign-in-card-enter lg:hidden">
+          <div className="sign-in-mobile-hero sign-in-card-enter hidden">
             <div className="sign-in-mobile-copy">
               <span className="sign-in-hero-kicker w-fit border-cyan-200/80 bg-cyan-50 text-cyan-700 backdrop-blur-none">
                 Encarta Hospital Management Suite
