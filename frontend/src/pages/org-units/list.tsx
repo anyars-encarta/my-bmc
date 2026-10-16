@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNotification } from "@refinedev/core";
 
-import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
+import {
+  ListView,
+  ListViewHeader,
+} from "@/components/refine-ui/views/list-view";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import { orgUnitTypeOptions } from "@/constants/options";
 import type { OrgUnitRecord } from "@/types/domain";
 import { createAuthHeaders } from "@/providers/me";
 import PageLoader from "@/components/PageLoader";
+import { EditIcon } from "lucide-react";
 
 type OrgUnitPayload = {
   parentId?: string | null;
@@ -32,7 +36,10 @@ type OrgUnitPayload = {
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
-const flattenTree = (tree: OrgUnitRecord[], depth = 0): Array<OrgUnitRecord & { depth: number }> => {
+const flattenTree = (
+  tree: OrgUnitRecord[],
+  depth = 0,
+): Array<OrgUnitRecord & { depth: number }> => {
   const rows: Array<OrgUnitRecord & { depth: number }> = [];
   for (const node of tree) {
     rows.push({ ...node, depth });
@@ -43,18 +50,37 @@ const flattenTree = (tree: OrgUnitRecord[], depth = 0): Array<OrgUnitRecord & { 
   return rows;
 };
 
-const TreeNode = ({ node }: { node: OrgUnitRecord }) => {
+const TreeNode = ({
+  node,
+  onEdit,
+}: {
+  node: OrgUnitRecord;
+  onEdit: (unit: OrgUnitRecord) => void;
+}) => {
   return (
     <li className="space-y-2">
-      <div className="rounded-md border border-border px-3 py-2 text-sm">
-        <span className="font-medium">{node.name}</span>
-        <span className="ml-2 text-muted-foreground">({node.code})</span>
-        <span className="ml-2 text-xs text-muted-foreground">{node.unitType}</span>
+      <div className="rounded-md border border-border px-3 py-2 text-sm flex justify-between items-center">
+        <div>
+          <span className="font-medium">{node.name}</span>
+          <span className="ml-2 text-muted-foreground">({node.code})</span>
+          <span className="ml-2 text-xs text-muted-foreground">
+            {node.unitType}
+          </span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 cursor-pointer"
+          onClick={() => onEdit(node)}
+          aria-label={`Edit ${node.name}`}
+        >
+          <EditIcon className="size-4 hover:text-primary" />
+        </Button>
       </div>
       {node.children?.length ? (
         <ul className="ml-5 space-y-2 border-l border-border pl-3">
           {node.children.map((child) => (
-            <TreeNode key={child.id} node={child} />
+            <TreeNode key={child.id} node={child} onEdit={onEdit} />
           ))}
         </ul>
       ) : null}
@@ -97,7 +123,10 @@ export const OrgUnitList = () => {
       credentials: "include",
       headers: createAuthHeaders(),
     });
-    const payload = (await response.json()) as { data?: OrgUnitRecord[]; message?: string };
+    const payload = (await response.json()) as {
+      data?: OrgUnitRecord[];
+      message?: string;
+    };
     if (!response.ok) {
       throw new Error(payload.message || "Failed to load org units.");
     }
@@ -106,7 +135,11 @@ export const OrgUnitList = () => {
 
   useEffect(() => {
     loadTree().catch((error) => {
-      notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to load org units." });
+      notify?.({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to load org units.",
+      });
     });
   }, [notify]);
 
@@ -118,7 +151,9 @@ export const OrgUnitList = () => {
 
     try {
       setIsSubmitting(true);
-      const url = editingId ? `${apiBase}/v1/org-units/${editingId}` : `${apiBase}/v1/org-units`;
+      const url = editingId
+        ? `${apiBase}/v1/org-units/${editingId}`
+        : `${apiBase}/v1/org-units`;
       const response = await fetch(url, {
         method: editingId ? "PATCH" : "POST",
         credentials: "include",
@@ -141,7 +176,11 @@ export const OrgUnitList = () => {
       resetForm();
       await loadTree();
     } catch (error) {
-      notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to save org unit." });
+      notify?.({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to save org unit.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -174,25 +213,18 @@ export const OrgUnitList = () => {
             ) : (
               <ul className="space-y-2">
                 {tree.map((node) => (
-                  <TreeNode key={node.id} node={node} />
+                  <TreeNode key={node.id} node={node} onEdit={startEdit} />
                 ))}
               </ul>
             )}
-            {flatUnits.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {flatUnits.map((unit) => (
-                  <Button key={unit.id} variant="outline" size="sm" className="cursor-pointer" onClick={() => startEdit(unit)}>
-                    Edit {unit.name}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>{editingId ? "Edit Org Unit" : "Create Org Unit"}</CardTitle>
+            <CardTitle>
+              {editingId ? "Edit Org Unit" : "Create Org Unit"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1.5">
@@ -200,7 +232,12 @@ export const OrgUnitList = () => {
               <Input
                 id="org-code"
                 value={form.code}
-                onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    code: event.target.value,
+                  }))
+                }
               />
             </div>
             <div className="space-y-1.5">
@@ -208,14 +245,24 @@ export const OrgUnitList = () => {
               <Input
                 id="org-name"
                 value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
               />
             </div>
             <div className="space-y-1.5">
               <Label>Parent Unit</Label>
               <Select
                 value={form.parentId ?? "none"}
-                onValueChange={(value) => setForm((current) => ({ ...current, parentId: value === "none" ? null : value }))}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    parentId: value === "none" ? null : value,
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select parent" />
@@ -234,7 +281,12 @@ export const OrgUnitList = () => {
               <Label>Unit Type</Label>
               <Select
                 value={form.unitType}
-                onValueChange={(value) => setForm((current) => ({ ...current, unitType: value as OrgUnitPayload["unitType"] }))}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    unitType: value as OrgUnitPayload["unitType"],
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -252,7 +304,10 @@ export const OrgUnitList = () => {
               <Checkbox
                 checked={form.isClinical}
                 onCheckedChange={(checked) =>
-                  setForm((current) => ({ ...current, isClinical: Boolean(checked) }))
+                  setForm((current) => ({
+                    ...current,
+                    isClinical: Boolean(checked),
+                  }))
                 }
               />
               Clinical unit
@@ -261,7 +316,10 @@ export const OrgUnitList = () => {
               <Checkbox
                 checked={form.operates24h}
                 onCheckedChange={(checked) =>
-                  setForm((current) => ({ ...current, operates24h: Boolean(checked) }))
+                  setForm((current) => ({
+                    ...current,
+                    operates24h: Boolean(checked),
+                  }))
                 }
               />
               Operates 24 hours
@@ -270,22 +328,37 @@ export const OrgUnitList = () => {
               <Checkbox
                 checked={Boolean(form.active)}
                 onCheckedChange={(checked) =>
-                  setForm((current) => ({ ...current, active: Boolean(checked) }))
+                  setForm((current) => ({
+                    ...current,
+                    active: Boolean(checked),
+                  }))
                 }
               />
               Active
             </label>
             <div className="flex gap-2 pt-2">
-              <Button className="cursor-pointer" onClick={submit} disabled={isSubmitting}>
+              <Button
+                className="cursor-pointer"
+                onClick={submit}
+                disabled={isSubmitting}
+              >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
                     <PageLoader inline />
-                      Saving...
+                    Saving...
                   </span>
-                ) : editingId ? "Update Unit" : "Create Unit"}
+                ) : editingId ? (
+                  "Update Unit"
+                ) : (
+                  "Create Unit"
+                )}
               </Button>
               {editingId ? (
-                <Button variant="outline" className="cursor-pointer" onClick={resetForm}>
+                <Button
+                  variant="outline"
+                  className="cursor-pointer"
+                  onClick={resetForm}
+                >
                   Cancel edit
                 </Button>
               ) : null}
