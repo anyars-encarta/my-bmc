@@ -91,6 +91,7 @@ const TreeNode = ({
 export const OrgUnitList = () => {
   const { open: notify } = useNotification();
   const [tree, setTree] = useState<OrgUnitRecord[]>([]);
+  const [loadingTree, setLoadingTree] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState<OrgUnitPayload>({
@@ -119,18 +120,23 @@ export const OrgUnitList = () => {
   };
 
   const loadTree = async () => {
-    const response = await fetch(`${apiBase}/v1/org-units/tree`, {
-      credentials: "include",
-      headers: createAuthHeaders(),
-    });
-    const payload = (await response.json()) as {
-      data?: OrgUnitRecord[];
-      message?: string;
-    };
-    if (!response.ok) {
-      throw new Error(payload.message || "Failed to load org units.");
+    setLoadingTree(true);
+    try {
+      const response = await fetch(`${apiBase}/v1/org-units/tree`, {
+        credentials: "include",
+        headers: createAuthHeaders(),
+      });
+      const payload = (await response.json()) as {
+        data?: OrgUnitRecord[];
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.message || "Failed to load org units.");
+      }
+      setTree(payload.data ?? []);
+    } finally {
+      setLoadingTree(false);
     }
-    setTree(payload.data ?? []);
   };
 
   useEffect(() => {
@@ -207,17 +213,23 @@ export const OrgUnitList = () => {
           <CardHeader>
             <CardTitle>Org Unit Tree</CardTitle>
           </CardHeader>
-          <CardContent>
-            {tree.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No org units yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {tree.map((node) => (
-                  <TreeNode key={node.id} node={node} onEdit={startEdit} />
-                ))}
-              </ul>
-            )}
-          </CardContent>
+          {loadingTree ? (
+            <PageLoader />
+          ) : (
+            <CardContent>
+              {tree.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No org units yet.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {tree.map((node) => (
+                    <TreeNode key={node.id} node={node} onEdit={startEdit} />
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         <Card>
