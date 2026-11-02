@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -153,13 +154,20 @@ export const StaffingRequirementsPage = () => {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <Field label="Org unit">
-            <Select value={form.orgUnitId || "__none__"} onValueChange={(value) => setForm((current) => ({ ...current, orgUnitId: value === "__none__" ? "" : value }))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Choose a unit" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Choose a unit</SelectItem>
-                {units.map((unit) => <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.code})</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={form.orgUnitId || "__none__"}
+              onValueChange={(value) => setForm((current) => ({ ...current, orgUnitId: value === "__none__" ? "" : value }))}
+              options={[
+                { value: "__none__", label: "Choose a unit" },
+                ...units.map((unit) => ({
+                  value: unit.id,
+                  label: `${unit.name} (${unit.code})`,
+                })),
+              ]}
+              placeholder="Choose a unit"
+              searchPlaceholder="Search units..."
+              emptyMessage="No matching units."
+            />
           </Field>
           <Field label="Shift">
             <Select value={form.shiftTypeId || "__none__"} onValueChange={(value) => setForm((current) => ({ ...current, shiftTypeId: value === "__none__" ? "" : value }))}>

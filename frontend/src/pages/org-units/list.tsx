@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -269,7 +270,7 @@ export const OrgUnitList = () => {
             </div>
             <div className="space-y-1.5">
               <Label>Parent Unit</Label>
-              <Select
+              <SearchableSelect
                 value={form.parentId ?? "none"}
                 onValueChange={(value) =>
                   setForm((current) => ({
@@ -277,19 +278,17 @@ export const OrgUnitList = () => {
                     parentId: value === "none" ? null : value,
                   }))
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select parent" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No parent</SelectItem>
-                  {flatUnits.map((unit) => (
-                    <SelectItem key={unit.id} value={unit.id}>
-                      {"—".repeat(unit.depth)} {unit.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "none", label: "No parent" },
+                  ...flatUnits.map((unit) => ({
+                    value: unit.id,
+                    label: `${"—".repeat(unit.depth)} ${unit.name} (${unit.code})`,
+                  })),
+                ]}
+                placeholder="Select parent"
+                searchPlaceholder="Search units..."
+                emptyMessage="No matching units."
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Unit Type</Label>

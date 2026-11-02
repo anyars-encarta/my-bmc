@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -410,17 +411,20 @@ function UnitSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select value={value || "__none__"} onValueChange={(next) => onChange(next === "__none__" ? "" : next)}>
-      <SelectTrigger className="w-full">
-        <SelectValue placeholder="Choose a unit" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none__">Choose a unit</SelectItem>
-        {units.map((unit) => (
-          <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.code})</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <SearchableSelect
+      value={value || "__none__"}
+      onValueChange={(next) => onChange(next === "__none__" ? "" : next)}
+      options={[
+        { value: "__none__", label: "Choose a unit" },
+        ...units.map((unit) => ({
+          value: unit.id,
+          label: `${unit.name} (${unit.code})`,
+        })),
+      ]}
+      placeholder="Choose a unit"
+      searchPlaceholder="Search units..."
+      emptyMessage="No matching units."
+    />
   );
 }
 

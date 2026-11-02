@@ -9,13 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
 
 type BatchMove = { staffId: string; toUnitId: string };
@@ -191,20 +185,20 @@ export const TransfersPage = () => {
             {moves.map((move, index) => (
               <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-[1fr_1fr_auto]">
                 <Field label="Staff member">
-                  <Select
+                  <SearchableSelect
                     value={move.staffId || "__none__"}
                     onValueChange={(staffId) => updateMove(index, { staffId: staffId === "__none__" ? "" : staffId })}
-                  >
-                    <SelectTrigger className="w-full"><SelectValue placeholder="Choose staff" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Choose staff</SelectItem>
-                      {staffRecords.map((person) => (
-                        <SelectItem key={person.id} value={person.id}>
-                          {person.firstName} {person.lastName} ({person.employeeId})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={[
+                      { value: "__none__", label: "Choose staff" },
+                      ...staffRecords.map((person) => ({
+                        value: person.id,
+                        label: `${person.firstName} ${person.lastName} (${person.employeeId})`,
+                      })),
+                    ]}
+                    placeholder="Choose staff"
+                    searchPlaceholder="Search staff by name or employee ID..."
+                    emptyMessage="No matching staff."
+                  />
                 </Field>
                 <Field label="Destination unit">
                   <OrgUnitSelect
@@ -218,6 +212,7 @@ export const TransfersPage = () => {
                     variant="outline"
                     disabled={moves.length === 1}
                     onClick={() => setMoves((current) => current.filter((_, row) => row !== index))}
+                    className="cursor-pointer"
                   >
                     Remove
                   </Button>
@@ -226,16 +221,16 @@ export const TransfersPage = () => {
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setMoves((current) => [...current, { staffId: "", toUnitId: "" }])}>
+            <Button variant="outline" onClick={() => setMoves((current) => [...current, { staffId: "", toUnitId: "" }])} className="cursor-pointer">
               Add move
             </Button>
-            <Button onClick={createDraft} disabled={saving || !facilityDate}>{saving ? "Saving..." : editingBatchId ? "Save draft changes" : "Save draft"}</Button>
+            <Button onClick={createDraft} disabled={saving || !facilityDate} className="cursor-pointer">{saving ? "Saving..." : editingBatchId ? "Save draft changes" : "Save draft"}</Button>
             {editingBatchId ? <Button variant="outline" onClick={() => {
               setEditingBatchId("");
               setTitle("");
               setEffectiveFrom(facilityDate);
               setMoves([{ staffId: "", toUnitId: "" }]);
-            }}>Cancel edit</Button> : null}
+            }} className="cursor-pointer">Cancel edit</Button> : null}
           </div>
         </CardContent>
       </Card>
@@ -259,14 +254,15 @@ export const TransfersPage = () => {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => loadPreview(batch.id)} disabled={saving}>Preview</Button>
+                <Button variant="outline" onClick={() => loadPreview(batch.id)} disabled={saving} className="cursor-pointer">Preview</Button>
                 {batch.status === "DRAFT" ? (
                   <>
-                    <Button variant="outline" disabled={saving} onClick={() => editDraft(batch)}>Edit draft</Button>
+                    <Button variant="outline" disabled={saving} onClick={() => editDraft(batch)} className="cursor-pointer">Edit draft</Button>
                     <Button
                       variant="outline"
                       disabled={saving || previewedBatchId !== batch.id}
                       onClick={() => void transitionBatchFor(batch.id, "approve")}
+                      className="cursor-pointer"
                     >
                       Approve
                     </Button>
@@ -277,6 +273,7 @@ export const TransfersPage = () => {
                     <Button
                       disabled={saving || previewedBatchId !== batch.id}
                       onClick={() => void transitionBatchFor(batch.id, "apply")}
+                      className="cursor-pointer"
                     >
                       Apply
                     </Button>
@@ -284,6 +281,7 @@ export const TransfersPage = () => {
                       variant="outline"
                       disabled={saving}
                       onClick={() => void transitionBatchFor(batch.id, "cancel")}
+                      className="cursor-pointer"
                     >
                       Cancel batch
                     </Button>
@@ -414,12 +412,19 @@ function OrgUnitSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select value={value || "__none__"} onValueChange={(next) => onChange(next === "__none__" ? "" : next)}>
-      <SelectTrigger className="w-full"><SelectValue placeholder="Choose an org unit" /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none__">Choose an org unit</SelectItem>
-        {units.map((unit) => <SelectItem key={unit.id} value={unit.id}>{unit.name} ({unit.code})</SelectItem>)}
-      </SelectContent>
-    </Select>
+    <SearchableSelect
+      value={value || "__none__"}
+      onValueChange={(next) => onChange(next === "__none__" ? "" : next)}
+      options={[
+        { value: "__none__", label: "Choose an org unit" },
+        ...units.map((unit) => ({
+          value: unit.id,
+          label: `${unit.name} (${unit.code})`,
+        })),
+      ]}
+      placeholder="Choose an org unit"
+      searchPlaceholder="Search org units..."
+      emptyMessage="No matching org units."
+    />
   );
 }
