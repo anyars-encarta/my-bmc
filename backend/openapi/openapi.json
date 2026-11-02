@@ -10,6 +10,89 @@
     }
   ],
   "paths": {
+    "/public/hosting-renewal/reference": {
+      "servers": [{ "url": "/api" }],
+      "post": {
+        "summary": "Create a server-priced hosting renewal reference",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["quantityInMonths"],
+                "properties": {
+                  "quantityInMonths": { "type": "integer", "minimum": 1, "maximum": 36 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Server-priced renewal and payment reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "reference": { "type": "string" },
+                        "quantityInMonths": { "type": "integer" },
+                        "exchangeRate": { "type": "number" },
+                        "totalCediEquivalent": { "type": "number" },
+                        "startDate": { "type": "string", "format": "date" },
+                        "endDate": { "type": "string", "format": "date" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/hosting-renewal/confirm": {
+      "servers": [{ "url": "/api" }],
+      "post": {
+        "summary": "Confirm a server-issued hosting renewal payment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["quantityInMonths", "totalCediEquivalent", "payment"],
+                "properties": {
+                  "quantityInMonths": { "type": "integer", "minimum": 1, "maximum": 36 },
+                  "totalCediEquivalent": { "type": "number", "exclusiveMinimum": 0 },
+                  "payment": {
+                    "type": "object",
+                    "required": ["reference", "amount", "currency"],
+                    "properties": {
+                      "reference": { "type": "string" },
+                      "amount": { "type": "number" },
+                      "currency": { "type": "string", "const": "GHS" },
+                      "status": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Hosting renewal confirmed" },
+          "400": { "description": "Invalid quote or payment" },
+          "404": { "description": "No stored renewal matches the payment reference" },
+          "409": { "description": "The stored renewal is not awaiting confirmation" }
+        }
+      }
+    },
     "/me": {
       "get": {
         "summary": "Current authenticated profile",
@@ -280,6 +363,17 @@
         "summary": "Atomically apply an approved transfer batch",
         "parameters": [{ "$ref": "#/components/parameters/Id" }],
         "responses": { "200": { "description": "Batch applied" } }
+      }
+    },
+    "/transfer-batches/{id}/cancel": {
+      "post": {
+        "summary": "Cancel an approved transfer batch",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": {
+          "200": { "description": "Batch cancelled" },
+          "404": { "description": "Batch not found" },
+          "409": { "description": "Batch is not approved" }
+        }
       }
     },
     "/unit-staffing-requirements": {

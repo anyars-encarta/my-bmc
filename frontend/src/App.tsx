@@ -47,16 +47,15 @@ import { authProvider } from "./providers/auth";
 import { accessControlProvider } from "./providers/accessControl";
 import { dataProvider } from "./providers/data";
 import { SetupRecord } from "./types/domain";
-import { BACKEND_BASE_URL } from "./constants";
 import { RouteLoading } from "./components/refine-ui/layout/route-loading";
 import HostingCriticalInfoModal from "./components/HostingCriticalInfoModal";
+import { ProtectedRoute } from "./components/auth/protected-route";
+import { AuthProvider } from "./contexts/auth-context";
+import { getPublicApiBase } from "./lib/public-api";
 
 const HostingRenewalPage = lazy(
   () => import("./pages/hosting-renewal/hosting"),
 );
-
-const getPublicApiBase = () =>
-  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 const formatPathSegment = (value: string) =>
   value.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -178,8 +177,9 @@ function App() {
   }
 
   return (
-    <ThemeProvider>
-      <BrowserRouter>
+    <AuthProvider>
+      <ThemeProvider>
+        <BrowserRouter>
         <RefineKbarProvider>
           <DevtoolsProvider>
             <Refine
@@ -232,21 +232,22 @@ function App() {
 
                   <Route path="forgot-password" element={<ForgotPassword />} />
 
-                  <Route
-                    element={
-                      <Authenticated
-                        key="protected-routes"
-                        redirectOnFail="/login"
-                      >
-                        <>
-                          <HostingCriticalInfoModal setupInfo={info} />
-                          <Layout>
-                            <Outlet />
-                          </Layout>
-                        </>
-                      </Authenticated>
-                    }
-                  >
+                  <Route element={<ProtectedRoute />}>
+                    <Route
+                      element={
+                        <Authenticated
+                          key="protected-routes"
+                          redirectOnFail="/login"
+                        >
+                          <>
+                            <HostingCriticalInfoModal setupInfo={info} />
+                            <Layout>
+                              <Outlet />
+                            </Layout>
+                          </>
+                        </Authenticated>
+                      }
+                    >
                       <Route
                         index
                         element={<NavigateToResource resource="dashboard" />}
@@ -295,6 +296,7 @@ function App() {
                       />
                       <Route path="*" element={<ErrorComponent />} />
                   </Route>
+                  </Route>
                 </Routes>
 
                 <Toaster />
@@ -305,8 +307,9 @@ function App() {
               <DevtoolsPanel />
           </DevtoolsProvider>
         </RefineKbarProvider>
-      </BrowserRouter>
-    </ThemeProvider>
+        </BrowserRouter>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 

@@ -25,7 +25,7 @@ export type SessionPayload = {
 export type AuthContextValue = {
   user: AuthUser | null;
   isLoading: boolean;
-  refreshSession: () => Promise<void>;
+  refreshSession: () => Promise<AuthUser | null>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };

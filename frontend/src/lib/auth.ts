@@ -14,8 +14,12 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
-const authUrl = (path: string) => `${API_BASE_URL}/api/auth${path.startsWith("/") ? path : `/${path}`}`;
-const apiUrl = (path: string) => `${API_BASE_URL}/api${path.startsWith("/") ? path : `/${path}`}`;
+const apiBaseUrl = API_BASE_URL.endsWith("/api")
+  ? API_BASE_URL
+  : `${API_BASE_URL}/api`;
+
+const authUrl = (path: string) => `${apiBaseUrl}/auth${path.startsWith("/") ? path : `/${path}`}`;
+const apiUrl = (path: string) => `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
 const parseError = async (response: Response) => {
   try {

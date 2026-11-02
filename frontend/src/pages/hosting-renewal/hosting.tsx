@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
 
-import { BACKEND_BASE_URL } from "@/constants/env";
+import { getPublicApiBase } from "@/lib/public-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,9 +18,23 @@ const formatCurrency = (amount: number, currency: string) =>
   }).format(amount);
 
 const addMonths = (date: Date, months: number) => {
-  const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
-  return result;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + months;
+  const targetYear = year + Math.floor(month / 12);
+  const targetMonth = ((month % 12) + 12) % 12;
+  const day = Math.min(
+    date.getUTCDate(),
+    new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate(),
+  );
+  return new Date(Date.UTC(
+    targetYear,
+    targetMonth,
+    day,
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  ));
 };
 
 const toLocalDateString = (date: Date) => date.toISOString().slice(0, 10);
@@ -30,9 +43,6 @@ const formatDisplayDate = (isoDate: string) => {
   const [year, month, day] = isoDate.split("-");
   return `${day}/${month}/${year}`;
 };
-
-const getPublicApiBase = () =>
-  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 type HostingInfo = {
   facilityName: string | null;
@@ -52,8 +62,24 @@ type ExchangeRateState =
 type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
-  | { status: "success"; endDate: string; totalCedi: number; paymentReference: string | null }
+  | { status: "success"; months: number; endDate: string; totalCedi: number; paymentReference: string | null }
   | { status: "error"; message: string };
+
+type RenewalReference = {
+  reference: string;
+  quantityInMonths: number;
+  exchangeRate: number;
+  totalCediEquivalent: number;
+  startDate: string;
+  endDate: string;
+};
+
+type AcceptedCharge = {
+  reference: string;
+  quantityInMonths: number;
+  amount: number;
+  endDate: string;
+};
 
 const fetchUsdToGhsRate = async (): Promise<number> => {
   const response = await fetch("https://api.frankfurter.dev/v2/rate/USD/GHS");
@@ -73,13 +99,14 @@ const fetchUsdToGhsRate = async (): Promise<number> => {
 };
 
 const HostingRenewal = () => {
-  const navigate = useNavigate();
   const [info, setInfo] = useState<HostingInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(true);
   const [infoError, setInfoError] = useState<string | null>(null);
   const [months, setMonths] = useState("1");
   const [exchangeRate, setExchangeRate] = useState<ExchangeRateState>({ status: "idle" });
   const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
+  const [renewalReference, setRenewalReference] = useState<RenewalReference | null>(null);
+  const [acceptedCharge, setAcceptedCharge] = useState<AcceptedCharge | null>(null);
 
   const paystackPublicKey =
     (import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string | undefined) ?? "";
@@ -91,16 +118,18 @@ const HostingRenewal = () => {
 
   const monthlyDollarRate = info?.monthlyRenewalFee ? Number(info.monthlyRenewalFee) : null;
   const totalDollarAmount = monthlyDollarRate !== null ? monthlyDollarRate * quantityInMonths : null;
-  const totalCediEquivalent =
-    totalDollarAmount !== null && exchangeRate.status === "loaded"
+  const totalCediEquivalent = renewalReference?.quantityInMonths === quantityInMonths
+    ? renewalReference.totalCediEquivalent
+    : totalDollarAmount !== null && exchangeRate.status === "loaded"
       ? totalDollarAmount * exchangeRate.rate
       : null;
   const paymentAmount = totalCediEquivalent !== null ? Number(totalCediEquivalent.toFixed(2)) : 0;
-
-  const paystackReference = useMemo(
-    () => `hosting-renewal-${quantityInMonths}-${Date.now()}`,
-    [quantityInMonths],
-  );
+  const displayedStartDate = renewalReference?.quantityInMonths === quantityInMonths
+    ? renewalReference.startDate
+    : startDate;
+  const displayedEndDate = renewalReference?.quantityInMonths === quantityInMonths
+    ? renewalReference.endDate
+    : endDate;
 
   useEffect(() => {
     const loadInfo = async () => {
@@ -166,23 +195,19 @@ const HostingRenewal = () => {
     void loadExchangeRate();
   }, [loadExchangeRate]);
 
-  const confirmRenewal = useCallback(
-    async (payment: {
-      reference?: unknown;
-      transactionId?: unknown;
-      serviceChargeReference?: unknown;
-      status?: unknown;
-      serviceCharge?: unknown;
-      amount: number;
-      currency: string;
-    }) => {
+  const confirmRenewal = useCallback(async (charge: AcceptedCharge) => {
       const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quantityInMonths,
-          totalCediEquivalent: Number(totalCediEquivalent?.toFixed(2) ?? 0),
-          payment,
+          quantityInMonths: charge.quantityInMonths,
+          totalCediEquivalent: charge.amount,
+          payment: {
+            reference: charge.reference,
+            status: "success",
+            amount: charge.amount,
+            currency: "GHS",
+          },
         }),
       });
 
@@ -202,93 +227,115 @@ const HostingRenewal = () => {
 
       setSubmitState({
         status: "success",
-        endDate: payload.data?.renewal?.endDate ?? endDate,
-        totalCedi: Number(totalCediEquivalent?.toFixed(2) ?? 0),
-        paymentReference: payload.data?.paymentReference ?? null,
+        months: charge.quantityInMonths,
+        endDate: payload.data?.renewal?.endDate ?? charge.endDate,
+        totalCedi: charge.amount,
+        paymentReference: payload.data?.paymentReference ?? charge.reference,
       });
+      setAcceptedCharge(null);
+    }, []);
 
-      navigate("/login", { replace: true });
-    },
-    [endDate, navigate, quantityInMonths, totalCediEquivalent],
-  );
+  const handlePay = useCallback(async () => {
+    if (acceptedCharge) {
+      setSubmitState({ status: "submitting" });
+      try {
+        await confirmRenewal(acceptedCharge);
+      } catch (error) {
+        setSubmitState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Unable to confirm hosting renewal.",
+        });
+      }
+      return;
+    }
 
-  const handlePay = useCallback(() => {
     if (!paystackPublicKey) {
       setSubmitState({ status: "error", message: "Paystack public key is not configured." });
       return;
     }
 
-    if (exchangeRate.status !== "loaded" || totalCediEquivalent === null || paymentAmount <= 0) {
-      setSubmitState({ status: "error", message: "The renewal amount is not ready yet." });
+    if (monthlyDollarRate === null) {
+      setSubmitState({ status: "error", message: "Monthly renewal fee is not configured." });
       return;
     }
 
     setSubmitState({ status: "submitting" });
-
     const email = info?.businessEmail || "billing@business.local";
     const [firstName, ...restName] = (info?.facilityName || "Business").split(" ").filter(Boolean);
     const lastName = restName.join(" ") || undefined;
 
-    void openPaystackCheckout({
-      key: paystackPublicKey,
-      email,
-      amount: paymentAmount,
-      currency: "GHS",
-      reference: paystackReference,
-      firstname: firstName || "Business",
-      lastname: lastName,
-      metadata: {
-        quantityInMonths,
-        purpose: "hosting_renewal",
-      },
-      onSuccess: async (response) => {
-        const isSuccessful = String(response.status ?? "").toLowerCase() === "success";
-        const resolvedReference =
-          String(response.reference ?? "").trim() ||
-          String(response.trans ?? "").trim() ||
-          String(response.transaction ?? "").trim() ||
-          String(response.trxref ?? "").trim() ||
-          paystackReference;
+    try {
+      const referenceResponse = await fetch(`${getPublicApiBase()}/public/hosting-renewal/reference`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantityInMonths }),
+      });
+      const referencePayload = (await referenceResponse.json()) as {
+        success?: boolean;
+        error?: string;
+        data?: RenewalReference;
+      };
+      if (!referenceResponse.ok || !referencePayload.success || !referencePayload.data) {
+        throw new Error(referencePayload.error || "Failed to prepare hosting renewal payment.");
+      }
+      const quote = referencePayload.data;
+      if (
+        !quote.reference ||
+        quote.quantityInMonths !== quantityInMonths ||
+        !Number.isFinite(quote.exchangeRate) ||
+        !Number.isFinite(quote.totalCediEquivalent) ||
+        quote.totalCediEquivalent <= 0
+      ) {
+        throw new Error("The server returned an invalid hosting renewal quote.");
+      }
 
-        if (!isSuccessful || !resolvedReference) {
-          setSubmitState({ status: "error", message: "Paystack did not confirm this payment." });
-          return;
-        }
-
-        try {
-          await confirmRenewal({
-            reference: resolvedReference,
-            transactionId: resolvedReference,
-            status: response.status,
-            amount: paymentAmount,
-            currency: "GHS",
+      setRenewalReference(quote);
+      setExchangeRate({ status: "loaded", rate: quote.exchangeRate, fetchedAt: new Date() });
+      const charge: AcceptedCharge = {
+        reference: quote.reference,
+        quantityInMonths: quote.quantityInMonths,
+        amount: quote.totalCediEquivalent,
+        endDate: quote.endDate,
+      };
+      await openPaystackCheckout({
+        key: paystackPublicKey,
+        email,
+        amount: charge.amount,
+        currency: "GHS",
+        reference: charge.reference,
+        firstname: firstName || "Business",
+        lastname: lastName,
+        onSuccess: (response) => {
+          if (String(response.status ?? "").toLowerCase() !== "success") {
+            setSubmitState({ status: "error", message: "Paystack did not confirm this payment." });
+            return;
+          }
+          setAcceptedCharge(charge);
+          void confirmRenewal(charge).catch((error: unknown) => {
+            setSubmitState({
+              status: "error",
+              message: error instanceof Error ? error.message : "Unable to confirm hosting renewal.",
+            });
           });
-        } catch (error) {
-          setSubmitState({
-            status: "error",
-            message: error instanceof Error ? error.message : "Unable to confirm hosting renewal.",
-          });
-        }
-      },
-      onClose: () => {
-        setSubmitState((current) => (current.status === "submitting" ? { status: "idle" } : current));
-      },
-    }).catch((error: unknown) => {
+        },
+        onClose: () => {
+          setSubmitState((current) => (current.status === "submitting" ? { status: "idle" } : current));
+        },
+      });
+    } catch (error) {
       setSubmitState({
         status: "error",
         message: error instanceof Error ? error.message : "Unable to open Paystack checkout.",
       });
-    });
+    }
   }, [
+    acceptedCharge,
     confirmRenewal,
-    exchangeRate.status,
     info?.businessEmail,
     info?.facilityName,
+    monthlyDollarRate,
     paystackPublicKey,
-    paystackReference,
-    paymentAmount,
     quantityInMonths,
-    totalCediEquivalent,
   ]);
 
   if (infoLoading) {
@@ -333,7 +380,7 @@ const HostingRenewal = () => {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Duration</span>
                 <span className="font-medium">
-                  {quantityInMonths} month{quantityInMonths > 1 ? "s" : ""}
+                  {submitState.months} month{submitState.months > 1 ? "s" : ""}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -412,7 +459,11 @@ const HostingRenewal = () => {
                 min={1}
                 max={36}
                 value={months}
-                onChange={(event) => setMonths(event.target.value)}
+                disabled={Boolean(acceptedCharge) || submitState.status === "submitting"}
+                onChange={(event) => {
+                  setMonths(event.target.value);
+                  setRenewalReference(null);
+                }}
                 placeholder="e.g. 3"
                 required
               />
@@ -421,11 +472,11 @@ const HostingRenewal = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Start Date</Label>
-                <Input readOnly value={formatDisplayDate(startDate)} className="bg-muted cursor-not-allowed" />
+                <Input readOnly value={formatDisplayDate(displayedStartDate)} className="bg-muted cursor-not-allowed" />
               </div>
               <div className="space-y-1.5">
                 <Label>End Date</Label>
-                <Input readOnly value={formatDisplayDate(endDate)} className="bg-muted cursor-not-allowed" />
+                <Input readOnly value={formatDisplayDate(displayedEndDate)} className="bg-muted cursor-not-allowed" />
               </div>
             </div>
 
@@ -499,16 +550,19 @@ const HostingRenewal = () => {
               size="lg"
               className="w-full cursor-pointer"
               disabled={
-                monthlyDollarRate === null ||
-                exchangeRate.status !== "loaded" ||
-                submitState.status === "submitting"
+                submitState.status === "submitting" ||
+                (!acceptedCharge && monthlyDollarRate === null)
               }
             >
               {submitState.status === "submitting" ? (
                 <span className="flex items-center gap-2">
                   <Loader className="h-8 w-8 animate-spin" />
-                  Opening payment gateway...
+                  {acceptedCharge ? "Confirming payment..." : "Preparing payment..."}
                 </span>
+              ) : acceptedCharge ? (
+                "Retry confirmation"
+              ) : totalCediEquivalent === null ? (
+                "Get current GHS quote & renew hosting"
               ) : (
                 `Pay ${formatCurrency(paymentAmount, "GHS")} & Renew Hosting`
               )}

@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useShow, useNotification } from "@refinedev/core";
+import { useGetIdentity, useShow, useNotification } from "@refinedev/core";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
 import type {
@@ -29,6 +29,7 @@ import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
 import { StaffAssignments } from "./assignments";
 import { StaffDeactivation } from "./deactivate";
+import { canReadStaffAssignments } from "@/lib/workforce-access";
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
@@ -45,6 +46,8 @@ export const StaffShow = () => {
   const staffId = id ?? "";
   const { result: record } = useShow<StaffRecord>({});
   const { open: notify } = useNotification();
+  const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const canReadAssignments = canReadStaffAssignments(identity);
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
   const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});
   const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
@@ -240,7 +243,7 @@ export const StaffShow = () => {
         </CardContent>
       </Card>
 
-      <StaffAssignments staffId={staffId} />
+      {canReadAssignments ? <StaffAssignments staffId={staffId} /> : null}
       <StaffDeactivation
         staffId={staffId}
         status={deactivated ? "inactive" : record?.status}

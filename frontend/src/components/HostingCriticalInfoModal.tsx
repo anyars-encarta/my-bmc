@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { BACKEND_BASE_URL } from "@/constants";
+import { getPublicApiBase } from "@/lib/public-api";
 
 import { Separator } from "./ui/separator";
 import { formatDate } from "@/lib/timeFormat";
@@ -22,10 +22,10 @@ type HostingModalVariant = "temporal-hosting" | "hosting-expiry" | null;
 
 const MILLISECONDS_IN_A_DAY = 1000 * 60 * 60 * 24;
 
-const getPublicApiBase = () =>
-  BACKEND_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
-
-const getDaysUntilExpiry = (hostingExpiryDate: string | null | undefined) => {
+const getDaysUntilExpiry = (
+  hostingExpiryDate: string | null | undefined,
+  currentDate: Date,
+) => {
   if (!hostingExpiryDate) {
     return null;
   }
@@ -35,9 +35,8 @@ const getDaysUntilExpiry = (hostingExpiryDate: string | null | undefined) => {
     return null;
   }
 
-  const today = new Date();
   const todayStartUtc = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+    Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), currentDate.getUTCDate()),
   );
 
   return Math.floor(
@@ -57,7 +56,13 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
   const [initialized, setInitialized] = useState(false);
   const [actionCompleted, setActionCompleted] = useState(false);
   const [modalVariant, setModalVariant] = useState<HostingModalVariant>(null);
+  const [clockNow, setClockNow] = useState(() => new Date());
   const hasHandledExpiredHosting = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -75,30 +80,44 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
     setInitialized(false);
 
     const loadSystemSettings = async () => {
+      let lastError: unknown;
       try {
-        const response = await fetch(
-          `${getPublicApiBase()}/public/hosting-renewal/info`,
-        );
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (!isActive) return;
+          try {
+            const response = await fetch(
+              `${getPublicApiBase()}/public/hosting-renewal/info`,
+            );
 
-        if (!response.ok) {
-          throw new Error("Failed to load hosting info");
-        }
+            if (!response.ok) {
+              throw new Error("Failed to load hosting info");
+            }
 
-        const payload = (await response.json()) as {
-          success?: boolean;
-          data?: SetupRecord;
-          error?: string;
-        };
+            const payload = (await response.json()) as {
+              success?: boolean;
+              data?: SetupRecord;
+              error?: string;
+            };
 
-        if (!payload.success) {
-          throw new Error(payload.error || "Failed to load hosting info");
+            if (!payload.success) {
+              throw new Error(payload.error || "Failed to load hosting info");
+            }
+
+            if (isActive) {
+              setSystemSettings(payload.data ?? null);
+            }
+            return;
+          } catch (error) {
+            lastError = error;
+            if (!isActive) return;
+            if (attempt < 2) {
+              await new Promise<void>((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+            }
+          }
         }
 
         if (isActive) {
-          setSystemSettings(payload.data ?? null);
-        }
-      } catch {
-        if (isActive) {
+          console.error("GET /public/hosting-renewal/info failed after retries:", lastError);
           setSystemSettings(null);
         }
       } finally {
@@ -115,17 +134,12 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
     };
   }, [setupInfo]);
 
-  const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate);
+  const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate, clockNow);
 
   const isHostingExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
 
   useEffect(() => {
-    if (initialized || !hasFetchedSettings) {
-      return;
-    }
-
-    if (!systemSettings) {
-      setInitialized(true);
+    if (!hasFetchedSettings) {
       return;
     }
 
@@ -143,6 +157,13 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
         richColors: true,
       });
       navigate("/hosting-renewal", { replace: true });
+      return;
+    }
+
+    if (initialized) return;
+
+    if (!systemSettings) {
+      setInitialized(true);
       return;
     }
 

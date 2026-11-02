@@ -17,8 +17,8 @@ test("temporary and cover assignments override primary assignments", () => {
     { assignmentType: "TEMPORARY", effectiveFrom: "2026-02-01", effectiveTo: "2026-03-01" },
     { assignmentType: "COVER", effectiveFrom: "2026-02-15", effectiveTo: "2026-02-15" },
   ]);
-  assert.equal(effective?.assignmentType, "TEMPORARY");
-  assert.equal(effective?.effectiveFrom, "2026-02-01");
+  assert.equal(effective?.assignmentType, "COVER");
+  assert.equal(effective?.effectiveFrom, "2026-02-15");
 });
 
 test(

@@ -181,8 +181,14 @@ export const hostingRenewal = pgTable(
       precision: 10,
       scale: 2,
     }).notNull(),
+    paymentReference: varchar("payment_reference", { length: 120 }),
+    usdToGhsRate: numeric("usd_to_ghs_rate", { precision: 12, scale: 6 }),
+    status: varchar("status", { length: 12 }).$type<"PENDING" | "COMPLETED">().notNull().default("COMPLETED"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex("hosting_renewal_payment_reference_unique").on(table.paymentReference),
+    check("chk_hosting_renewal_status", sql`${table.status} IN ('PENDING', 'COMPLETED')`),
     check(
       "chk_hosting_renewal_monthly_nonnegative",
       sql`${table.monthlyDollarRate} >= 0`,

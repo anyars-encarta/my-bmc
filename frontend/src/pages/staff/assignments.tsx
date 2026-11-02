@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useNotification } from "@refinedev/core";
+import { useGetIdentity, useNotification } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
+import { fetchFacilityLocalDate } from "@/lib/facility-clock";
+import { canWriteStaffAssignments } from "@/lib/workforce-access";
 import type { OrgUnitRecord } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,31 +45,33 @@ type EffectiveAssignment = {
 } | null;
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
-const today = () => new Date().toISOString().slice(0, 10);
 
 const getErrorMessage = (payload: { message?: string; error?: string }, fallback: string) =>
   payload.message || payload.error || fallback;
 
 export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   const { open: notify } = useNotification();
+  const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const canWriteAssignments = canWriteStaffAssignments(identity);
   const [units, setUnits] = useState<OrgUnitRecord[]>([]);
   const [records, setRecords] = useState<AssignmentRecord[]>([]);
-  const [effectiveOn, setEffectiveOn] = useState(today());
+  const [facilityDate, setFacilityDate] = useState("");
+  const [effectiveOn, setEffectiveOn] = useState("");
   const [effectiveAssignment, setEffectiveAssignment] = useState<EffectiveAssignment>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [temporaryOpen, setTemporaryOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [transfer, setTransfer] = useState({
     toUnitId: "",
-    effectiveFrom: today(),
+    effectiveFrom: "",
     reason: "TRANSFER",
     note: "",
   });
   const [temporary, setTemporary] = useState({
     orgUnitId: "",
     assignmentType: "TEMPORARY" as "TEMPORARY" | "COVER",
-    effectiveFrom: today(),
-    effectiveTo: today(),
+    effectiveFrom: "",
+    effectiveTo: "",
     note: "",
   });
 
@@ -102,12 +106,13 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   useEffect(() => {
     const loadReferences = async () => {
       try {
-        const [allUnits, assignmentResponse] = await Promise.all([
+        const [allUnits, assignmentResponse, facilityDate] = await Promise.all([
           fetchAllUnits(),
           fetch(`${apiBase}/v1/staff/${staffId}/assignments`, {
             credentials: "include",
             headers: createAuthHeaders(),
           }),
+          fetchFacilityLocalDate(),
         ]);
         const assignmentPayload = (await assignmentResponse.json()) as {
           data?: AssignmentRecord[];
@@ -119,6 +124,14 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
         }
         setUnits(allUnits.filter((unit) => unit.active));
         setRecords(assignmentPayload.data ?? []);
+        setFacilityDate(facilityDate);
+        setEffectiveOn((value) => value || facilityDate);
+        setTransfer((value) => ({ ...value, effectiveFrom: value.effectiveFrom || facilityDate }));
+        setTemporary((value) => ({
+          ...value,
+          effectiveFrom: value.effectiveFrom || facilityDate,
+          effectiveTo: value.effectiveTo || facilityDate,
+        }));
       } catch (error) {
         notify?.({
           type: "error",
@@ -130,6 +143,7 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   }, [notify, staffId]);
 
   useEffect(() => {
+    if (!effectiveOn) return;
     loadEffectiveUnit(effectiveOn).catch((error) =>
       notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to resolve effective unit." }),
     );
@@ -196,6 +210,8 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle>Assignments &amp; transfers</CardTitle>
         <div className="flex flex-wrap gap-2">
+          {canWriteAssignments ? (
+            <>
           <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="cursor-pointer">Permanent transfer</Button>
@@ -218,7 +234,8 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
                 <FieldLabel label="Effective from">
                   <Input
                     type="date"
-                    min={today()}
+                    min={facilityDate}
+                    disabled={!facilityDate}
                     value={transfer.effectiveFrom}
                     onChange={(event) =>
                       setTransfer((value) => ({ ...value, effectiveFrom: event.target.value }))
@@ -292,7 +309,8 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
                   <FieldLabel label="Start date">
                     <Input
                       type="date"
-                      min={today()}
+                      min={facilityDate}
+                      disabled={!facilityDate}
                       value={temporary.effectiveFrom}
                       onChange={(event) =>
                         setTemporary((value) => ({ ...value, effectiveFrom: event.target.value }))
@@ -324,6 +342,8 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+            </>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>

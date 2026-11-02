@@ -89,8 +89,9 @@ export const StaffingRequirementsPage = () => {
   }, [loadRequirements, notify]);
 
   const submit = async () => {
-    const minimum = Number(form.minStaff);
-    if (!form.orgUnitId || !form.shiftTypeId || !Number.isInteger(minimum) || minimum < 0) {
+    const minStaff = form.minStaff.trim();
+    const minimum = Number(minStaff);
+    if (!form.orgUnitId || !form.shiftTypeId || !minStaff || !Number.isInteger(minimum) || minimum < 0) {
       notify?.({ type: "error", message: "Choose a unit and shift, and enter a non-negative whole-number minimum." });
       return;
     }

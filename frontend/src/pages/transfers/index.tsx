@@ -3,6 +3,7 @@ import { useNotification } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
+import { fetchFacilityLocalDate } from "@/lib/facility-clock";
 import type { OrgUnitRecord, StaffRecord } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,7 +54,6 @@ type BatchEnvelope = { data?: BatchRecord; message?: string; error?: string };
 type BatchesEnvelope = { data?: BatchRecord[]; message?: string; error?: string };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
-const today = () => new Date().toISOString().slice(0, 10);
 const errorMessage = (payload: { message?: string; error?: string }, fallback: string) =>
   payload.message || payload.error || fallback;
 
@@ -63,7 +63,8 @@ export const TransfersPage = () => {
   const [units, setUnits] = useState<OrgUnitRecord[]>([]);
   const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [title, setTitle] = useState("");
-  const [effectiveFrom, setEffectiveFrom] = useState(today());
+  const [facilityDate, setFacilityDate] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
   const [moves, setMoves] = useState<BatchMove[]>([{ staffId: "", toUnitId: "" }]);
   const [editingBatchId, setEditingBatchId] = useState("");
   const [activeBatchId, setActiveBatchId] = useState("");
@@ -90,17 +91,15 @@ export const TransfersPage = () => {
   useEffect(() => {
     const loadReferences = async () => {
       try {
-        const [unitsResponse, staffRecords] = await Promise.all([
-          fetch(`${apiBase}/v1/org-units?page=1&limit=200`, {
-            credentials: "include",
-            headers: createAuthHeaders(),
-          }),
+        const [allUnits, staffRecords, facilityDate] = await Promise.all([
+          fetchAllOrgUnits(),
           fetchAllStaff(),
+          fetchFacilityLocalDate(),
         ]);
-        const unitPayload = (await unitsResponse.json()) as UnitEnvelope;
-        if (!unitsResponse.ok) throw new Error(errorMessage(unitPayload, "Failed to load org units."));
-        setUnits((unitPayload.data ?? []).filter((unit) => unit.active));
+        setUnits(allUnits.filter((unit) => unit.active));
         setStaffRecords(staffRecords.filter((person) => person.status === "active"));
+        setFacilityDate(facilityDate);
+        setEffectiveFrom(facilityDate);
       } catch (error) {
         notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to load transfer data." });
       }
@@ -185,7 +184,7 @@ export const TransfersPage = () => {
               <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Ward cover rotation" />
             </Field>
             <Field label="Effective from">
-              <Input type="date" min={today()} value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} />
+              <Input type="date" min={facilityDate} value={effectiveFrom} disabled={!facilityDate} onChange={(event) => setEffectiveFrom(event.target.value)} />
             </Field>
           </div>
           <div className="space-y-3">
@@ -230,11 +229,11 @@ export const TransfersPage = () => {
             <Button variant="outline" onClick={() => setMoves((current) => [...current, { staffId: "", toUnitId: "" }])}>
               Add move
             </Button>
-            <Button onClick={createDraft} disabled={saving}>{saving ? "Saving..." : editingBatchId ? "Save draft changes" : "Save draft"}</Button>
+            <Button onClick={createDraft} disabled={saving || !facilityDate}>{saving ? "Saving..." : editingBatchId ? "Save draft changes" : "Save draft"}</Button>
             {editingBatchId ? <Button variant="outline" onClick={() => {
               setEditingBatchId("");
               setTitle("");
-              setEffectiveFrom(today());
+              setEffectiveFrom(facilityDate);
               setMoves([{ staffId: "", toUnitId: "" }]);
             }}>Cancel edit</Button> : null}
           </div>
@@ -274,12 +273,21 @@ export const TransfersPage = () => {
                   </>
                 ) : null}
                 {batch.status === "APPROVED" ? (
-                  <Button
-                    disabled={saving || previewedBatchId !== batch.id}
-                    onClick={() => void transitionBatchFor(batch.id, "apply")}
-                  >
-                    Apply
-                  </Button>
+                  <>
+                    <Button
+                      disabled={saving || previewedBatchId !== batch.id}
+                      onClick={() => void transitionBatchFor(batch.id, "apply")}
+                    >
+                      Apply
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() => void transitionBatchFor(batch.id, "cancel")}
+                    >
+                      Cancel batch
+                    </Button>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -335,15 +343,23 @@ export const TransfersPage = () => {
     setMoves((current) => current.map((move, row) => row === index ? { ...move, ...patch } : move));
   }
 
-  async function transitionBatchFor(batchId: string, action: "approve" | "apply") {
+  async function transitionBatchFor(batchId: string, action: "approve" | "apply" | "cancel") {
     setActiveBatchId(batchId);
     try {
       setSaving(true);
       await request<BatchEnvelope>(`transfer-batches/${batchId}/${action}`, { method: "POST" });
-      notify?.({ type: "success", message: action === "approve" ? "Batch approved." : "Batch applied atomically." });
+      notify?.({
+        type: "success",
+        message:
+          action === "approve"
+            ? "Batch approved."
+            : action === "apply"
+              ? "Batch applied atomically."
+              : "Batch cancelled.",
+      });
       await loadBatches();
       setPreviewedBatchId("");
-      if (action === "apply") setPreview(null);
+      if (action !== "approve") setPreview(null);
     } catch (error) {
       notify?.({ type: "error", message: error instanceof Error ? error.message : `Failed to ${action} batch.` });
     } finally {
@@ -364,6 +380,22 @@ async function fetchAllStaff() {
     if (!response.ok) throw new Error(errorMessage(payload, "Failed to load staff."));
     records.push(...(payload.data ?? []));
     if (!payload.pagination?.hasMore) return records;
+    page += 1;
+  }
+}
+
+async function fetchAllOrgUnits() {
+  const units: OrgUnitRecord[] = [];
+  let page = 1;
+  while (true) {
+    const response = await fetch(`${apiBase}/v1/org-units?page=${page}&limit=200`, {
+      credentials: "include",
+      headers: createAuthHeaders(),
+    });
+    const payload = (await response.json()) as UnitEnvelope & { pagination?: { hasMore?: boolean } };
+    if (!response.ok) throw new Error(errorMessage(payload, "Failed to load org units."));
+    units.push(...(payload.data ?? []));
+    if (!payload.pagination?.hasMore) return units;
     page += 1;
   }
 }

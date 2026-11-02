@@ -4,6 +4,13 @@ Base URL: `/api/v1`. Auth: `Authorization: Bearer <JWT>` (ADR-015). Device endpo
 `/api/v1/device/**` with `X-Device-Code` / `X-Device-Key`. Public surfaces, when added, live under
 `/api/public/*`.
 
+Hosting renewal is a public exception: `POST /api/public/hosting-renewal/reference` obtains a
+server-priced quote and persists its unique Paystack reference before checkout. Confirmation must
+submit that reference and the matching quote total; the backend verifies the transaction with
+Paystack before completing the stored renewal. The Vercel proxy maps these public paths to the
+backend's `/public/hosting-renewal/*` router. Configure `BACKEND_URL` (or
+`VITE_BACKEND_BASE_URL`) for the proxy runtime.
+
 > The existing Refine data provider (`frontend/src/providers/data.ts`) currently **fetches whole lists and
 > filters/paginates in the browser** (`listCache`). That is fine for 200 staff and impossible for 300,000 patients.
 > Sprint 1 rewrites it to send the list-query contract in §2 and read the `pagination` block (ADR-006).

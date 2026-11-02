@@ -214,7 +214,9 @@ export const OrgUnitList = () => {
             <CardTitle>Org Unit Tree</CardTitle>
           </CardHeader>
           {loadingTree ? (
-            <PageLoader />
+            <CardContent className="flex items-center justify-center py-8">
+              <PageLoader inline />
+            </CardContent>
           ) : (
             <CardContent>
               {tree.length === 0 ? (
@@ -352,7 +354,7 @@ export const OrgUnitList = () => {
               <Button
                 className="cursor-pointer"
                 onClick={submit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || loadingTree}
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">

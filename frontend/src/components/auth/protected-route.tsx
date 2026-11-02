@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 
 import type { AppRole } from "@/types/auth";
 import { useAuth } from "@/contexts/use-auth";
+import { getPublicApiBase } from "@/lib/public-api";
 
 type ProtectedRouteProps = {
   allowRoles?: AppRole[];
 };
 
 export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, refreshSession } = useAuth();
   const location = useLocation();
   const [redirectPath, setRedirectPath] = useState<"/login" | "/hosting-renewal" | null>(null);
   const [checkingHostingStatus, setCheckingHostingStatus] = useState(false);
@@ -27,7 +28,15 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
 
     const resolveRedirectPath = async () => {
       try {
-        const response = await fetch("/api/public/hosting-renewal/info");
+        const refreshedUser = await refreshSession();
+        if (!isActive) return;
+
+        if (refreshedUser) {
+          setCheckingHostingStatus(false);
+          return;
+        }
+
+        const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/info`);
         const payload = (await response.json()) as {
           success?: boolean;
           data?: { hosted?: boolean; hostingExpiryDate?: string | null };
@@ -65,7 +74,7 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
     return () => {
       isActive = false;
     };
-  }, [isLoading, user]);
+  }, [isLoading, user, refreshSession]);
 
   if (isLoading || (!user && checkingHostingStatus && !redirectPath)) {
     return (

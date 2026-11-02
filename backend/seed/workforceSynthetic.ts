@@ -38,7 +38,7 @@ const main = async () => {
   const unitCount = readCount("units", 4, 100);
   const staffCount = readCount("staff", 40, 10000);
   const seed = readSeed();
-  const seedCode = seed.toString(36).toUpperCase().slice(-8).padStart(1, "0");
+  const seedCode = seed.toString(36).toUpperCase();
   const random = makeRandom(seed);
   const today = new Date().toISOString().slice(0, 10);
   const createdUnits: Array<{ id: string; name: string; code: string }> = [];

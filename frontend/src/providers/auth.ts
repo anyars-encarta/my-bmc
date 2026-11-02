@@ -40,7 +40,8 @@ const getSessionData = async (): Promise<AuthSessionData | null> => {
   });
 
   if (!response.ok) {
-    return null;
+    if (response.status === 401 || response.status === 403) return null;
+    throw new Error(`Session lookup failed with status ${response.status}.`);
   }
 
   const payload = (await response.json()) as AuthSessionData | null;
@@ -85,11 +86,15 @@ export const authProvider: AuthProvider = {
       };
     }
 
-    let session: AuthSessionData | null = null;
+    let session: AuthSessionData | null;
     try {
       session = await withTimeout(getSessionData(), 5000);
     } catch {
-      session = null;
+      clearMeCache();
+      return {
+        success: true,
+        redirectTo: "/dashboard",
+      };
     }
 
     if (!session?.user || !session?.session) {
@@ -136,9 +141,25 @@ export const authProvider: AuthProvider = {
         }
 
         if (session?.user && session?.session) {
-          return {
-            authenticated: true,
-          };
+          let currentUser: Awaited<ReturnType<typeof fetchMe>> = null;
+          try {
+            currentUser = await fetchMe(true);
+          } catch {
+            return { authenticated: true };
+          }
+
+          if (currentUser?.user.status === "active") {
+            return { authenticated: true };
+          }
+
+          clearMeCache();
+          const signOut = await authClient.signOut({
+            fetchOptions: { onError: () => undefined },
+          });
+          if (signOut.error) {
+            console.error("Unable to clear an inactive user session:", signOut.error);
+          }
+          return { authenticated: false, redirectTo: "/login" };
         }
 
         if (attempt < 2) {
@@ -247,14 +268,18 @@ export const authProvider: AuthProvider = {
   },
   getIdentity: async () => {
     let me = null as Awaited<ReturnType<typeof fetchMe>>;
+    let fetchFailed = false;
     try {
       me = await fetchMe();
     } catch {
-      me = null;
+      fetchFailed = true;
     }
 
-    const currentUser = me?.user;
-    if (!currentUser) {
+    if (!fetchFailed && !me?.user) {
+      return null;
+    }
+
+    if (fetchFailed) {
       const session = await getSessionData();
       const sessionUser = session?.user;
       if (!sessionUser?.id || !sessionUser.email) {
@@ -281,6 +306,9 @@ export const authProvider: AuthProvider = {
         status: sessionUser.status || undefined,
       };
     }
+
+    const currentUser = me?.user;
+    if (!currentUser) return null;
 
     const safeName =
       typeof currentUser.name === "string" && currentUser.name.trim().length > 0

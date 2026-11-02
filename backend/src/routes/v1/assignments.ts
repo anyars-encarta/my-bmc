@@ -32,6 +32,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from "../.
 import { isRetroactiveAssignmentDate, resolveEffectiveAssignment } from "../../lib/assignmentRules.js";
 import { isAppRole, requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
+import { nowAtFacility } from "../../lib/facilityClock.js";
 
 const router = Router();
 
@@ -98,14 +99,14 @@ type AssignmentRow = {
 
 const parseRouteId = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
-const today = () => new Date().toISOString().slice(0, 10);
+const facilityToday = async () => (await nowAtFacility()).localDateTime.slice(0, 10);
 const previousDate = (date: string) => {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() - 1);
   return value.toISOString().slice(0, 10);
 };
-const ensureNonRetroactive = (date: string) => {
-  if (isRetroactiveAssignmentDate(date, today())) {
+const ensureNonRetroactive = async (date: string) => {
+  if (isRetroactiveAssignmentDate(date, await facilityToday())) {
     throw validationError("Assignment dates cannot be in the past.", "ASSIGNMENT_DATE_IN_PAST");
   }
 };
@@ -162,7 +163,7 @@ export const transferPrimary = async (
     actorId?: string;
   },
 ) => {
-  ensureNonRetroactive(input.effectiveFrom);
+  await ensureNonRetroactive(input.effectiveFrom);
   await validateStaffAndUnit(tx, input.staffId, input.toUnitId);
 
   const [current] = await getAssignmentOn(tx, input.staffId, input.effectiveFrom);
@@ -249,6 +250,7 @@ const checkManagedStaff = async (
     throw forbidden("You do not have access to this staff member.", "STAFF_FORBIDDEN");
   }
 
+  const today = await facilityToday();
   const [assignment] = await db
     .select({ orgUnitId: staffAssignment.orgUnitId })
     .from(staffAssignment)
@@ -256,8 +258,8 @@ const checkManagedStaff = async (
       and(
         eq(staffAssignment.staffId, staffId),
         eq(staffAssignment.assignmentType, "PRIMARY"),
-        lte(staffAssignment.effectiveFrom, today()),
-        or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, today())),
+        lte(staffAssignment.effectiveFrom, today),
+        or(isNull(staffAssignment.effectiveTo), gte(staffAssignment.effectiveTo, today)),
       ),
     )
     .orderBy(desc(staffAssignment.effectiveFrom))
@@ -306,7 +308,7 @@ router.get(
     try {
       const staffId = parseRouteId(req.params.staffId);
       if (!staffId) throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
-      const date = typeof req.query.on === "string" ? req.query.on : today();
+      const date = typeof req.query.on === "string" ? req.query.on : await facilityToday();
       if (!z.string().date().safeParse(date).success) {
         throw validationError("Provide a valid date in YYYY-MM-DD format.", "INVALID_DATE");
       }
@@ -383,7 +385,7 @@ router.post(
         });
       }
       const { effectiveFrom, effectiveTo, assignmentType } = parsed.data;
-      ensureNonRetroactive(effectiveFrom);
+      await ensureNonRetroactive(effectiveFrom);
       if (effectiveTo < effectiveFrom) {
         throw validationError("End date must be on or after the start date.", "ASSIGNMENT_DATE_RANGE_INVALID");
       }
@@ -540,24 +542,54 @@ const previewBatch = async (batchId: string) => {
   const unitLabels = new Map(units.map((unit) => [unit.id, `${unit.name} (${unit.code})`]));
   const shiftLabels = new Map(shifts.map((shift) => [shift.id, shift.name]));
   const roleLabels = new Map(roles.map((role) => [role.id, role.name]));
-  const countAt = (unitId: string, roleId: string | null, projected: boolean) => {
-    let count = 0;
-    for (const assignment of currentByStaff.values()) {
-      const unitIdForStaff = projected
-        ? assignment.assignmentType === "PRIMARY"
-          ? destinationByStaff.get(assignment.staffId) ?? assignment.orgUnitId
-          : assignment.orgUnitId
-        : assignment.orgUnitId;
-      if (
-        unitIdForStaff === unitId &&
-        (roleId === null || assignment.jobRoleId === roleId)
-      ) count += 1;
+  const shiftIds = [...new Set(requirements.map((requirement) => requirement.shiftTypeId))];
+  const rosteredStaff = shiftIds.length > 0
+    ? await db
+        .select({
+          staffId: rosterEntry.staffId,
+          orgUnitId: rosterEntry.orgUnitId,
+          shiftTypeId: rosterEntry.shiftTypeId,
+        })
+        .from(rosterEntry)
+        .where(
+          and(
+            eq(rosterEntry.rosterDate, batch.effectiveFrom),
+            eq(rosterEntry.status, "ACTIVE"),
+            inArray(rosterEntry.shiftTypeId, shiftIds),
+          ),
+        )
+    : [];
+  const countAt = (
+    unitId: string,
+    shiftTypeId: string,
+    roleId: string | null,
+    projected: boolean,
+  ) => {
+    const countedStaff = new Set<string>();
+    for (const rostered of rosteredStaff) {
+      if (rostered.shiftTypeId !== shiftTypeId) continue;
+      const assignment = currentByStaff.get(rostered.staffId);
+      if (!assignment || (roleId !== null && assignment.jobRoleId !== roleId)) continue;
+      const unitIdForStaff = projected && assignment.assignmentType === "PRIMARY"
+        ? destinationByStaff.get(rostered.staffId) ?? rostered.orgUnitId
+        : rostered.orgUnitId;
+      if (unitIdForStaff === unitId) countedStaff.add(rostered.staffId);
     }
-    return count;
+    return countedStaff.size;
   };
   const coverage = requirements.map((requirement) => {
-    const currentStaff = countAt(requirement.orgUnitId, requirement.jobRoleId, false);
-    const projectedStaff = countAt(requirement.orgUnitId, requirement.jobRoleId, true);
+    const currentStaff = countAt(
+      requirement.orgUnitId,
+      requirement.shiftTypeId,
+      requirement.jobRoleId,
+      false,
+    );
+    const projectedStaff = countAt(
+      requirement.orgUnitId,
+      requirement.shiftTypeId,
+      requirement.jobRoleId,
+      true,
+    );
     return {
       unitName: unitLabels.get(requirement.orgUnitId) ?? "Org unit",
       shiftName: shiftLabels.get(requirement.shiftTypeId) ?? "Shift",
@@ -603,7 +635,7 @@ router.post("/transfer-batches", requireAnyRole([...HR_ROLES]), async (req, res,
         fieldErrors: parsed.error.flatten().fieldErrors,
       });
     }
-    ensureNonRetroactive(parsed.data.effectiveFrom);
+    await ensureNonRetroactive(parsed.data.effectiveFrom);
     const batch = await db.transaction(async (tx) => {
       await validateBatchItems(tx, parsed.data.items, parsed.data.effectiveFrom);
       const [created] = await tx
@@ -638,7 +670,7 @@ router.patch("/transfer-batches/:id", requireAnyRole([...HR_ROLES]), async (req,
         fieldErrors: parsed.error.flatten().fieldErrors,
       });
     }
-    ensureNonRetroactive(parsed.data.effectiveFrom);
+    await ensureNonRetroactive(parsed.data.effectiveFrom);
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx
         .select()
@@ -698,7 +730,7 @@ router.post(
         if (batch.status !== "DRAFT") {
           throw conflict("Only draft batches can be approved.", "TRANSFER_BATCH_NOT_DRAFT");
         }
-        ensureNonRetroactive(batch.effectiveFrom);
+        await ensureNonRetroactive(batch.effectiveFrom);
         const items = await tx.select().from(transferBatchItem)
           .where(eq(transferBatchItem.transferBatchId, batchId));
         if (items.length === 0) {
@@ -725,6 +757,34 @@ router.post(
           .where(eq(transferBatch.id, batchId)).limit(1);
         if (!existing) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
         throw conflict("Only draft batches can be approved.", "TRANSFER_BATCH_NOT_DRAFT");
+      }
+      res.json({ data: await loadBatch(batchId) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/transfer-batches/:id/cancel",
+  requireAnyRole([...HR_ROLES]),
+  async (req, res, next) => {
+    try {
+      const batchId = parseRouteId(req.params.id);
+      if (!batchId) throw badRequest("Transfer batch ID is required.", "TRANSFER_BATCH_ID_REQUIRED");
+      const [updated] = await db
+        .update(transferBatch)
+        .set({ status: "CANCELLED" })
+        .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "APPROVED")))
+        .returning({ id: transferBatch.id });
+      if (!updated) {
+        const [existing] = await db
+          .select({ id: transferBatch.id })
+          .from(transferBatch)
+          .where(eq(transferBatch.id, batchId))
+          .limit(1);
+        if (!existing) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
+        throw conflict("Only approved batches can be cancelled.", "TRANSFER_BATCH_NOT_APPROVED");
       }
       res.json({ data: await loadBatch(batchId) });
     } catch (error) {
