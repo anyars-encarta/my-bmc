@@ -88,34 +88,28 @@ test(
 
       const historyPerson = await createStaff("history", origin.id);
       await assert.rejects(
-        db.transaction((tx) =>
-          transferPrimary(tx, {
-            staffId: historyPerson.id,
-            toUnitId: destinationOne.id,
-            effectiveFrom: addDays(-1),
-            reason: "TRANSFER",
-          }),
-        ),
+        transferPrimary(db, {
+          staffId: historyPerson.id,
+          toUnitId: destinationOne.id,
+          effectiveFrom: addDays(-1),
+          reason: "TRANSFER",
+        }),
         (error: unknown) =>
           error instanceof Error && error.message.includes("Assignment dates cannot be in the past."),
       );
 
-      await db.transaction((tx) =>
-        transferPrimary(tx, {
-          staffId: historyPerson.id,
-          toUnitId: destinationOne.id,
-          effectiveFrom: addDays(1),
-          reason: "TRANSFER",
-        }),
-      );
-      await db.transaction((tx) =>
-        transferPrimary(tx, {
-          staffId: historyPerson.id,
-          toUnitId: destinationTwo.id,
-          effectiveFrom: addDays(2),
-          reason: "TRANSFER",
-        }),
-      );
+      await transferPrimary(db, {
+        staffId: historyPerson.id,
+        toUnitId: destinationOne.id,
+        effectiveFrom: addDays(1),
+        reason: "TRANSFER",
+      });
+      await transferPrimary(db, {
+        staffId: historyPerson.id,
+        toUnitId: destinationTwo.id,
+        effectiveFrom: addDays(2),
+        reason: "TRANSFER",
+      });
       const history = await db
         .select()
         .from(staffAssignment)
@@ -127,22 +121,18 @@ test(
 
       const concurrentPerson = await createStaff("concurrent", origin.id);
       const results = await Promise.allSettled([
-        db.transaction((tx) =>
-          transferPrimary(tx, {
-            staffId: concurrentPerson.id,
-            toUnitId: destinationOne.id,
-            effectiveFrom: addDays(1),
-            reason: "TRANSFER",
-          }),
-        ),
-        db.transaction((tx) =>
-          transferPrimary(tx, {
-            staffId: concurrentPerson.id,
-            toUnitId: destinationTwo.id,
-            effectiveFrom: addDays(1),
-            reason: "TRANSFER",
-          }),
-        ),
+        transferPrimary(db, {
+          staffId: concurrentPerson.id,
+          toUnitId: destinationOne.id,
+          effectiveFrom: addDays(1),
+          reason: "TRANSFER",
+        }),
+        transferPrimary(db, {
+          staffId: concurrentPerson.id,
+          toUnitId: destinationTwo.id,
+          effectiveFrom: addDays(1),
+          reason: "TRANSFER",
+        }),
       ]);
       assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
       const concurrentAssignments = await db
@@ -169,24 +159,20 @@ test(
       assert.ok(unassigned);
       staffIds.push(unassigned.id);
       const overlappingInserts = await Promise.allSettled([
-        db.transaction((tx) =>
-          tx.insert(staffAssignment).values({
-            staffId: unassigned.id,
-            orgUnitId: destinationOne.id,
-            assignmentType: "PRIMARY",
-            effectiveFrom: addDays(1),
-            reason: "INITIAL",
-          }),
-        ),
-        db.transaction((tx) =>
-          tx.insert(staffAssignment).values({
-            staffId: unassigned.id,
-            orgUnitId: destinationTwo.id,
-            assignmentType: "PRIMARY",
-            effectiveFrom: addDays(1),
-            reason: "INITIAL",
-          }),
-        ),
+        db.insert(staffAssignment).values({
+          staffId: unassigned.id,
+          orgUnitId: destinationOne.id,
+          assignmentType: "PRIMARY",
+          effectiveFrom: addDays(1),
+          reason: "INITIAL",
+        }),
+        db.insert(staffAssignment).values({
+          staffId: unassigned.id,
+          orgUnitId: destinationTwo.id,
+          assignmentType: "PRIMARY",
+          effectiveFrom: addDays(1),
+          reason: "INITIAL",
+        }),
       ]);
       assert.equal(overlappingInserts.filter((result) => result.status === "fulfilled").length, 1);
       const persistedConcurrent = await db

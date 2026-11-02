@@ -17,7 +17,7 @@ type BatchRecord = {
   id: string;
   title: string;
   effectiveFrom: string;
-  status: "DRAFT" | "APPROVED" | "APPLIED" | "CANCELLED";
+  status: "DRAFT" | "APPROVED" | "APPLYING" | "APPLIED" | "CANCELLED";
   items: Array<{
     staffId: string;
     toUnitId: string;
@@ -352,7 +352,7 @@ export const TransfersPage = () => {
           action === "approve"
             ? "Batch approved."
             : action === "apply"
-              ? "Batch applied atomically."
+              ? "Batch applied."
               : "Batch cancelled.",
       });
       await loadBatches();

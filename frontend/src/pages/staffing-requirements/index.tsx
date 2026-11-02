@@ -191,8 +191,8 @@ export const StaffingRequirementsPage = () => {
             <Input type="number" min={0} step={1} value={form.minStaff} onChange={(event) => setForm((current) => ({ ...current, minStaff: event.target.value }))} />
           </Field>
           <div className="flex gap-2 md:col-span-2">
-            <Button onClick={submit} disabled={saving}>{saving ? "Saving..." : editingId ? "Save changes" : "Add minimum"}</Button>
-            {editingId ? <Button variant="outline" onClick={cancelEdit} disabled={saving}>Cancel</Button> : null}
+            <Button onClick={submit} disabled={saving} className="cursor-pointer">{saving ? "Saving..." : editingId ? "Save changes" : "Add minimum"}</Button>
+            {editingId ? <Button variant="outline" onClick={cancelEdit} disabled={saving} className="cursor-pointer">Cancel</Button> : null}
           </div>
         </CardContent>
       </Card>
@@ -209,8 +209,8 @@ export const StaffingRequirementsPage = () => {
                 <p className="text-sm text-muted-foreground">{requirement.roleName ?? "All roles"} · Minimum {requirement.minStaff}</p>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" disabled={saving} onClick={() => edit(requirement)}>Edit</Button>
-                <Button variant="destructive" disabled={saving} onClick={() => void remove(requirement)}>Remove</Button>
+                <Button variant="outline" disabled={saving} onClick={() => edit(requirement)} className="cursor-pointer">Edit</Button>
+                <Button variant="destructive" disabled={saving} onClick={() => void remove(requirement)} className="cursor-pointer">Remove</Button>
               </div>
             </div>
           ))}

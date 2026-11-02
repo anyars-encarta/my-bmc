@@ -87,7 +87,7 @@ const staffingRequirementSchema = z.object({
   minStaff: z.number().int().min(0).max(10000),
 });
 
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DatabaseExecutor = typeof db;
 type AssignmentRow = {
   id: string;
   staffId: string;
@@ -111,7 +111,7 @@ const ensureNonRetroactive = async (date: string) => {
   }
 };
 
-const getAssignmentOn = async (executor: Transaction, staffId: string, date: string) =>
+const getAssignmentOn = async (executor: DatabaseExecutor, staffId: string, date: string) =>
   executor
     .select()
     .from(staffAssignment)
@@ -127,7 +127,7 @@ const getAssignmentOn = async (executor: Transaction, staffId: string, date: str
     .limit(1);
 
 const validateStaffAndUnit = async (
-  executor: Transaction,
+  executor: DatabaseExecutor,
   staffId: string,
   orgUnitId: string,
 ) => {
@@ -152,7 +152,7 @@ const validateStaffAndUnit = async (
 };
 
 export const transferPrimary = async (
-  tx: Transaction,
+  executor: DatabaseExecutor,
   input: {
     staffId: string;
     toUnitId: string;
@@ -164,16 +164,34 @@ export const transferPrimary = async (
   },
 ) => {
   await ensureNonRetroactive(input.effectiveFrom);
-  await validateStaffAndUnit(tx, input.staffId, input.toUnitId);
+  await validateStaffAndUnit(executor, input.staffId, input.toUnitId);
 
-  const [current] = await getAssignmentOn(tx, input.staffId, input.effectiveFrom);
+  if (input.batchId) {
+    const [alreadyApplied] = await executor
+      .select()
+      .from(staffAssignment)
+      .where(and(
+        eq(staffAssignment.staffId, input.staffId),
+        eq(staffAssignment.transferBatchId, input.batchId),
+        eq(staffAssignment.effectiveFrom, input.effectiveFrom),
+      ))
+      .limit(1);
+    if (alreadyApplied) {
+      if (alreadyApplied.orgUnitId !== input.toUnitId) {
+        throw conflict("A different transfer for this batch is already applied.", "TRANSFER_BATCH_ITEM_ALREADY_APPLIED");
+      }
+      return alreadyApplied;
+    }
+  }
+
+  const [current] = await getAssignmentOn(executor, input.staffId, input.effectiveFrom);
   if (!current) throw validationError("No primary assignment exists on that date.", "NO_CURRENT_ASSIGNMENT");
   if (current.orgUnitId === input.toUnitId) {
     throw validationError("Staff member is already assigned to that unit.", "ALREADY_ASSIGNED_TO_UNIT");
   }
 
   const dateBeforeTransfer = previousDate(input.effectiveFrom);
-  const [previous] = await getAssignmentOn(tx, input.staffId, dateBeforeTransfer);
+  const [previous] = await getAssignmentOn(executor, input.staffId, dateBeforeTransfer);
   if (!previous) {
     throw validationError(
       "A transfer must begin after the current primary assignment starts.",
@@ -181,61 +199,101 @@ export const transferPrimary = async (
     );
   }
 
-  await tx
-    .delete(staffAssignment)
-    .where(
-      and(
-        eq(staffAssignment.staffId, input.staffId),
-        eq(staffAssignment.assignmentType, "PRIMARY"),
-        gte(staffAssignment.effectiveFrom, input.effectiveFrom),
-      ),
-    );
-
-  await tx
+  const [closedPrevious] = await executor
     .update(staffAssignment)
     .set({ effectiveTo: dateBeforeTransfer })
-    .where(eq(staffAssignment.id, previous.id));
+    .where(and(
+      eq(staffAssignment.id, previous.id),
+      previous.effectiveTo === null
+        ? isNull(staffAssignment.effectiveTo)
+        : eq(staffAssignment.effectiveTo, previous.effectiveTo),
+    ))
+    .returning({ id: staffAssignment.id });
+  if (!closedPrevious) {
+    throw conflict("The primary assignment changed while the transfer was being applied.", "ASSIGNMENT_CHANGED_RETRY");
+  }
 
-  const [nextAssignment] = await tx
-    .insert(staffAssignment)
-    .values({
-      staffId: input.staffId,
-      orgUnitId: input.toUnitId,
-      assignmentType: "PRIMARY",
-      effectiveFrom: input.effectiveFrom,
-      reason: input.reason,
-      note: input.note ?? null,
-      approvedBy: input.actorId ?? null,
-      approvedAt: new Date(),
-      transferBatchId: input.batchId ?? null,
-    })
-    .returning();
+  let removedAssignments: typeof staffAssignment.$inferSelect[] = [];
+  let nextAssignment: typeof staffAssignment.$inferSelect | undefined;
+  let updatedRoster: Array<{ id: string; orgUnitId: string }> = [];
+  try {
+    removedAssignments = await executor
+      .delete(staffAssignment)
+      .where(
+        and(
+          eq(staffAssignment.staffId, input.staffId),
+          eq(staffAssignment.assignmentType, "PRIMARY"),
+          gte(staffAssignment.effectiveFrom, input.effectiveFrom),
+        ),
+      )
+      .returning();
 
-  await tx
-    .update(rosterEntry)
-    .set({ orgUnitId: input.toUnitId })
-    .where(
-      and(
-        eq(rosterEntry.staffId, input.staffId),
-        eq(rosterEntry.status, "ACTIVE"),
-        ne(rosterEntry.source, "COVER"),
-        gte(rosterEntry.rosterDate, input.effectiveFrom),
-      ),
-    );
+    const [created] = await executor
+      .insert(staffAssignment)
+      .values({
+        staffId: input.staffId,
+        orgUnitId: input.toUnitId,
+        assignmentType: "PRIMARY",
+        effectiveFrom: input.effectiveFrom,
+        reason: input.reason,
+        note: input.note ?? null,
+        approvedBy: input.actorId ?? null,
+        approvedAt: new Date(),
+        transferBatchId: input.batchId ?? null,
+      })
+      .returning();
+    if (!created) throw badRequest("Unable to create the new primary assignment.", "ASSIGNMENT_CREATE_FAILED");
+    nextAssignment = created;
 
-  await tx.insert(workforceEvent).values({
-    eventType: "StaffTransferred",
-    aggregateId: input.staffId,
-    payload: {
-      staffId: input.staffId,
-      fromUnitId: previous.orgUnitId,
-      toUnitId: input.toUnitId,
-      effectiveFrom: input.effectiveFrom,
-      transferBatchId: input.batchId ?? null,
-    },
-  });
+    updatedRoster = await executor
+      .update(rosterEntry)
+      .set({ orgUnitId: input.toUnitId })
+      .where(
+        and(
+          eq(rosterEntry.staffId, input.staffId),
+          eq(rosterEntry.status, "ACTIVE"),
+          ne(rosterEntry.source, "COVER"),
+          gte(rosterEntry.rosterDate, input.effectiveFrom),
+        ),
+      )
+      .returning({ id: rosterEntry.id, orgUnitId: rosterEntry.orgUnitId });
 
-  return nextAssignment;
+    await executor.insert(workforceEvent).values({
+      eventType: "StaffTransferred",
+      aggregateId: input.staffId,
+      payload: {
+        staffId: input.staffId,
+        fromUnitId: previous.orgUnitId,
+        toUnitId: input.toUnitId,
+        effectiveFrom: input.effectiveFrom,
+        transferBatchId: input.batchId ?? null,
+      },
+    });
+
+    return created;
+  } catch (error) {
+    try {
+      for (const entry of updatedRoster) {
+        await executor.update(rosterEntry).set({ orgUnitId: entry.orgUnitId }).where(eq(rosterEntry.id, entry.id));
+      }
+      if (nextAssignment) {
+        await executor.delete(staffAssignment).where(eq(staffAssignment.id, nextAssignment.id));
+      }
+      if (removedAssignments.length > 0) {
+        await executor.insert(staffAssignment).values(removedAssignments);
+      }
+      await executor
+        .update(staffAssignment)
+        .set({ effectiveTo: previous.effectiveTo })
+        .where(and(
+          eq(staffAssignment.id, previous.id),
+          eq(staffAssignment.effectiveTo, dateBeforeTransfer),
+        ));
+    } catch (compensationError) {
+      console.error("Unable to roll back a partially applied staff transfer:", compensationError);
+    }
+    throw error;
+  }
 };
 
 const checkManagedStaff = async (
@@ -354,16 +412,14 @@ router.post(
           fieldErrors: parsed.error.flatten().fieldErrors,
         });
       }
-      const created = await db.transaction((tx) =>
-        transferPrimary(tx, {
-          staffId,
-          toUnitId: parsed.data.toUnitId,
-          effectiveFrom: parsed.data.effectiveFrom,
-          reason: parsed.data.reason,
-          ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
-          ...(req.user?.id ? { actorId: req.user.id } : {}),
-        }),
-      );
+      const created = await transferPrimary(db, {
+        staffId,
+        toUnitId: parsed.data.toUnitId,
+        effectiveFrom: parsed.data.effectiveFrom,
+        reason: parsed.data.reason,
+        ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+        ...(req.user?.id ? { actorId: req.user.id } : {}),
+      });
       res.status(201).json({ data: created });
     } catch (error) {
       next(error);
@@ -389,24 +445,22 @@ router.post(
       if (effectiveTo < effectiveFrom) {
         throw validationError("End date must be on or after the start date.", "ASSIGNMENT_DATE_RANGE_INVALID");
       }
-      const [created] = await db.transaction(async (tx) => {
-        await validateStaffAndUnit(tx, staffId, parsed.data.orgUnitId);
-        const [record] = await tx
-          .insert(staffAssignment)
-          .values({
-            staffId,
-            orgUnitId: parsed.data.orgUnitId,
-            assignmentType,
-            effectiveFrom,
-            effectiveTo,
-            reason: parsed.data.reason ?? (assignmentType === "COVER" ? "COVER" : "SECONDMENT"),
-            note: parsed.data.note ?? null,
-            approvedBy: req.user?.id ?? null,
-            approvedAt: new Date(),
-          })
-          .returning();
-        return [record];
-      });
+      await validateStaffAndUnit(db, staffId, parsed.data.orgUnitId);
+      const [created] = await db
+        .insert(staffAssignment)
+        .values({
+          staffId,
+          orgUnitId: parsed.data.orgUnitId,
+          assignmentType,
+          effectiveFrom,
+          effectiveTo,
+          reason: parsed.data.reason ?? (assignmentType === "COVER" ? "COVER" : "SECONDMENT"),
+          note: parsed.data.note ?? null,
+          approvedBy: req.user?.id ?? null,
+          approvedAt: new Date(),
+        })
+        .returning();
+      if (!created) throw badRequest("Unable to create the assignment.", "ASSIGNMENT_CREATE_FAILED");
       res.status(201).json({ data: created });
     } catch (error) {
       next(error);
@@ -439,7 +493,7 @@ const loadBatch = async (batchId: string) => {
 };
 
 const validateBatchItems = async (
-  tx: Transaction,
+  executor: DatabaseExecutor,
   items: z.infer<typeof batchItemSchema>[],
   effectiveFrom: string,
 ) => {
@@ -447,8 +501,8 @@ const validateBatchItems = async (
     throw validationError("A staff member can only appear once in a batch.", "TRANSFER_BATCH_DUPLICATE_STAFF");
   }
   for (const item of items) {
-    await validateStaffAndUnit(tx, item.staffId, item.toUnitId);
-    const [current] = await getAssignmentOn(tx, item.staffId, effectiveFrom);
+    await validateStaffAndUnit(executor, item.staffId, item.toUnitId);
+    const [current] = await getAssignmentOn(executor, item.staffId, effectiveFrom);
     if (!current) {
       throw validationError(
         "Every staff member must have a primary assignment on the effective date.",
@@ -636,24 +690,30 @@ router.post("/transfer-batches", requireAnyRole([...HR_ROLES]), async (req, res,
       });
     }
     await ensureNonRetroactive(parsed.data.effectiveFrom);
-    const batch = await db.transaction(async (tx) => {
-      await validateBatchItems(tx, parsed.data.items, parsed.data.effectiveFrom);
-      const [created] = await tx
-        .insert(transferBatch)
-        .values({ title: parsed.data.title, effectiveFrom: parsed.data.effectiveFrom })
-        .returning();
-      if (!created) throw badRequest("Unable to create transfer batch.", "TRANSFER_BATCH_CREATE_FAILED");
-      await tx.insert(transferBatchItem).values(
+    await validateBatchItems(db, parsed.data.items, parsed.data.effectiveFrom);
+    const [batch] = await db
+      .insert(transferBatch)
+      .values({ title: parsed.data.title, effectiveFrom: parsed.data.effectiveFrom })
+      .returning();
+    if (!batch) throw badRequest("Unable to create transfer batch.", "TRANSFER_BATCH_CREATE_FAILED");
+    try {
+      await db.insert(transferBatchItem).values(
         parsed.data.items.map((item) => ({
-          transferBatchId: created.id,
+          transferBatchId: batch.id,
           staffId: item.staffId,
           toOrgUnitId: item.toUnitId,
           reason: item.reason,
           note: item.note ?? null,
         })),
       );
-      return created;
-    });
+    } catch (error) {
+      try {
+        await db.delete(transferBatch).where(eq(transferBatch.id, batch.id));
+      } catch (compensationError) {
+        console.error("Unable to remove a transfer batch after its items failed to save:", compensationError);
+      }
+      throw error;
+    }
     res.status(201).json({ data: await loadBatch(batch.id) });
   } catch (error) {
     next(error);
@@ -671,24 +731,31 @@ router.patch("/transfer-batches/:id", requireAnyRole([...HR_ROLES]), async (req,
       });
     }
     await ensureNonRetroactive(parsed.data.effectiveFrom);
-    const updated = await db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select()
-        .from(transferBatch)
-        .where(eq(transferBatch.id, batchId))
-        .limit(1);
-      if (!existing) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
-      if (existing.status !== "DRAFT") {
-        throw conflict("Only draft batches can be edited.", "TRANSFER_BATCH_NOT_DRAFT");
-      }
-      await validateBatchItems(tx, parsed.data.items, parsed.data.effectiveFrom);
-      const [batch] = await tx
-        .update(transferBatch)
-        .set({ title: parsed.data.title, effectiveFrom: parsed.data.effectiveFrom })
-        .where(eq(transferBatch.id, batchId))
-        .returning();
-      await tx.delete(transferBatchItem).where(eq(transferBatchItem.transferBatchId, batchId));
-      await tx.insert(transferBatchItem).values(
+    const [existing] = await db
+      .select()
+      .from(transferBatch)
+      .where(eq(transferBatch.id, batchId))
+      .limit(1);
+    if (!existing) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
+    if (existing.status !== "DRAFT") {
+      throw conflict("Only draft batches can be edited.", "TRANSFER_BATCH_NOT_DRAFT");
+    }
+    await validateBatchItems(db, parsed.data.items, parsed.data.effectiveFrom);
+    const previousItems = await db
+      .select()
+      .from(transferBatchItem)
+      .where(eq(transferBatchItem.transferBatchId, batchId));
+    const [updated] = await db
+      .update(transferBatch)
+      .set({ title: parsed.data.title, effectiveFrom: parsed.data.effectiveFrom })
+      .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "DRAFT")))
+      .returning();
+    if (!updated) {
+      throw conflict("Only draft batches can be edited.", "TRANSFER_BATCH_NOT_DRAFT");
+    }
+    try {
+      await db.delete(transferBatchItem).where(eq(transferBatchItem.transferBatchId, batchId));
+      await db.insert(transferBatchItem).values(
         parsed.data.items.map((item) => ({
           transferBatchId: batchId,
           staffId: item.staffId,
@@ -697,9 +764,21 @@ router.patch("/transfer-batches/:id", requireAnyRole([...HR_ROLES]), async (req,
           note: item.note ?? null,
         })),
       );
-      return batch;
-    });
-    if (!updated) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
+    } catch (error) {
+      try {
+        await db.delete(transferBatchItem).where(eq(transferBatchItem.transferBatchId, batchId));
+        if (previousItems.length > 0) {
+          await db.insert(transferBatchItem).values(previousItems);
+        }
+        await db
+          .update(transferBatch)
+          .set({ title: existing.title, effectiveFrom: existing.effectiveFrom })
+          .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "DRAFT")));
+      } catch (compensationError) {
+        console.error("Unable to restore a transfer batch after its items failed to update:", compensationError);
+      }
+      throw error;
+    }
     res.json({ data: await loadBatch(updated.id) });
   } catch (error) {
     next(error);
@@ -723,35 +802,38 @@ router.post(
     try {
       const batchId = parseRouteId(req.params.id);
       if (!batchId) throw badRequest("Transfer batch ID is required.", "TRANSFER_BATCH_ID_REQUIRED");
-      const [updated] = await db.transaction(async (tx) => {
-        const [batch] = await tx.select().from(transferBatch)
-          .where(eq(transferBatch.id, batchId)).limit(1);
-        if (!batch) return [];
-        if (batch.status !== "DRAFT") {
-          throw conflict("Only draft batches can be approved.", "TRANSFER_BATCH_NOT_DRAFT");
-        }
-        await ensureNonRetroactive(batch.effectiveFrom);
-        const items = await tx.select().from(transferBatchItem)
-          .where(eq(transferBatchItem.transferBatchId, batchId));
-        if (items.length === 0) {
-          throw validationError("A batch must contain at least one move.", "TRANSFER_BATCH_EMPTY");
-        }
-        await validateBatchItems(
-          tx,
-          items.map((item) => ({
-            staffId: item.staffId,
-            toUnitId: item.toOrgUnitId,
-            reason: item.reason as z.infer<typeof batchItemSchema>["reason"],
-            ...(item.note ? { note: item.note } : {}),
-          })),
-          batch.effectiveFrom,
-        );
-        return tx
-          .update(transferBatch)
-          .set({ status: "APPROVED", approvedBy: req.user?.id ?? null, approvedAt: new Date() })
-          .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "DRAFT")))
-          .returning();
-      });
+      const [batch] = await db
+        .select()
+        .from(transferBatch)
+        .where(eq(transferBatch.id, batchId))
+        .limit(1);
+      if (!batch) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
+      if (batch.status !== "DRAFT") {
+        throw conflict("Only draft batches can be approved.", "TRANSFER_BATCH_NOT_DRAFT");
+      }
+      await ensureNonRetroactive(batch.effectiveFrom);
+      const items = await db
+        .select()
+        .from(transferBatchItem)
+        .where(eq(transferBatchItem.transferBatchId, batchId));
+      if (items.length === 0) {
+        throw validationError("A batch must contain at least one move.", "TRANSFER_BATCH_EMPTY");
+      }
+      await validateBatchItems(
+        db,
+        items.map((item) => ({
+          staffId: item.staffId,
+          toUnitId: item.toOrgUnitId,
+          reason: item.reason as z.infer<typeof batchItemSchema>["reason"],
+          ...(item.note ? { note: item.note } : {}),
+        })),
+        batch.effectiveFrom,
+      );
+      const [updated] = await db
+        .update(transferBatch)
+        .set({ status: "APPROVED", approvedBy: req.user?.id ?? null, approvedAt: new Date() })
+        .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "DRAFT")))
+        .returning({ id: transferBatch.id });
       if (!updated) {
         const [existing] = await db.select({ id: transferBatch.id }).from(transferBatch)
           .where(eq(transferBatch.id, batchId)).limit(1);
@@ -797,18 +879,26 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
   try {
     const batchId = parseRouteId(req.params.id);
     if (!batchId) throw badRequest("Transfer batch ID is required.", "TRANSFER_BATCH_ID_REQUIRED");
-    await db.transaction(async (tx) => {
-      const [batch] = await tx
-        .select()
-        .from(transferBatch)
-        .where(eq(transferBatch.id, batchId))
-        .for("update")
-        .limit(1);
-      if (!batch) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
-      if (batch.status !== "APPROVED") {
-        throw conflict("Only approved batches can be applied.", "TRANSFER_BATCH_NOT_APPROVED");
-      }
-      const items = await tx
+    const [batch] = await db
+      .select()
+      .from(transferBatch)
+      .where(eq(transferBatch.id, batchId))
+      .limit(1);
+    if (!batch) throw notFound("Transfer batch not found.", "TRANSFER_BATCH_NOT_FOUND");
+    if (batch.status !== "APPROVED") {
+      throw conflict("Only approved batches can be applied.", "TRANSFER_BATCH_NOT_APPROVED");
+    }
+    const [claimed] = await db
+      .update(transferBatch)
+      .set({ status: "APPLYING" })
+      .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "APPROVED")))
+      .returning({ id: transferBatch.id });
+    if (!claimed) {
+      throw conflict("The transfer batch status changed before it could be applied.", "TRANSFER_BATCH_NOT_APPROVED");
+    }
+
+    try {
+      const items = await db
         .select()
         .from(transferBatchItem)
         .where(eq(transferBatchItem.transferBatchId, batchId))
@@ -817,7 +907,7 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
         throw validationError("A batch must contain at least one move.", "TRANSFER_BATCH_EMPTY");
       }
       for (const item of items) {
-        await transferPrimary(tx, {
+        await transferPrimary(db, {
           staffId: item.staffId,
           toUnitId: item.toOrgUnitId,
           effectiveFrom: batch.effectiveFrom,
@@ -827,11 +917,25 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
           ...(req.user?.id ? { actorId: req.user.id } : {}),
         });
       }
-      await tx
+      const [applied] = await db
         .update(transferBatch)
         .set({ status: "APPLIED" })
-        .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "APPROVED")));
-    });
+        .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "APPLYING")))
+        .returning({ id: transferBatch.id });
+      if (!applied) {
+        throw conflict("The transfer batch status changed while it was being applied.", "TRANSFER_BATCH_STATUS_CHANGED");
+      }
+    } catch (error) {
+      try {
+        await db
+          .update(transferBatch)
+          .set({ status: "APPROVED" })
+          .where(and(eq(transferBatch.id, batchId), eq(transferBatch.status, "APPLYING")));
+      } catch (compensationError) {
+        console.error("Unable to restore an interrupted transfer batch to APPROVED:", compensationError);
+      }
+      throw error;
+    }
     res.json({ data: await loadBatch(batchId) });
   } catch (error) {
     next(error);

@@ -282,30 +282,39 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
 
     await ensureStaffRules(parsed.data);
 
-    const created = await db.transaction(async (tx) => {
-      const [createdStaff] = await tx.insert(staff).values(parsed.data).returning();
-      if (!createdStaff) {
-        throw badRequest("Unable to create staff member.", "STAFF_CREATE_FAILED");
+    if (parsed.data.orgUnitId) {
+      const [unit] = await db
+        .select({ id: orgUnit.id, active: orgUnit.active })
+        .from(orgUnit)
+        .where(eq(orgUnit.id, parsed.data.orgUnitId))
+        .limit(1);
+      if (!unit || !unit.active) {
+        throw validationError("The selected org unit is not active.", "ORG_UNIT_INACTIVE");
       }
-      if (parsed.data.orgUnitId) {
-        const [unit] = await tx
-          .select({ id: orgUnit.id, active: orgUnit.active })
-          .from(orgUnit)
-          .where(eq(orgUnit.id, parsed.data.orgUnitId))
-          .limit(1);
-        if (!unit || !unit.active) {
-          throw validationError("The selected org unit is not active.", "ORG_UNIT_INACTIVE");
-        }
-        await tx.insert(staffAssignment).values({
-          staffId: createdStaff.id,
+    }
+
+    const [created] = await db.insert(staff).values(parsed.data).returning();
+    if (!created) {
+      throw badRequest("Unable to create staff member.", "STAFF_CREATE_FAILED");
+    }
+    if (parsed.data.orgUnitId) {
+      try {
+        await db.insert(staffAssignment).values({
+          staffId: created.id,
           orgUnitId: parsed.data.orgUnitId,
           assignmentType: "PRIMARY",
           effectiveFrom: parsed.data.hireDate ?? new Date().toISOString().slice(0, 10),
           reason: "INITIAL",
         });
+      } catch (error) {
+        try {
+          await db.delete(staff).where(eq(staff.id, created.id));
+        } catch (compensationError) {
+          console.error("Unable to remove a staff record after its initial assignment failed:", compensationError);
+        }
+        throw error;
       }
-      return createdStaff;
-    });
+    }
 
     res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []) });
   } catch (error) {
@@ -398,41 +407,37 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
       throw validationError("Deactivation reason must be 500 characters or fewer.", "STAFF_DEACTIVATION_REASON_TOO_LONG");
     }
 
-    const updated = await db.transaction(async (tx) => {
-      const [record] = await tx
-        .update(staff)
-        .set({ status: "inactive", terminationDate: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
-        .where(and(eq(staff.id, staffId), eq(staff.status, "active")))
-        .returning();
-      if (!record) {
-        const [existing] = await tx.select({ id: staff.id }).from(staff).where(eq(staff.id, staffId)).limit(1);
-        if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
-        throw conflict("Staff member is already inactive.", "STAFF_ALREADY_INACTIVE");
-      }
+    const [updated] = await db
+      .update(staff)
+      .set({ status: "inactive", terminationDate: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
+      .where(and(eq(staff.id, staffId), eq(staff.status, "active")))
+      .returning();
+    if (!updated) {
+      const [existing] = await db.select({ id: staff.id }).from(staff).where(eq(staff.id, staffId)).limit(1);
+      if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+      throw conflict("Staff member is already inactive.", "STAFF_ALREADY_INACTIVE");
+    }
 
-      if (record.userId) {
-        await tx.update(user).set({ status: "inactive", updatedAt: new Date() }).where(eq(user.id, record.userId));
-        await tx.delete(session).where(eq(session.userId, record.userId));
-      }
+    if (updated.userId) {
+      await db.update(user).set({ status: "inactive", updatedAt: new Date() }).where(eq(user.id, updated.userId));
+      await db.delete(session).where(eq(session.userId, updated.userId));
+    }
 
-      await tx
-        .update(rosterEntry)
-        .set({ status: "CANCELLED" })
-        .where(
-          and(
-            eq(rosterEntry.staffId, staffId),
-            eq(rosterEntry.status, "ACTIVE"),
-            gte(rosterEntry.plannedStart, new Date()),
-          ),
-        );
+    await db
+      .update(rosterEntry)
+      .set({ status: "CANCELLED" })
+      .where(
+        and(
+          eq(rosterEntry.staffId, staffId),
+          eq(rosterEntry.status, "ACTIVE"),
+          gte(rosterEntry.plannedStart, new Date()),
+        ),
+      );
 
-      await tx.insert(workforceEvent).values({
-        eventType: "StaffDeactivated",
-        aggregateId: staffId,
-        payload: { staffId, reason, deactivatedBy: req.user?.id ?? null },
-      });
-
-      return record;
+    await db.insert(workforceEvent).values({
+      eventType: "StaffDeactivated",
+      aggregateId: staffId,
+      payload: { staffId, reason, deactivatedBy: req.user?.id ?? null },
     });
 
     res.json({ data: { ...updated, deactivationReason: reason } });
@@ -571,65 +576,63 @@ router.post(
       const createdUnitIds: string[] = [];
       const today = new Date().toISOString().slice(0, 10);
 
-      await db.transaction(async (tx) => {
-        for (const row of staffRows) {
-          const department = (row.department ?? "").trim();
-          if (!department) continue;
-          const key = department.toLowerCase();
-          let unit = byName.get(key);
+      for (const row of staffRows) {
+        const department = (row.department ?? "").trim();
+        if (!department) continue;
+        const key = department.toLowerCase();
+        let unit = byName.get(key);
 
-          if (!unit) {
-            const baseCode =
-              department
+        if (!unit) {
+          const baseCode =
+            department
               .toUpperCase()
               .replace(/[^A-Z0-9]+/g, "_")
               .replace(/^_+|_+$/g, "")
               .slice(0, 30) || `UNIT_${createdUnitIds.length + 1}`;
-            let code = baseCode;
-            let suffix = 2;
-            while (existingCodes.has(code)) {
-              const suffixText = `_${suffix}`;
-              code = `${baseCode.slice(0, Math.max(1, 30 - suffixText.length))}${suffixText}`;
-              suffix += 1;
-            }
-
-            const [createdUnit] = await tx
-              .insert(orgUnit)
-              .values({
-                code,
-                name: department,
-                unitType: "DEPARTMENT",
-                isClinical: false,
-                operates24h: false,
-                active: true,
-              })
-              .returning();
-            if (!createdUnit) {
-              throw badRequest("Unable to create org unit for department migration.", "ORG_UNIT_CREATE_FAILED");
-            }
-            unit = createdUnit;
-            byName.set(key, unit);
-            existingCodes.add(code);
-            createdUnitIds.push(unit.id);
+          let code = baseCode;
+          let suffix = 2;
+          while (existingCodes.has(code)) {
+            const suffixText = `_${suffix}`;
+            code = `${baseCode.slice(0, Math.max(1, 30 - suffixText.length))}${suffixText}`;
+            suffix += 1;
           }
 
-          const [existingPrimary] = await tx
-            .select()
-            .from(staffAssignment)
-            .where(and(eq(staffAssignment.staffId, row.id), eq(staffAssignment.assignmentType, "PRIMARY")))
-            .limit(1);
-
-          if (!existingPrimary) {
-            await tx.insert(staffAssignment).values({
-              staffId: row.id,
-              orgUnitId: unit.id,
-              assignmentType: "PRIMARY",
-              effectiveFrom: row.hireDate ?? today,
-              reason: "INITIAL",
-            });
+          const [createdUnit] = await db
+            .insert(orgUnit)
+            .values({
+              code,
+              name: department,
+              unitType: "DEPARTMENT",
+              isClinical: false,
+              operates24h: false,
+              active: true,
+            })
+            .returning();
+          if (!createdUnit) {
+            throw badRequest("Unable to create org unit for department migration.", "ORG_UNIT_CREATE_FAILED");
           }
+          unit = createdUnit;
+          byName.set(key, unit);
+          existingCodes.add(code);
+          createdUnitIds.push(unit.id);
         }
-      });
+
+        const [existingPrimary] = await db
+          .select()
+          .from(staffAssignment)
+          .where(and(eq(staffAssignment.staffId, row.id), eq(staffAssignment.assignmentType, "PRIMARY")))
+          .limit(1);
+
+        if (!existingPrimary) {
+          await db.insert(staffAssignment).values({
+            staffId: row.id,
+            orgUnitId: unit.id,
+            assignmentType: "PRIMARY",
+            effectiveFrom: row.hireDate ?? today,
+            reason: "INITIAL",
+          });
+        }
+      }
 
       res.json({ data: { createdUnits: createdUnitIds.length, message: "Department migration applied." } });
     } catch (error) {

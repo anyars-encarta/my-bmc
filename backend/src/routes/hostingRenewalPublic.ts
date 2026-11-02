@@ -442,25 +442,29 @@ const confirmHostingRenewal = async (req: express.Request, res: express.Response
       });
     }
 
-    const result = await db.transaction(async (tx) => {
-      const [lockedRenewal] = await tx
-        .select()
-        .from(hostingRenewal)
-        .where(eq(hostingRenewal.id, storedRenewal.id))
-        .for("update")
-        .limit(1);
-      if (!lockedRenewal || lockedRenewal.status !== "PENDING") return null;
+    const [completedRenewal] = await db
+      .update(hostingRenewal)
+      .set({ status: "COMPLETED", totalCediEquivalent: String(totalCediEquivalent) })
+      .where(and(
+        eq(hostingRenewal.id, storedRenewal.id),
+        eq(hostingRenewal.status, "PENDING"),
+      ))
+      .returning();
 
-      const [completedRenewal] = await tx
-        .update(hostingRenewal)
-        .set({ status: "COMPLETED", totalCediEquivalent: String(totalCediEquivalent) })
-        .where(and(
-          eq(hostingRenewal.id, storedRenewal.id),
-          eq(hostingRenewal.status, "PENDING"),
-        ))
-        .returning();
-      if (!completedRenewal) return null;
-      const [updatedSchool] = await tx
+    if (!completedRenewal) {
+      return res.status(409).json({
+        success: false,
+        error: "This hosting renewal is no longer awaiting confirmation.",
+      });
+    }
+
+    let updatedSchool: {
+      id: string;
+      hosted: boolean;
+      hostingExpiryDate: string | null;
+    };
+    try {
+      const [school] = await db
         .update(facilitySetup)
         .set({
           hosted: true,
@@ -472,23 +476,27 @@ const confirmHostingRenewal = async (req: express.Request, res: express.Response
           hosted: facilitySetup.hosted,
           hostingExpiryDate: facilitySetup.hostingExpiryDate,
         });
-
-      if (!updatedSchool) {
-        throw new Error("Failed to update school hosting status");
+      if (!school) throw new Error("Failed to update school hosting status");
+      updatedSchool = school;
+    } catch (error) {
+      try {
+        await db
+          .update(hostingRenewal)
+          .set({ status: "PENDING" })
+          .where(and(
+            eq(hostingRenewal.id, storedRenewal.id),
+            eq(hostingRenewal.status, "COMPLETED"),
+          ));
+      } catch (compensationError) {
+        console.error("Unable to restore the pending hosting renewal:", compensationError);
       }
-
-      return {
-        renewal: completedRenewal,
-        school: updatedSchool,
-      };
-    });
-
-    if (!result) {
-      return res.status(409).json({
-        success: false,
-        error: "This hosting renewal is no longer awaiting confirmation.",
-      });
+      throw error;
     }
+
+    const result = {
+      renewal: completedRenewal,
+      school: updatedSchool,
+    };
 
     return res.status(201).json({
       success: true,
