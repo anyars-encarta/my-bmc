@@ -1,6 +1,8 @@
 import {
   BanknoteArrowDown,
+  ArrowLeftRight,
   ClipboardCheck,
+  ClipboardList,
   Coins,
   Building2,
   LayoutDashboard,
@@ -42,7 +44,18 @@ export const appResources: AppResource[] = [
     show: "/staff/show/:id",
     label: "Staff",
     icon: Users,
-    canDelete: true,
+  },
+  {
+    name: "transfers",
+    list: "/transfers",
+    label: "Assignments & Transfers",
+    icon: ArrowLeftRight,
+  },
+  {
+    name: "staffing-requirements",
+    list: "/staffing-requirements",
+    label: "Staffing Minimums",
+    icon: ClipboardList,
   },
   {
     name: "categories",

@@ -27,6 +27,8 @@ import type {
 } from "@/types/domain";
 import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
+import { StaffAssignments } from "./assignments";
+import { StaffDeactivation } from "./deactivate";
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
@@ -48,6 +50,7 @@ export const StaffShow = () => {
   const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
   const [shiftTypeLabels, setShiftTypeLabels] = useState<Record<string, string>>({});
   const [savingLicense, setSavingLicense] = useState(false);
+  const [deactivated, setDeactivated] = useState(false);
   const [newLicense, setNewLicense] = useState<NewLicense>({
     licensingBody: "MDC",
     licenceNo: "",
@@ -232,10 +235,17 @@ export const StaffShow = () => {
           <DataItem label="MoMo Name" value={record?.momoName} />
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
-            <Badge>{record?.status || "-"}</Badge>
+            <Badge>{deactivated ? "inactive" : record?.status || "-"}</Badge>
           </div>
         </CardContent>
       </Card>
+
+      <StaffAssignments staffId={staffId} />
+      <StaffDeactivation
+        staffId={staffId}
+        status={deactivated ? "inactive" : record?.status}
+        onDeactivated={() => setDeactivated(true)}
+      />
 
       <Card>
         <CardHeader>

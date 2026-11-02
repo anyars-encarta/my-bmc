@@ -37,6 +37,8 @@ import {
 } from "./pages/payments";
 import { SetupCreate, SetupEdit, SetupShow } from "./pages/setup";
 import { StaffCreate, StaffEdit, StaffList, StaffShow } from "./pages/staff";
+import { TransfersPage } from "./pages/transfers/index";
+import { StaffingRequirementsPage } from "./pages/staffing-requirements/index";
 import CreateUser from "./pages/users/create";
 import EditUser from "./pages/users/edit";
 import ListUsers from "./pages/users/list";
@@ -257,6 +259,8 @@ function App() {
                         <Route path="show/:id" element={<StaffShow />} />
                       </Route>
                       <Route path="org-units" element={<OrgUnitList />} />
+                      <Route path="transfers" element={<TransfersPage />} />
+                      <Route path="staffing-requirements" element={<StaffingRequirementsPage />} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />

@@ -241,6 +241,30 @@ export const transferBatch = pgTable("transfer_batch", {
 export type TransferBatch = typeof transferBatch.$inferSelect;
 export type NewTransferBatch = typeof transferBatch.$inferInsert;
 
+export const transferBatchItem = pgTable("transfer_batch_item", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transferBatchId: uuid("transfer_batch_id").notNull(),
+  staffId: uuid("staff_id").notNull(),
+  toOrgUnitId: uuid("to_org_unit_id").notNull(),
+  reason: varchar("reason", { length: 30 }).default("RESHUFFLE").notNull(),
+  note: text("note"),
+});
+
+export type TransferBatchItem = typeof transferBatchItem.$inferSelect;
+export type NewTransferBatchItem = typeof transferBatchItem.$inferInsert;
+
+export const workforceEvent = pgTable("workforce_event", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventType: varchar("event_type", { length: 40 }).notNull(),
+  aggregateId: uuid("aggregate_id").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+});
+
+export type WorkforceEvent = typeof workforceEvent.$inferSelect;
+export type NewWorkforceEvent = typeof workforceEvent.$inferInsert;
+
 export const staffAssignment = pgTable("staff_assignment", {
   id: uuid("id").primaryKey().defaultRandom(),
   staffId: uuid("staff_id").notNull(),

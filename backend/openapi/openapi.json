@@ -51,10 +51,427 @@
           }
         }
       }
+    },
+    "/staff/{staffId}/assignments": {
+      "get": {
+        "summary": "Staff assignment history",
+        "parameters": [
+          { "$ref": "#/components/parameters/StaffId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignment history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AssignmentRecord" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a temporary or cover assignment",
+        "parameters": [{ "$ref": "#/components/parameters/StaffId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TemporaryAssignmentRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Assignment created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AssignmentResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/{staffId}/effective-unit": {
+      "get": {
+        "summary": "Resolve a staff member's effective unit on a date",
+        "parameters": [
+          { "$ref": "#/components/parameters/StaffId" },
+          {
+            "name": "on",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "date" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective assignment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "on": { "type": "string", "format": "date" },
+                        "assignment": {
+                          "oneOf": [
+                            { "$ref": "#/components/schemas/AssignmentRecord" },
+                            { "type": "null" }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/{staffId}/transfers": {
+      "post": {
+        "summary": "Schedule a permanent staff transfer",
+        "parameters": [{ "$ref": "#/components/parameters/StaffId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransferRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer scheduled",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AssignmentResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/{staffId}/deactivate": {
+      "post": {
+        "summary": "Deactivate a staff member and cancel future work",
+        "parameters": [{ "$ref": "#/components/parameters/StaffId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StaffDeactivationRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Staff member deactivated" } }
+      }
+    },
+    "/transfer-batches": {
+      "get": {
+        "summary": "List transfer batches",
+        "responses": {
+          "200": {
+            "description": "Transfer batches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TransferBatch" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a transfer batch draft",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransferBatchRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Draft created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TransferBatchResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer-batches/{id}": {
+      "patch": {
+        "summary": "Edit a transfer batch draft",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransferBatchRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TransferBatchResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer-batches/{id}/preview": {
+      "get": {
+        "summary": "Preview transfer batch coverage impact",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": {
+          "200": {
+            "description": "Coverage preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/TransferBatchPreview" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfer-batches/{id}/approve": {
+      "post": {
+        "summary": "Approve a transfer batch",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": { "200": { "description": "Batch approved" } }
+      }
+    },
+    "/transfer-batches/{id}/apply": {
+      "post": {
+        "summary": "Atomically apply an approved transfer batch",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": { "200": { "description": "Batch applied" } }
+      }
+    },
+    "/unit-staffing-requirements": {
+      "get": {
+        "summary": "List minimum staffing requirements",
+        "responses": {
+          "200": {
+            "description": "Staffing requirements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/StaffingRequirement" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a minimum staffing requirement",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StaffingRequirementRequest" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Requirement created" } }
+      }
+    },
+    "/unit-staffing-requirements/{id}": {
+      "patch": {
+        "summary": "Update a minimum staffing requirement",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StaffingRequirementRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Requirement updated" } }
+      },
+      "delete": {
+        "summary": "Delete a minimum staffing requirement",
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "responses": { "200": { "description": "Requirement deleted" } }
+      }
     }
   },
   "components": {
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "StaffId": {
+        "name": "staffId",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" }
+      }
+    },
     "schemas": {
+      "AssignmentRecord": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "orgUnitId": { "type": "string", "format": "uuid" },
+          "unitName": { "type": "string" },
+          "unitCode": { "type": "string" },
+          "assignmentType": { "type": "string", "enum": ["PRIMARY", "TEMPORARY", "COVER"] },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "effectiveTo": { "type": ["string", "null"], "format": "date" },
+          "reason": { "type": "string" },
+          "note": { "type": ["string", "null"] }
+        }
+      },
+      "AssignmentResponse": {
+        "type": "object",
+        "properties": { "data": { "$ref": "#/components/schemas/AssignmentRecord" } }
+      },
+      "TemporaryAssignmentRequest": {
+        "type": "object",
+        "required": ["orgUnitId", "assignmentType", "effectiveFrom", "effectiveTo"],
+        "properties": {
+          "orgUnitId": { "type": "string", "format": "uuid" },
+          "assignmentType": { "type": "string", "enum": ["TEMPORARY", "COVER"] },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "effectiveTo": { "type": "string", "format": "date" },
+          "reason": { "type": "string", "enum": ["SECONDMENT", "COVER"] },
+          "note": { "type": "string", "maxLength": 1000 }
+        }
+      },
+      "TransferRequest": {
+        "type": "object",
+        "required": ["toUnitId", "effectiveFrom"],
+        "properties": {
+          "toUnitId": { "type": "string", "format": "uuid" },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "reason": { "type": "string", "enum": ["TRANSFER", "RESHUFFLE", "PROMOTION", "RETURN"] },
+          "note": { "type": "string", "maxLength": 1000 }
+        }
+      },
+      "StaffDeactivationRequest": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      },
+      "TransferBatchItemRequest": {
+        "type": "object",
+        "required": ["staffId", "toUnitId"],
+        "properties": {
+          "staffId": { "type": "string", "format": "uuid" },
+          "toUnitId": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string", "enum": ["RESHUFFLE", "TRANSFER", "PROMOTION", "RETURN"] },
+          "note": { "type": "string", "maxLength": 1000 }
+        }
+      },
+      "TransferBatchRequest": {
+        "type": "object",
+        "required": ["title", "effectiveFrom", "items"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 150 },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/TransferBatchItemRequest" }
+          }
+        }
+      },
+      "TransferBatch": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "status": { "type": "string", "enum": ["DRAFT", "APPROVED", "APPLIED", "CANCELLED"] },
+          "items": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "TransferBatchResponse": {
+        "type": "object",
+        "properties": { "data": { "$ref": "#/components/schemas/TransferBatch" } }
+      },
+      "TransferBatchPreview": {
+        "type": "object",
+        "properties": {
+          "batchId": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "effectiveFrom": { "type": "string", "format": "date" },
+          "moves": { "type": "array", "items": { "type": "object" } },
+          "coverage": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "StaffingRequirement": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "orgUnitId": { "type": "string", "format": "uuid" },
+          "unitName": { "type": "string" },
+          "unitCode": { "type": "string" },
+          "shiftTypeId": { "type": "string", "format": "uuid" },
+          "shiftName": { "type": "string" },
+          "jobRoleId": { "type": ["string", "null"], "format": "uuid" },
+          "roleName": { "type": ["string", "null"] },
+          "minStaff": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "StaffingRequirementRequest": {
+        "type": "object",
+        "required": ["orgUnitId", "shiftTypeId", "minStaff"],
+        "properties": {
+          "orgUnitId": { "type": "string", "format": "uuid" },
+          "shiftTypeId": { "type": "string", "format": "uuid" },
+          "jobRoleId": { "type": ["string", "null"], "format": "uuid" },
+          "minStaff": { "type": "integer", "minimum": 0 }
+        }
+      },
       "Pagination": {
         "type": "object",
         "required": ["page", "limit", "total", "totalPages", "hasMore"],

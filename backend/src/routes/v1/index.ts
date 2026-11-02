@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import auditLogRoutes from "./auditLog.js";
+import assignmentRoutes from "./assignments.js";
 import consentRoutes from "./consent.js";
 import facilityRoutes from "./facility.js";
 import jobRoleRoutes from "./jobRoles.js";
@@ -21,5 +22,6 @@ router.use("/facility", facilityRoutes);
 router.use("/consent", consentRoutes);
 router.use("/audit-log", auditLogRoutes);
 router.use("/org-units", orgUnitRoutes);
+router.use("/", assignmentRoutes);
 
 export default router;

@@ -64,6 +64,13 @@
       "when": 1791984368655,
       "tag": "0008_bitter_ultimatum",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793600000000,
+      "tag": "0009_sprint3_assignments_transfers",
+      "breakpoints": true
     }
   ]
 }
