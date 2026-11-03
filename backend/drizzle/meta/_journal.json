@@ -57,6 +57,41 @@
       "when": 1792489860000,
       "tag": "0007_sprint2_org_staff",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792490000000,
+      "tag": "0008_bitter_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793600000000,
+      "tag": "0009_sprint3_assignments_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793610000000,
+      "tag": "0010_hosting_renewal_payment_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793613600000,
+      "tag": "0011_sprint3_review_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793620000000,
+      "tag": "0012_hosting_payment_recovery",
+      "breakpoints": true
     }
   ]
 }

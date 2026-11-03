@@ -15,6 +15,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -191,6 +192,7 @@ export const StaffCreate = () => {
           />
 
           <TextField form={form} name="email" label="Email" type="email" />
+          <TextField form={form} name="userId" label="Linked User ID" required={false} />
           <TextField form={form} name="employeeId" label="Employee ID" />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
           <TextField form={form} name="momoName" label="MoMo Name" />
@@ -200,7 +202,6 @@ export const StaffCreate = () => {
           <TextField form={form} name="badgeNumber" label="Badge Number" required={false} />
           <TextField form={form} name="hireDate" label="Hire Date" type="date" required={false} />
           <TextField form={form} name="terminationDate" label="Termination Date" type="date" required={false} />
-          <TextField form={form} name="userId" label="Linked User ID" required={false} />
 
           <SelectField
             form={form}
@@ -225,6 +226,7 @@ export const StaffCreate = () => {
             name="orgUnitId"
             label="Current Org Unit"
             required={false}
+            searchable
             options={orgUnits.map((option) => ({ value: option.id, label: `${option.name} (${option.code})` }))}
           />
           <SelectField
@@ -301,9 +303,10 @@ type SelectFieldProps = {
   label: string;
   options: Array<{ value: string; label: string }>;
   required?: boolean;
+  searchable?: boolean;
 };
 
-function SelectField({ form, name, label, options, required = true }: SelectFieldProps) {
+function SelectField({ form, name, label, options, required = true, searchable = false }: SelectFieldProps) {
   return (
     <FormField
       control={form.control}
@@ -312,24 +315,40 @@ function SelectField({ form, name, label, options, required = true }: SelectFiel
       render={({ field }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
-          <Select
-            onValueChange={(value) => field.onChange(value === "__none__" ? "" : value)}
-            value={(field.value as string | undefined) || "__none__"}
-          >
+          {searchable ? (
             <FormControl>
+              <SearchableSelect
+                value={(field.value as string | undefined) || "__none__"}
+                onValueChange={(value) => field.onChange(value === "__none__" ? "" : value)}
+                options={[
+                  ...(!required ? [{ value: "__none__", label: "None" }] : []),
+                  ...options,
+                ]}
+                placeholder={`Select ${label.toLowerCase()}`}
+                searchPlaceholder={`Search ${label.toLowerCase()}...`}
+                emptyMessage={`No matching ${label.toLowerCase()}.`}
+              />
+            </FormControl>
+          ) : (
+            <Select
+              onValueChange={(value) => field.onChange(value === "__none__" ? "" : value)}
+              value={(field.value as string | undefined) || "__none__"}
+            >
+              <FormControl>
               <SelectTrigger>
                 <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
               </SelectTrigger>
-            </FormControl>
-            <SelectContent>
-              {!required ? <SelectItem value="__none__">None</SelectItem> : null}
-              {options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              </FormControl>
+              <SelectContent>
+                {!required ? <SelectItem value="__none__">None</SelectItem> : null}
+                {options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <FormMessage />
         </FormItem>
       )}

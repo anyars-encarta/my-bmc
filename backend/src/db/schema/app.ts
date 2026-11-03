@@ -11,10 +11,13 @@ import {
   date,
   smallint,
   char,
+  check,
+  integer,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
+import { serial } from "drizzle-orm/mysql-core";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -149,9 +152,64 @@ export const facilitySetup = pgTable("facility_setup", {
   nhiaFacilityCode: varchar("nhia_facility_code", { length: 30 }),
   gpsDigitalAddress: varchar("gps_digital_address", { length: 20 }),
   registrationNumber: varchar("registration_number", { length: 40 }),
+  hosted: boolean("hosted").notNull().default(false),
+  hostingExpiryDate: date("hosting_expiry_date"),
+  monthlyRenewalFee: numeric("monthly_renewal_fee", {
+      precision: 10,
+      scale: 2,
+    }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const hostingRenewal = pgTable(
+  "hosting_renewal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    monthlyDollarRate: numeric("monthly_dollar_rate", {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    quantityInMonths: integer("quantity_in_months").notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    totalDollarAmount: numeric("total_dollar_amount", {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    totalCediEquivalent: numeric("total_cedi_equivalent", {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    paymentReference: varchar("payment_reference", { length: 120 }),
+    serviceChargeReference: varchar("service_charge_reference", { length: 120 }),
+    usdToGhsRate: numeric("usd_to_ghs_rate", { precision: 12, scale: 6 }),
+    paymentStartedAt: timestamp("payment_started_at", { withTimezone: true }),
+    status: varchar("status", { length: 12 }).$type<"PENDING" | "COMPLETED">().notNull().default("COMPLETED"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("hosting_renewal_payment_reference_unique").on(table.paymentReference),
+    uniqueIndex("hosting_renewal_service_charge_reference_unique").on(table.serviceChargeReference),
+    check("chk_hosting_renewal_status", sql`${table.status} IN ('PENDING', 'COMPLETED')`),
+    check(
+      "chk_hosting_renewal_monthly_nonnegative",
+      sql`${table.monthlyDollarRate} >= 0`,
+    ),
+    check(
+      "chk_hosting_renewal_quantity_positive",
+      sql`${table.quantityInMonths} >= 1`,
+    ),
+    check(
+      "chk_hosting_renewal_totals_nonnegative",
+      sql`${table.totalDollarAmount} >= 0 and ${table.totalCediEquivalent} >= 0`,
+    ),
+    check(
+      "chk_hosting_renewal_dates_order",
+      sql`${table.startDate} <= ${table.endDate}`,
+    ),
+  ],
+);
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 

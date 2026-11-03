@@ -1,0 +1,353 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { getPublicApiBase } from "@/lib/public-api";
+
+import { Separator } from "./ui/separator";
+import { formatDate } from "@/lib/timeFormat";
+import { SetupRecord } from "@/types/domain";
+
+type HostingModalVariant = "temporal-hosting" | "hosting-expiry" | null;
+
+const MILLISECONDS_IN_A_DAY = 1000 * 60 * 60 * 24;
+
+const getDaysUntilExpiry = (
+  hostingExpiryDate: string | null | undefined,
+  currentDate: Date,
+) => {
+  if (!hostingExpiryDate) {
+    return null;
+  }
+
+  const expiryDate = new Date(`${hostingExpiryDate}T00:00:00Z`);
+  if (Number.isNaN(expiryDate.getTime())) {
+    return null;
+  }
+
+  const todayStartUtc = new Date(
+    Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), currentDate.getUTCDate()),
+  );
+
+  return Math.floor(
+    (expiryDate.getTime() - todayStartUtc.getTime()) / MILLISECONDS_IN_A_DAY,
+  );
+};
+
+type HostingCriticalInfoModalProps = {
+  setupInfo?: SetupRecord | null;
+  onStatusChange?: (status: "checking" | "ready" | "unavailable") => void;
+};
+
+const HostingCriticalInfoModal = ({
+  setupInfo = null,
+  onStatusChange,
+}: HostingCriticalInfoModalProps) => {
+  const navigate = useNavigate();
+  const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(setupInfo);
+  const [hasFetchedSettings, setHasFetchedSettings] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [actionCompleted, setActionCompleted] = useState(false);
+  const [modalVariant, setModalVariant] = useState<HostingModalVariant>(null);
+  const [clockNow, setClockNow] = useState(() => new Date());
+  const [expiryCheckStatus, setExpiryCheckStatus] = useState<"idle" | "checking" | "unavailable">("idle");
+  const hasHandledExpiredHosting = useRef(false);
+  const wasInNoticeWindow = useRef(false);
+
+  const fetchHostingInfo = useCallback(async () => {
+    const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/info`);
+    const payload = (await response.json()) as {
+      success?: boolean;
+      data?: SetupRecord;
+      error?: string;
+    };
+    if (!response.ok || !payload.success || !payload.data) {
+      throw new Error(payload.error || "Failed to load hosting info.");
+    }
+    return payload.data;
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    setHasFetchedSettings(false);
+    setExpiryCheckStatus("checking");
+
+    const loadSystemSettings = async () => {
+      let lastError: unknown;
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (!isActive) return;
+          try {
+            const settings = await fetchHostingInfo();
+            if (isActive) {
+              setSystemSettings(settings);
+            }
+            return;
+          } catch (error) {
+            lastError = error;
+            if (!isActive) return;
+            if (attempt < 2) {
+              await new Promise<void>((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+            }
+          }
+        }
+
+        if (isActive) {
+          console.error("GET /public/hosting-renewal/info failed after retries:", lastError);
+          setSystemSettings(null);
+        }
+      } finally {
+        if (isActive) {
+          setHasFetchedSettings(true);
+        }
+      }
+    };
+
+    void loadSystemSettings();
+
+    return () => {
+      isActive = false;
+    };
+  }, [fetchHostingInfo]);
+
+  const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate, clockNow);
+
+  const isHostingExpired = daysUntilExpiry !== null && daysUntilExpiry < 0;
+
+  useEffect(() => {
+    if (!hasFetchedSettings) {
+      return;
+    }
+
+    if (isHostingExpired) {
+      if (hasHandledExpiredHosting.current) {
+        return;
+      }
+
+      hasHandledExpiredHosting.current = true;
+      setExpiryCheckStatus("checking");
+      void fetchHostingInfo()
+        .then((latestSettings) => {
+          setSystemSettings(latestSettings);
+          const latestDaysUntilExpiry = getDaysUntilExpiry(
+            latestSettings.hostingExpiryDate,
+            new Date(),
+          );
+          if (latestDaysUntilExpiry !== null && latestDaysUntilExpiry < 0) {
+            setOpen(false);
+            setModalVariant(null);
+            toast.error("Hosting has expired", {
+              id: "hosting-expired",
+              richColors: true,
+            });
+            navigate("/hosting-renewal", { replace: true });
+            return;
+          }
+          hasHandledExpiredHosting.current = false;
+          setExpiryCheckStatus("idle");
+        })
+        .catch((error: unknown) => {
+          console.error("Unable to revalidate hosting expiry:", error);
+          setExpiryCheckStatus("unavailable");
+        });
+      return;
+    }
+
+    if (!systemSettings) {
+      return;
+    }
+
+    const isInNoticeWindow = daysUntilExpiry !== null &&
+      daysUntilExpiry >= 0 &&
+      daysUntilExpiry <= 7;
+    if (isInNoticeWindow && !wasInNoticeWindow.current) {
+      setModalVariant(systemSettings.hosted ? "hosting-expiry" : "temporal-hosting");
+      setActionCompleted(false);
+      setOpen(true);
+    }
+    wasInNoticeWindow.current = isInNoticeWindow;
+  }, [
+    daysUntilExpiry,
+    fetchHostingInfo,
+    hasFetchedSettings,
+    isHostingExpired,
+    navigate,
+    systemSettings,
+  ]);
+
+  const retryHostingCheck = async () => {
+    setExpiryCheckStatus("checking");
+    try {
+      const latestSettings = await fetchHostingInfo();
+      setSystemSettings(latestSettings);
+      const latestDaysUntilExpiry = getDaysUntilExpiry(
+        latestSettings.hostingExpiryDate,
+        new Date(),
+      );
+      if (latestDaysUntilExpiry !== null && latestDaysUntilExpiry < 0) {
+        toast.error("Hosting has expired", {
+          id: "hosting-expired",
+          richColors: true,
+        });
+        navigate("/hosting-renewal", { replace: true });
+        return;
+      }
+      hasHandledExpiredHosting.current = false;
+      wasInNoticeWindow.current = false;
+      setExpiryCheckStatus("idle");
+    } catch (error) {
+      console.error("Unable to load current hosting status:", error);
+      setExpiryCheckStatus("unavailable");
+    }
+  };
+
+  const canDismiss = actionCompleted;
+  const isTemporalHostingModal = modalVariant === "temporal-hosting";
+  const formattedExpiryDate = formatDate(
+    systemSettings?.hostingExpiryDate ?? undefined,
+  );
+
+  const isExpired = isHostingExpired;
+  const shouldBlockProtectedContent =
+    !hasFetchedSettings || !systemSettings || expiryCheckStatus !== "idle" || isExpired;
+  const accessStatus = !hasFetchedSettings || expiryCheckStatus === "checking"
+    ? "checking"
+    : !systemSettings || expiryCheckStatus === "unavailable"
+      ? "unavailable"
+      : isExpired
+        ? "checking"
+        : "ready";
+
+  useEffect(() => {
+    onStatusChange?.(accessStatus);
+    return () => onStatusChange?.("checking");
+  }, [accessStatus, onStatusChange]);
+
+  return (
+    <>
+    {shouldBlockProtectedContent ? (
+      <div className="flex min-h-[50vh] items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-lg">
+          <p className="font-semibold">
+            {expiryCheckStatus === "checking" ? "Checking hosting status" : "Hosting status unavailable"}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Protected pages are unavailable until the facility hosting status can be confirmed.
+          </p>
+          <Button
+            type="button"
+            onClick={() => void retryHostingCheck()}
+            disabled={expiryCheckStatus === "checking"}
+            className="cursor-pointer"
+          >
+            {expiryCheckStatus === "checking" ? "Checking..." : "Retry hosting check"}
+          </Button>
+        </div>
+      </div>
+    ) : null}
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen || canDismiss) {
+          setOpen(nextOpen);
+        }
+      }}
+    >
+      <AlertDialogContent
+        onEscapeKeyDown={(event) => {
+          if (!canDismiss) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-red-400">
+            {isTemporalHostingModal ? "CRITICAL INFO" : "HOSTING EXPIRY NOTICE"}
+          </AlertDialogTitle>
+          <Separator />
+          <AlertDialogDescription>
+            {isTemporalHostingModal ? (
+              <>
+                This system is currently on Temporal Hosting and would be
+                expiring on{" "}
+                <span className="text-red-400 font-bold">
+                  {formattedExpiryDate}
+                </span>
+                .
+                <br />
+                <br />
+                Please contact your software developer immediately to avoid
+                service interruption.
+              </>
+            ) : (
+              <>
+                {daysUntilExpiry !== null && daysUntilExpiry < 0
+                  ? "This system hosting has expired."
+                  : `This system hosting will expire in ${
+                      daysUntilExpiry ?? 0
+                    } day(s).`}{" "}
+                Expiry date:{" "}
+                <span className="text-red-400 font-bold">
+                  {formattedExpiryDate}
+                </span>
+                .
+                <br />
+                <br />
+                Please renew or contact your software developer as soon as
+                possible to avoid service interruption.
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <Separator />
+
+        <div className="flex items-start space-x-2">
+          <Checkbox
+            id="hosting-critical-ack"
+            checked={actionCompleted}
+            onCheckedChange={(checked) =>
+              setActionCompleted(checked === "indeterminate" ? false : checked)
+            }
+          />
+          <Label htmlFor="hosting-critical-ack" className="leading-5">
+            {isTemporalHostingModal
+              ? "I have read this critical information and will contact the software developer."
+              : "I have read this hosting expiry notice and will take action immediately."}
+          </Label>
+        </div>
+
+        <AlertDialogAction
+          className="cursor-pointer"
+          disabled={!actionCompleted}
+        >
+          I Understand
+        </AlertDialogAction>
+
+        <Separator />
+        <span className="text-xs text-muted-foreground text-end">
+          The Hosting Team
+        </span>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
+  );
+};
+
+export default HostingCriticalInfoModal;

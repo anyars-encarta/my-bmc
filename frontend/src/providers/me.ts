@@ -61,9 +61,14 @@ export const fetchMe = async (force = false): Promise<MeResponse | null> => {
   const requestGeneration = meGeneration;
   const request = fetch(meUrl, {
     credentials: "include",
+    cache: "no-store",
     headers: createAuthHeaders(),
   })
     .then(async (response) => {
+      if (response.status === 304) {
+        return meCache;
+      }
+
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           if (meGeneration === requestGeneration) {

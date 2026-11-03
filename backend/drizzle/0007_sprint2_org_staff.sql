@@ -1,6 +1,7 @@
 ALTER TABLE user_unit_scope
   ADD CONSTRAINT user_unit_scope_org_unit_fk
   FOREIGN KEY (org_unit_id) REFERENCES org_unit(id) ON DELETE CASCADE;
+--> statement-breakpoint
 
 INSERT INTO shift_type (code, name, category, start_time, end_time, break_minutes, early_in_minutes, late_out_minutes, grace_late_minutes, active)
 VALUES
@@ -19,6 +20,7 @@ SET
   late_out_minutes = EXCLUDED.late_out_minutes,
   grace_late_minutes = EXCLUDED.grace_late_minutes,
   active = EXCLUDED.active;
+--> statement-breakpoint
 
 INSERT INTO job_role (code, name, staff_category, requires_license)
 VALUES

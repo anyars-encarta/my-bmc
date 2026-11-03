@@ -15,12 +15,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useShow, useNotification } from "@refinedev/core";
+import { useGetIdentity, useShow, useNotification } from "@refinedev/core";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
-import type { StaffLicenseRecord, StaffRecord } from "@/types/domain";
+import type {
+  JobRoleRecord,
+  OrgUnitRecord,
+  ShiftTypeRecord,
+  StaffLicenseRecord,
+  StaffRecord,
+} from "@/types/domain";
 import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
+import { StaffAssignments } from "./assignments";
+import { StaffDeactivation } from "./deactivate";
+import { canReadStaffAssignments, canWriteStaffAssignments } from "@/lib/workforce-access";
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
@@ -37,8 +46,15 @@ export const StaffShow = () => {
   const staffId = id ?? "";
   const { result: record } = useShow<StaffRecord>({});
   const { open: notify } = useNotification();
+  const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const canReadAssignments = canReadStaffAssignments(identity);
+  const canWriteAssignments = canWriteStaffAssignments(identity);
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
+  const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});
+  const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
+  const [shiftTypeLabels, setShiftTypeLabels] = useState<Record<string, string>>({});
   const [savingLicense, setSavingLicense] = useState(false);
+  const [deactivated, setDeactivated] = useState(false);
   const [newLicense, setNewLicense] = useState<NewLicense>({
     licensingBody: "MDC",
     licenceNo: "",
@@ -64,10 +80,78 @@ export const StaffShow = () => {
     setLicenses(payload.data ?? []);
   };
 
+  const fetchPaged = async <T,>(resourcePath: string) => {
+    const records: T[] = [];
+    let page = 1;
+
+    while (true) {
+      const response = await fetch(`${apiBase}/v1/${resourcePath}?page=${page}&limit=200`, {
+        credentials: "include",
+        headers: createAuthHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load ${resourcePath}: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        data?: T[];
+        pagination?: { hasMore?: boolean };
+      };
+
+      records.push(...(payload.data ?? []));
+      if (!payload.pagination?.hasMore) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return records;
+  };
+
+  const loadReferenceLabels = async () => {
+    const [orgUnitsResult, jobRolesResult, shiftTypesResult] = await Promise.allSettled([
+      fetchPaged<OrgUnitRecord>("org-units"),
+      fetchPaged<JobRoleRecord>("job-roles"),
+      fetchPaged<ShiftTypeRecord>("shift-types"),
+    ]);
+    if (orgUnitsResult.status === "fulfilled") {
+      setOrgUnitLabels(
+        Object.fromEntries(
+          orgUnitsResult.value.map((unit) => [unit.id, `${unit.name} (${unit.code})`]),
+        ),
+      );
+    }
+    if (jobRolesResult.status === "fulfilled") {
+      setJobRoleLabels(
+        Object.fromEntries(jobRolesResult.value.map((role) => [role.id, role.name])),
+      );
+    }
+    if (shiftTypesResult.status === "fulfilled") {
+      setShiftTypeLabels(
+        Object.fromEntries(
+          shiftTypesResult.value.map((shiftType) => [shiftType.id, shiftType.name]),
+        ),
+      );
+    }
+
+    const failures = [orgUnitsResult, jobRolesResult, shiftTypesResult]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
+      notify?.({
+        type: "error",
+        message: failures
+          .map(({ reason }) => reason instanceof Error ? reason.message : "Failed to load staff reference data.")
+          .join(" "),
+      });
+    }
+  };
+
   useEffect(() => {
     loadLicenses().catch((error) => {
       notify?.({ type: "error", message: error instanceof Error ? error.message : "Failed to load licenses." });
     });
+    loadReferenceLabels();
   }, [notify, staffId]);
 
   const createLicense = async () => {
@@ -127,23 +211,53 @@ export const StaffShow = () => {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <DataItem label="Employee ID" value={record?.employeeId} />
           <DataItem label="Email" value={record?.email} />
-          <DataItem label="Org Unit ID" value={record?.orgUnitId ?? undefined} />
+          <DataItem
+            label="Org Unit"
+            value={
+              record?.orgUnitId
+                ? orgUnitLabels[record.orgUnitId] ?? "Unassigned"
+                : "Unassigned"
+            }
+          />
           <DataItem label="Department" value={record?.department} />
           <DataItem label="Position" value={record?.position} />
           <DataItem label="Phone" value={record?.phone} />
           <DataItem label="Staff Category" value={record?.staffCategory} />
           <DataItem label="Schedule Mode" value={record?.scheduleMode} />
-          <DataItem label="Job Role ID" value={record?.jobRoleId ?? undefined} />
-          <DataItem label="Default Shift ID" value={record?.defaultShiftTypeId ?? undefined} />
+          <DataItem
+            label="Job Role"
+            value={
+              record?.jobRoleId
+                ? jobRoleLabels[record.jobRoleId] ?? "Not assigned"
+                : "Not assigned"
+            }
+          />
+          <DataItem
+            label="Default Shift Type"
+            value={
+              record?.defaultShiftTypeId
+                ? shiftTypeLabels[record.defaultShiftTypeId] ?? "Not assigned"
+                : "Not assigned"
+            }
+          />
           <DataItem label="Badge Number" value={record?.badgeNumber ?? undefined} />
           <DataItem label="MoMo Number" value={record?.momoNumber} />
           <DataItem label="MoMo Name" value={record?.momoName} />
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
-            <Badge>{record?.status || "-"}</Badge>
+            <Badge>{deactivated ? "inactive" : record?.status || "-"}</Badge>
           </div>
         </CardContent>
       </Card>
+
+      {canReadAssignments ? <StaffAssignments staffId={staffId} /> : null}
+      {canWriteAssignments ? (
+        <StaffDeactivation
+          staffId={staffId}
+          status={deactivated ? "inactive" : record?.status}
+          onDeactivated={() => setDeactivated(true)}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>

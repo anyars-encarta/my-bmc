@@ -204,11 +204,17 @@ router.patch("/:id", requireAnyRole([...LIST_ROLES]), async (req, res, next) => 
   }
 });
 
-router.get("/:id/roles", requireAnyRole([...LIST_ROLES]), async (req, res, next) => {
+router.get("/:id/roles", async (req, res, next) => {
   try {
     const userId = parseRouteId(req.params.id);
     if (!userId) {
       throw badRequest("User ID is required.", "USER_ID_REQUIRED");
+    }
+    if (
+      req.user?.id !== userId &&
+      !(req.user?.roles ?? []).some((role) => LIST_ROLES.includes(role as (typeof LIST_ROLES)[number]))
+    ) {
+      throw forbidden("You are not allowed to view these roles.", "ROLE_READ_FORBIDDEN");
     }
 
     const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.id, userId)).limit(1);
@@ -283,16 +289,30 @@ router.patch("/:id/roles", requireAnyRole([...LIST_ROLES]), async (req, res, nex
       throw notFound("User not found.", "USER_NOT_FOUND");
     }
 
-    await db.transaction(async (tx) => {
-      await tx.delete(appUserRole).where(eq(appUserRole.userId, userId));
-      await tx.insert(appUserRole).values(
+    const previousRoles = await db
+      .select()
+      .from(appUserRole)
+      .where(eq(appUserRole.userId, userId));
+    await db.delete(appUserRole).where(eq(appUserRole.userId, userId));
+    try {
+      await db.insert(appUserRole).values(
         parsed.data.roles.map((role) => ({
           userId,
           role,
           grantedBy: req.user?.id ?? null,
         })),
       );
-    });
+    } catch (error) {
+      try {
+        await db.delete(appUserRole).where(eq(appUserRole.userId, userId));
+        if (previousRoles.length > 0) {
+          await db.insert(appUserRole).values(previousRoles);
+        }
+      } catch (compensationError) {
+        console.error("Unable to restore user roles after the role update failed:", compensationError);
+      }
+      throw error;
+    }
 
     res.json({ data: parsed.data.roles });
   } catch (error) {

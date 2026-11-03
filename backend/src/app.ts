@@ -14,6 +14,7 @@ import setupRoutes from "./routes/setup.js";
 import momoRoutes from "./routes/momo.js";
 import userRoutes from "./routes/users.js";
 import v1Routes from "./routes/v1/index.js";
+import hostingRenewalPublicRoutes from "./routes/hostingRenewalPublic.js";
 import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
 import { problemHandler } from "./middleware/problemHandler.js";
 
@@ -87,9 +88,16 @@ app.use(securityHeaders);
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Middleware
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, body) => {
+    if ((req as express.Request).originalUrl.split("?")[0] === "/public/hosting-renewal/webhook") {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
+app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
 
 app.use("/api", requireAuth);
 app.use("/api", securityMiddleware);

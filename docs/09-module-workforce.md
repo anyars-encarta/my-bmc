@@ -698,6 +698,8 @@ CREATE TABLE staff_assignment (
 CREATE INDEX staff_assignment_unit_idx ON staff_assignment(org_unit_id, effective_from, effective_to);
 ```
 
+Draft moves are stored in `transfer_batch_item`. Transfers and deactivations write `StaffTransferred` and `StaffDeactivated` records to the transactional `workforce_event` outbox; transfers also repoint active future roster entries, while deactivation disables linked logins and cancels future roster entries.
+
 **Effective unit on date D** = a `TEMPORARY`/`COVER` assignment covering D if one exists (latest `effective_from` wins), otherwise the `PRIMARY` one. A person can also appear in another unit's roster as a `COVER` entry without changing their primary assignment.
 
 ### 8.2 Transfer service
@@ -764,9 +766,17 @@ Re-shuffle scenarios:
 | POST/PATCH | `/api/v1/org-units` | Maintain units (HR_ADMIN) |
 | GET | `/api/v1/org-units/{id}/staff?on=YYYY-MM-DD` | Who is assigned on a date |
 | GET | `/api/v1/staff/{id}/assignments` | Assignment history |
+| GET | `/api/v1/staff/{id}/effective-unit?on=YYYY-MM-DD` | Effective assignment on a date |
 | POST | `/api/v1/staff/{id}/transfers` | `{toUnitId, effectiveFrom, reason, note}` |
-| POST | `/api/v1/transfer-batches`, `/{id}/preview`, `/{id}/approve`, `/{id}/apply` | Reshuffle exercise |
-| POST | `/api/v1/staff/{id}/assignments` | Temporary / cover assignment |
+| POST | `/api/v1/transfer-batches` | Create a reshuffle draft and its moves |
+| PATCH | `/api/v1/transfer-batches/{id}` | Replace moves while the batch is a draft |
+| GET | `/api/v1/transfer-batches/{id}/preview` | Coverage impact by unit, shift, and role |
+| POST | `/api/v1/transfer-batches/{id}/approve`, `/{id}/apply` | Approve and atomically apply a reshuffle |
+| POST | `/api/v1/staff/{id}/assignments` | Temporary / cover assignment with inclusive date range |
+| GET/POST | `/api/v1/unit-staffing-requirements` | Minimum staff by unit, shift, and optional role |
+| PATCH/DELETE | `/api/v1/unit-staffing-requirements/{id}` | Maintain staffing minimums |
+
+Generate deterministic demo/staging data without overwriting existing records with `npm run seed:workforce -- --units=4 --staff=40 --seed=123`.
 
 ---
 

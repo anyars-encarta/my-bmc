@@ -4,7 +4,7 @@ import { SubmitHandler } from "react-hook-form";
 import { BaseRecord, HttpError, useNotification } from "@refinedev/core";
 import { useForm } from "@refinedev/react-hook-form";
 
-import { staffCategoryOptions, staffStatusOptions, scheduleModeOptions } from "@/constants/options";
+import { staffCategoryOptions, scheduleModeOptions } from "@/constants/options";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -27,7 +27,7 @@ import PageLoader from "@/components/PageLoader";
 import UploadWidget from "@/components/upload-widget";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
-import type { JobRoleRecord, OrgUnitRecord, ShiftTypeRecord, StaffCategory, ScheduleMode } from "@/types/domain";
+import type { JobRoleRecord, ShiftTypeRecord, StaffCategory, ScheduleMode } from "@/types/domain";
 import type { UploadWidgetValue } from "@/types";
 
 type StaffEditValues = {
@@ -39,10 +39,8 @@ type StaffEditValues = {
   momoNumber: string;
   momoName?: string;
   department?: string;
-  orgUnitId?: string;
   position?: string;
   phone?: string;
-  status: string;
   staffCategory: StaffCategory;
   scheduleMode: ScheduleMode;
   defaultShiftTypeId?: string | null;
@@ -58,7 +56,6 @@ const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 export const StaffEdit = () => {
   const navigate = useNavigate();
   const { open: notify } = useNotification();
-  const [orgUnits, setOrgUnits] = useState<OrgUnitRecord[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRoleRecord[]>([]);
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeRecord[]>([]);
 
@@ -73,10 +70,8 @@ export const StaffEdit = () => {
       momoNumber: "",
       momoName: "",
       department: "",
-      orgUnitId: "",
       position: "",
       phone: "",
-      status: "active",
       staffCategory: "NON_CLINICAL",
       scheduleMode: "FIXED_WEEKDAY",
       defaultShiftTypeId: "",
@@ -125,13 +120,11 @@ export const StaffEdit = () => {
 
     const loadReferences = async () => {
       try {
-        const [allOrgUnits, allJobRoles, allShiftTypes] = await Promise.all([
-          fetchPaged<OrgUnitRecord>("org-units"),
+        const [allJobRoles, allShiftTypes] = await Promise.all([
           fetchPaged<JobRoleRecord>("job-roles"),
           fetchPaged<ShiftTypeRecord>("shift-types"),
         ]);
 
-        setOrgUnits(allOrgUnits);
         setJobRoles(allJobRoles);
         setShiftTypes(allShiftTypes);
       } catch (error) {
@@ -150,7 +143,6 @@ export const StaffEdit = () => {
   const onSubmit: SubmitHandler<StaffEditValues> = (values) => {
     onFinish({
       ...values,
-      orgUnitId: values.orgUnitId || undefined,
       defaultShiftTypeId: values.defaultShiftTypeId || null,
       jobRoleId: values.jobRoleId || null,
       badgeNumber: values.badgeNumber || null,
@@ -200,14 +192,7 @@ export const StaffEdit = () => {
           <TextField form={form} name="badgeNumber" label="Badge Number" required={false} />
           <TextField form={form} name="hireDate" label="Hire Date" type="date" required={false} />
           <TextField form={form} name="terminationDate" label="Termination Date" type="date" required={false} />
-          <TextField form={form} name="userId" label="Linked User ID" required={false} />
 
-          <SelectField
-            form={form}
-            name="status"
-            label="Status"
-            options={staffStatusOptions.map((option) => ({ value: option.value, label: option.label }))}
-          />
           <SelectField
             form={form}
             name="staffCategory"
@@ -219,13 +204,6 @@ export const StaffEdit = () => {
             name="scheduleMode"
             label="Schedule Mode"
             options={scheduleModeOptions.map((option) => ({ value: option.value, label: option.label }))}
-          />
-          <SelectField
-            form={form}
-            name="orgUnitId"
-            label="Current Org Unit"
-            required={false}
-            options={orgUnits.map((option) => ({ value: option.id, label: `${option.name} (${option.code})` }))}
           />
           <SelectField
             form={form}

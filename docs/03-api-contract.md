@@ -4,6 +4,13 @@ Base URL: `/api/v1`. Auth: `Authorization: Bearer <JWT>` (ADR-015). Device endpo
 `/api/v1/device/**` with `X-Device-Code` / `X-Device-Key`. Public surfaces, when added, live under
 `/api/public/*`.
 
+Hosting renewal is a public exception: `POST /api/public/hosting-renewal/reference` obtains a
+server-priced quote and persists its unique Paystack reference before checkout. Confirmation must
+submit that reference and the matching quote total; the backend verifies the transaction with
+Paystack before completing the stored renewal. The Vercel proxy maps these public paths to the
+backend's `/public/hosting-renewal/*` router. Configure `BACKEND_URL` (or
+`VITE_BACKEND_BASE_URL`) for the proxy runtime.
+
 > The existing Refine data provider (`frontend/src/providers/data.ts`) currently **fetches whole lists and
 > filters/paginates in the browser** (`listCache`). That is fine for 200 staff and impossible for 300,000 patients.
 > Sprint 1 rewrites it to send the list-query contract in §2 and read the `pagination` block (ADR-006).
@@ -128,12 +135,17 @@ Role legend: `SA` SUPER_ADMIN · `HA` HOSPITAL_ADMIN · `HR` HR_MANAGER · `PO` 
 | GET | `/org-units/:id/staff?on=YYYY-MM-DD` | UM(scoped) HR RO | roster-effective assignment on a date |
 | GET/POST/PATCH | `/staff` | HR SA (write), UM(scoped, read) | port of existing; category/mode/role/badge; payout fields only for HR/PO |
 | GET | `/staff/:id` | HR UM(scoped) ST(own) | |
-| POST | `/staff/:id/deactivate` | HR | publishes `StaffDeactivated`; reason required |
+| POST | `/staff/:id/deactivate` | HR | publishes `StaffDeactivated`; disables linked login and cancels future roster entries; reason required |
 | GET/POST/PATCH | `/job-roles` · `/staff/:id/licenses` | HR | licences gate clinical acts |
 | GET | `/staff/:id/assignments` | HR UM(scoped) | history |
+| GET | `/staff/:id/effective-unit?on=YYYY-MM-DD` | HR UM(scoped) RO | temporary/cover assignment takes precedence over primary |
 | POST | `/staff/:id/transfers` | HR (UM requests) | `{ toUnitId, effectiveFrom, reason, note }` |
-| POST | `/staff/:id/assignments` | HR | TEMPORARY / COVER |
-| POST/GET | `/transfer-batches` · `/:id/preview` · `/:id/approve` · `/:id/apply` | HR HA | mass reshuffle; preview = coverage impact |
+| POST | `/staff/:id/assignments` | HR | TEMPORARY / COVER with an inclusive date range |
+| GET/POST/PATCH | `/transfer-batches` | HR HA | draft a mass reshuffle and update draft moves |
+| GET | `/transfer-batches/:id/preview` | HR HA | coverage impact by affected unit, shift, and role |
+| POST | `/transfer-batches/:id/approve` · `/:id/apply` | HR HA | approval followed by atomic application |
+| GET/POST | `/unit-staffing-requirements` | HR (read scoped) | minimum staff per unit/shift/optional role |
+| PATCH/DELETE | `/unit-staffing-requirements/:id` | HR | maintain minimum coverage |
 
 ### Scheduling (rosters) — Sprints 3–4
 
