@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useLink, useLogin, useNotification } from "@refinedev/core";
+import { useNavigate } from "react-router";
+import { useAuth } from "@/contexts/use-auth";
 import PageLoader from "@/components/PageLoader";
 
 export const SignInForm = () => {
@@ -30,6 +32,8 @@ export const SignInForm = () => {
 
   const Link = useLink();
   const { open } = useNotification();
+  const navigate = useNavigate();
+  const { refreshSession } = useAuth();
 
   const { mutateAsync: login } = useLogin();
 
@@ -51,6 +55,8 @@ export const SignInForm = () => {
           result?.error?.message || "Invalid email or password.";
         throw new Error(message);
       }
+      await refreshSession();
+      navigate("/dashboard", { replace: true });
     } catch (error) {
       const message =
         error instanceof Error

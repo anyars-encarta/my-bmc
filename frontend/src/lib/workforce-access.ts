@@ -14,7 +14,6 @@ const READ_ROLES = [
 const rolesFor = (identity?: WorkforceIdentity | null) => {
   const roles = new Set(identity?.roles ?? []);
   if (identity?.role) roles.add(identity.role);
-  if (roles.has("admin")) roles.add("SUPER_ADMIN");
   return roles;
 };
 

@@ -413,8 +413,18 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
       .where(and(eq(staff.id, staffId), eq(staff.status, "active")))
       .returning();
     if (!updated) {
-      const [existing] = await db.select({ id: staff.id }).from(staff).where(eq(staff.id, staffId)).limit(1);
+      const [existing] = await db
+        .select({ id: staff.id, userId: staff.userId })
+        .from(staff)
+        .where(eq(staff.id, staffId))
+        .limit(1);
       if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+      if (existing.userId) {
+        await db.update(user)
+          .set({ status: "inactive", updatedAt: new Date() })
+          .where(eq(user.id, existing.userId));
+        await db.delete(session).where(eq(session.userId, existing.userId));
+      }
       throw conflict("Staff member is already inactive.", "STAFF_ALREADY_INACTIVE");
     }
 

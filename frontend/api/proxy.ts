@@ -54,7 +54,7 @@ export default async function handler(req: ProxyRequest, res: ServerResponse) {
     }
 
     const headers = new Headers();
-    for (const headerName of ["accept", "authorization", "content-type", "cookie", "user-agent"]) {
+    for (const headerName of ["accept", "authorization", "content-type", "cookie", "user-agent", "origin", "referer"]) {
       const value = req.headers[headerName];
       if (typeof value === "string") headers.set(headerName, value);
     }

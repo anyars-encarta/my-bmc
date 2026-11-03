@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   char,
+  check,
   date,
   inet,
   integer,
@@ -15,6 +16,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // Generated from drizzle/0005_sprint_ready_schema.sql to keep Drizzle schema in sync.
 
@@ -236,7 +238,12 @@ export const transferBatch = pgTable("transfer_batch", {
   status: varchar("status", { length: 10 }).default('DRAFT').notNull(),
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
-});
+}, (table) => [
+  check(
+    "chk_transfer_batch_status",
+    sql`${table.status} IN ('DRAFT', 'APPROVED', 'APPLYING', 'APPLIED', 'CANCELLED')`,
+  ),
+]);
 
 export type TransferBatch = typeof transferBatch.$inferSelect;
 export type NewTransferBatch = typeof transferBatch.$inferInsert;

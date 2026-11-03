@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useGetIdentity, useNotification } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
@@ -62,6 +62,7 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   const [transferOpen, setTransferOpen] = useState(false);
   const [temporaryOpen, setTemporaryOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const effectiveUnitRequestId = useRef(0);
   const [transfer, setTransfer] = useState({
     toUnitId: "",
     effectiveFrom: "",
@@ -91,17 +92,24 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   }, [staffId]);
 
   const loadEffectiveUnit = useCallback(async (onDate: string) => {
-    const response = await fetch(
-      `${apiBase}/v1/staff/${staffId}/effective-unit?on=${encodeURIComponent(onDate)}`,
-      { credentials: "include", headers: createAuthHeaders() },
-    );
-    const payload = (await response.json()) as {
-      data?: { assignment: EffectiveAssignment };
-      message?: string;
-      error?: string;
-    };
-    if (!response.ok) throw new Error(getErrorMessage(payload, "Failed to resolve effective org unit."));
-    setEffectiveAssignment(payload.data?.assignment ?? null);
+    const requestId = ++effectiveUnitRequestId.current;
+    try {
+      const response = await fetch(
+        `${apiBase}/v1/staff/${staffId}/effective-unit?on=${encodeURIComponent(onDate)}`,
+        { credentials: "include", headers: createAuthHeaders() },
+      );
+      if (requestId !== effectiveUnitRequestId.current) return;
+      const payload = (await response.json()) as {
+        data?: { assignment: EffectiveAssignment };
+        message?: string;
+        error?: string;
+      };
+      if (requestId !== effectiveUnitRequestId.current) return;
+      if (!response.ok) throw new Error(getErrorMessage(payload, "Failed to resolve effective org unit."));
+      setEffectiveAssignment(payload.data?.assignment ?? null);
+    } catch (error) {
+      if (requestId === effectiveUnitRequestId.current) throw error;
+    }
   }, [staffId]);
 
   useEffect(() => {

@@ -78,6 +78,13 @@
       "when": 1793610000000,
       "tag": "0010_hosting_renewal_payment_details",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793613600000,
+      "tag": "0011_sprint3_review_integrity",
+      "breakpoints": true
     }
   ]
 }

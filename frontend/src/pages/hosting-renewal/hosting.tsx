@@ -18,26 +18,27 @@ const formatCurrency = (amount: number, currency: string) =>
   }).format(amount);
 
 const addMonths = (date: Date, months: number) => {
-  const year = date.getUTCFullYear();
-  const month = date.getUTCMonth() + months;
+  const year = date.getFullYear();
+  const month = date.getMonth() + months;
   const targetYear = year + Math.floor(month / 12);
   const targetMonth = ((month % 12) + 12) % 12;
   const day = Math.min(
-    date.getUTCDate(),
-    new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate(),
+    date.getDate(),
+    new Date(targetYear, targetMonth + 1, 0).getDate(),
   );
-  return new Date(Date.UTC(
+  return new Date(
     targetYear,
     targetMonth,
     day,
-    date.getUTCHours(),
-    date.getUTCMinutes(),
-    date.getUTCSeconds(),
-    date.getUTCMilliseconds(),
-  ));
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds(),
+  );
 };
 
-const toLocalDateString = (date: Date) => date.toISOString().slice(0, 10);
+const toLocalDateString = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 const formatDisplayDate = (isoDate: string) => {
   const [year, month, day] = isoDate.split("-");
@@ -122,6 +123,11 @@ const HostingRenewal = () => {
     ? renewalReference.totalCediEquivalent
     : totalDollarAmount !== null && exchangeRate.status === "loaded"
       ? totalDollarAmount * exchangeRate.rate
+      : null;
+  const displayedExchangeRate = renewalReference?.quantityInMonths === quantityInMonths
+    ? renewalReference.exchangeRate
+    : exchangeRate.status === "loaded"
+      ? exchangeRate.rate
       : null;
   const paymentAmount = totalCediEquivalent !== null ? Number(totalCediEquivalent.toFixed(2)) : 0;
   const displayedStartDate = renewalReference?.quantityInMonths === quantityInMonths
@@ -249,6 +255,12 @@ const HostingRenewal = () => {
       return;
     }
 
+    const email = info?.businessEmail?.trim();
+    if (!email) {
+      setSubmitState({ status: "error", message: "The facility business email is not configured." });
+      return;
+    }
+
     if (!paystackPublicKey) {
       setSubmitState({ status: "error", message: "Paystack public key is not configured." });
       return;
@@ -260,7 +272,6 @@ const HostingRenewal = () => {
     }
 
     setSubmitState({ status: "submitting" });
-    const email = info?.businessEmail || "billing@business.local";
     const [firstName, ...restName] = (info?.facilityName || "Business").split(" ").filter(Boolean);
     const lastName = restName.join(" ") || undefined;
 
@@ -297,6 +308,7 @@ const HostingRenewal = () => {
         amount: quote.totalCediEquivalent,
         endDate: quote.endDate,
       };
+      let successReported = false;
       await openPaystackCheckout({
         key: paystackPublicKey,
         email,
@@ -310,6 +322,7 @@ const HostingRenewal = () => {
             setSubmitState({ status: "error", message: "Paystack did not confirm this payment." });
             return;
           }
+          successReported = true;
           setAcceptedCharge(charge);
           void confirmRenewal(charge).catch((error: unknown) => {
             setSubmitState({
@@ -319,7 +332,9 @@ const HostingRenewal = () => {
           });
         },
         onClose: () => {
-          setSubmitState((current) => (current.status === "submitting" ? { status: "idle" } : current));
+          if (!successReported) {
+            setSubmitState((current) => (current.status === "submitting" ? { status: "idle" } : current));
+          }
         },
       });
     } catch (error) {
@@ -498,22 +513,26 @@ const HostingRenewal = () => {
                 </Button>
               </div>
 
-              {exchangeRate.status === "loading" ? (
+              {exchangeRate.status === "loading" && displayedExchangeRate === null ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader className="h-8 w-8 animate-spin" />
                   Fetching live rate...
                 </div>
               ) : null}
 
-              {exchangeRate.status === "error" ? (
+              {exchangeRate.status === "error" && displayedExchangeRate === null ? (
                 <p className="text-xs text-destructive">{exchangeRate.message}</p>
               ) : null}
 
-              {exchangeRate.status === "loaded" ? (
+              {displayedExchangeRate !== null ? (
                 <div className="space-y-1">
-                  <Input readOnly value={`1 USD = ${exchangeRate.rate.toFixed(4)} GHS`} className="bg-muted cursor-not-allowed" />
+                  <Input readOnly value={`1 USD = ${displayedExchangeRate.toFixed(6)} GHS`} className="bg-muted cursor-not-allowed" />
                   <p className="text-xs text-muted-foreground">
-                    Rate fetched at {exchangeRate.fetchedAt.toLocaleTimeString()}
+                    {renewalReference?.quantityInMonths === quantityInMonths
+                      ? "Rate locked for this quote."
+                      : exchangeRate.status === "loaded"
+                        ? `Rate fetched at ${exchangeRate.fetchedAt.toLocaleTimeString()}`
+                        : "Rate unavailable."}
                   </p>
                 </div>
               ) : null}

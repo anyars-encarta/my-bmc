@@ -29,7 +29,7 @@ import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
 import { StaffAssignments } from "./assignments";
 import { StaffDeactivation } from "./deactivate";
-import { canReadStaffAssignments } from "@/lib/workforce-access";
+import { canReadStaffAssignments, canWriteStaffAssignments } from "@/lib/workforce-access";
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
@@ -48,6 +48,7 @@ export const StaffShow = () => {
   const { open: notify } = useNotification();
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
   const canReadAssignments = canReadStaffAssignments(identity);
+  const canWriteAssignments = canWriteStaffAssignments(identity);
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
   const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});
   const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
@@ -109,33 +110,39 @@ export const StaffShow = () => {
   };
 
   const loadReferenceLabels = async () => {
-    try {
-      const [allOrgUnits, allJobRoles, allShiftTypes] = await Promise.all([
-        fetchPaged<OrgUnitRecord>("org-units"),
-        fetchPaged<JobRoleRecord>("job-roles"),
-        fetchPaged<ShiftTypeRecord>("shift-types"),
-      ]);
-
+    const [orgUnitsResult, jobRolesResult, shiftTypesResult] = await Promise.allSettled([
+      fetchPaged<OrgUnitRecord>("org-units"),
+      fetchPaged<JobRoleRecord>("job-roles"),
+      fetchPaged<ShiftTypeRecord>("shift-types"),
+    ]);
+    if (orgUnitsResult.status === "fulfilled") {
       setOrgUnitLabels(
         Object.fromEntries(
-          allOrgUnits.map((unit) => [unit.id, `${unit.name} (${unit.code})`]),
+          orgUnitsResult.value.map((unit) => [unit.id, `${unit.name} (${unit.code})`]),
         ),
       );
+    }
+    if (jobRolesResult.status === "fulfilled") {
       setJobRoleLabels(
-        Object.fromEntries(allJobRoles.map((role) => [role.id, role.name])),
+        Object.fromEntries(jobRolesResult.value.map((role) => [role.id, role.name])),
       );
+    }
+    if (shiftTypesResult.status === "fulfilled") {
       setShiftTypeLabels(
         Object.fromEntries(
-          allShiftTypes.map((shiftType) => [shiftType.id, shiftType.name]),
+          shiftTypesResult.value.map((shiftType) => [shiftType.id, shiftType.name]),
         ),
       );
-    } catch (error) {
+    }
+
+    const failures = [orgUnitsResult, jobRolesResult, shiftTypesResult]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
       notify?.({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to load staff reference data.",
+        message: failures
+          .map(({ reason }) => reason instanceof Error ? reason.message : "Failed to load staff reference data.")
+          .join(" "),
       });
     }
   };
@@ -244,11 +251,13 @@ export const StaffShow = () => {
       </Card>
 
       {canReadAssignments ? <StaffAssignments staffId={staffId} /> : null}
-      <StaffDeactivation
-        staffId={staffId}
-        status={deactivated ? "inactive" : record?.status}
-        onDeactivated={() => setDeactivated(true)}
-      />
+      {canWriteAssignments ? (
+        <StaffDeactivation
+          staffId={staffId}
+          status={deactivated ? "inactive" : record?.status}
+          onDeactivated={() => setDeactivated(true)}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>

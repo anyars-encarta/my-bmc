@@ -14,17 +14,14 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
   const { user, isLoading, refreshSession } = useAuth();
   const location = useLocation();
   const [redirectPath, setRedirectPath] = useState<"/login" | "/hosting-renewal" | null>(null);
-  const [checkingHostingStatus, setCheckingHostingStatus] = useState(false);
 
   useEffect(() => {
     if (isLoading || user) {
       setRedirectPath(null);
-      setCheckingHostingStatus(false);
       return;
-    }
+    };
 
     let isActive = true;
-    setCheckingHostingStatus(true);
 
     const resolveRedirectPath = async () => {
       try {
@@ -32,7 +29,6 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
         if (!isActive) return;
 
         if (refreshedUser) {
-          setCheckingHostingStatus(false);
           return;
         }
 
@@ -53,7 +49,6 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
 
           if (!Number.isNaN(dueDate.getTime()) && dueDate.getTime() <= todayStart.getTime()) {
             setRedirectPath("/hosting-renewal");
-            setCheckingHostingStatus(false);
             return;
           }
         }
@@ -62,10 +57,6 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
       } catch {
         if (!isActive) return;
         setRedirectPath("/login");
-      } finally {
-        if (isActive) {
-          setCheckingHostingStatus(false);
-        }
       }
     };
 
@@ -76,7 +67,7 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
     };
   }, [isLoading, user, refreshSession]);
 
-  if (isLoading || (!user && checkingHostingStatus && !redirectPath)) {
+  if (isLoading || (!user && !redirectPath)) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-2 text-muted-foreground">
         <Loader className="size-4 animate-spin" />

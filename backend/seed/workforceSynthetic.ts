@@ -43,70 +43,68 @@ const main = async () => {
   const today = new Date().toISOString().slice(0, 10);
   const createdUnits: Array<{ id: string; name: string; code: string }> = [];
 
-  await db.transaction(async (tx) => {
-    for (let index = 1; index <= unitCount; index += 1) {
-      const code = `SYN${seedCode}_U${String(index).padStart(3, "0")}`;
-      await tx
-        .insert(orgUnit)
-        .values({
-          code,
-          name: `Demo Ward ${index}`,
-          unitType: index === 1 ? "DEPARTMENT" : "WARD",
-          parentId: createdUnits[0]?.id ?? null,
-          isClinical: true,
-          operates24h: true,
-          active: true,
-        })
-        .onConflictDoNothing({ target: orgUnit.code });
-      const [unit] = await tx.select().from(orgUnit).where(eq(orgUnit.code, code)).limit(1);
-      if (!unit) throw new Error(`Failed to load generated org unit ${code}.`);
-      createdUnits.push(unit);
-    }
+  for (let index = 1; index <= unitCount; index += 1) {
+    const code = `SYN${seedCode}_U${String(index).padStart(3, "0")}`;
+    await db
+      .insert(orgUnit)
+      .values({
+        code,
+        name: `Demo Ward ${index}`,
+        unitType: index === 1 ? "DEPARTMENT" : "WARD",
+        parentId: createdUnits[0]?.id ?? null,
+        isClinical: true,
+        operates24h: true,
+        active: true,
+      })
+      .onConflictDoNothing({ target: orgUnit.code });
+    const [unit] = await db.select().from(orgUnit).where(eq(orgUnit.code, code)).limit(1);
+    if (!unit) throw new Error(`Failed to load generated org unit ${code}.`);
+    createdUnits.push(unit);
+  }
 
-    for (let index = 1; index <= staffCount; index += 1) {
-      const employeeId = `SYN-${seedCode}-${String(index).padStart(5, "0")}`;
-      const email = `workforce.${seedCode}.${index}@example.test`;
-      const unit = createdUnits[(index - 1) % createdUnits.length];
-      if (!unit) throw new Error("No generated org unit is available.");
-      await tx
-        .insert(staff)
-        .values({
-          firstName: firstNames[Math.floor(random() * firstNames.length)] ?? "Demo",
-          lastName: lastNames[Math.floor(random() * lastNames.length)] ?? "Staff",
-          email,
-          employeeId,
-          momoNumber: `020${String(1000000 + index).slice(-7)}`,
-          department: unit.name,
-          position: "Clinical Staff",
-          status: "active",
-          staffCategory: "CLINICAL",
-          scheduleMode: "ROSTERED",
-          hireDate: today,
-        })
-        .onConflictDoNothing({ target: staff.employeeId });
-      const [person] = await tx.select().from(staff).where(eq(staff.employeeId, employeeId)).limit(1);
-      if (!person) throw new Error(`Failed to load generated staff member ${employeeId}.`);
-      const [assignment] = await tx
-        .select({ id: staffAssignment.id })
-        .from(staffAssignment)
-        .where(
-          and(
-            eq(staffAssignment.staffId, person.id),
-            eq(staffAssignment.assignmentType, "PRIMARY"),
-          ),
-        )
-        .limit(1);
-      if (!assignment) {
-        await tx.insert(staffAssignment).values({
-          staffId: person.id,
-          orgUnitId: unit.id,
-          assignmentType: "PRIMARY",
-          effectiveFrom: today,
-          reason: "INITIAL",
-        });
-      }
+  for (let index = 1; index <= staffCount; index += 1) {
+    const employeeId = `SYN-${seedCode}-${String(index).padStart(5, "0")}`;
+    const email = `workforce.${seedCode}.${index}@example.test`;
+    const unit = createdUnits[(index - 1) % createdUnits.length];
+    if (!unit) throw new Error("No generated org unit is available.");
+    await db
+      .insert(staff)
+      .values({
+        firstName: firstNames[Math.floor(random() * firstNames.length)] ?? "Demo",
+        lastName: lastNames[Math.floor(random() * lastNames.length)] ?? "Staff",
+        email,
+        employeeId,
+        momoNumber: `020${String(1000000 + index).slice(-7)}`,
+        department: unit.name,
+        position: "Clinical Staff",
+        status: "active",
+        staffCategory: "CLINICAL",
+        scheduleMode: "ROSTERED",
+        hireDate: today,
+      })
+      .onConflictDoNothing({ target: staff.employeeId });
+    const [person] = await db.select().from(staff).where(eq(staff.employeeId, employeeId)).limit(1);
+    if (!person) throw new Error(`Failed to load generated staff member ${employeeId}.`);
+    const [assignment] = await db
+      .select({ id: staffAssignment.id })
+      .from(staffAssignment)
+      .where(
+        and(
+          eq(staffAssignment.staffId, person.id),
+          eq(staffAssignment.assignmentType, "PRIMARY"),
+        ),
+      )
+      .limit(1);
+    if (!assignment) {
+      await db.insert(staffAssignment).values({
+        staffId: person.id,
+        orgUnitId: unit.id,
+        assignmentType: "PRIMARY",
+        effectiveFrom: today,
+        reason: "INITIAL",
+      });
     }
-  });
+  }
 
   console.log(
     `Synthetic workforce ready: ${unitCount} units, ${staffCount} staff, seed ${seed}.`,

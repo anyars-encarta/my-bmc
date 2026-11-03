@@ -579,6 +579,21 @@ const previewBatch = async (batchId: string) => {
     if (item.fromUnitId) affectedUnitIds.add(item.fromUnitId);
     affectedUnitIds.add(item.toUnitId);
   }
+  const movedStaffIds = [...destinationByStaff.keys()];
+  if (movedStaffIds.length > 0) {
+    const futureRosterUnits = await db
+      .select({ orgUnitId: rosterEntry.orgUnitId })
+      .from(rosterEntry)
+      .where(and(
+        inArray(rosterEntry.staffId, movedStaffIds),
+        eq(rosterEntry.status, "ACTIVE"),
+        ne(rosterEntry.source, "COVER"),
+        gte(rosterEntry.rosterDate, batch.effectiveFrom),
+      ));
+    for (const roster of futureRosterUnits) {
+      affectedUnitIds.add(roster.orgUnitId);
+    }
+  }
   const affectedIds = [...affectedUnitIds];
   if (affectedIds.length === 0) {
     return { batchId, effectiveFrom: batch.effectiveFrom, moves: items, coverage: [] };
@@ -603,6 +618,7 @@ const previewBatch = async (batchId: string) => {
           staffId: rosterEntry.staffId,
           orgUnitId: rosterEntry.orgUnitId,
           shiftTypeId: rosterEntry.shiftTypeId,
+          source: rosterEntry.source,
         })
         .from(rosterEntry)
         .where(
@@ -624,13 +640,21 @@ const previewBatch = async (batchId: string) => {
       if (rostered.shiftTypeId !== shiftTypeId) continue;
       const assignment = currentByStaff.get(rostered.staffId);
       if (!assignment || (roleId !== null && assignment.jobRoleId !== roleId)) continue;
-      const unitIdForStaff = projected && assignment.assignmentType === "PRIMARY"
+      const isProjectedPrimary = projected &&
+        primaryStaffIds.has(rostered.staffId) &&
+        rostered.source !== "COVER";
+      const unitIdForStaff = isProjectedPrimary
         ? destinationByStaff.get(rostered.staffId) ?? rostered.orgUnitId
         : rostered.orgUnitId;
       if (unitIdForStaff === unitId) countedStaff.add(rostered.staffId);
     }
     return countedStaff.size;
   };
+  const primaryStaffIds = new Set(
+    activeAssignments
+      .filter((assignment) => assignment.assignmentType === "PRIMARY")
+      .map((assignment) => assignment.staffId),
+  );
   const coverage = requirements.map((requirement) => {
     const currentStaff = countAt(
       requirement.orgUnitId,

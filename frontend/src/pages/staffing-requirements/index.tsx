@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useNotification } from "@refinedev/core";
+import { useGetIdentity, useNotification } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { canWriteStaffAssignments } from "@/lib/workforce-access";
 import {
   Select,
   SelectContent,
@@ -44,6 +45,8 @@ const getErrorMessage = (payload: { message?: string; error?: string }, fallback
 
 export const StaffingRequirementsPage = () => {
   const { open: notify } = useNotification();
+  const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const canWriteRequirements = canWriteStaffAssignments(identity);
   const [units, setUnits] = useState<OrgUnitRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftTypeRecord[]>([]);
   const [roles, setRoles] = useState<JobRoleRecord[]>([]);
@@ -148,7 +151,7 @@ export const StaffingRequirementsPage = () => {
   return (
     <ListView className="space-y-4">
       <ListViewHeader title="Minimum staffing requirements" />
-      <Card>
+      {canWriteRequirements ? <Card>
         <CardHeader>
           <CardTitle>{editingId ? "Edit staffing minimum" : "Add staffing minimum"}</CardTitle>
         </CardHeader>
@@ -195,7 +198,7 @@ export const StaffingRequirementsPage = () => {
             {editingId ? <Button variant="outline" onClick={cancelEdit} disabled={saving} className="cursor-pointer">Cancel</Button> : null}
           </div>
         </CardContent>
-      </Card>
+      </Card> : null}
 
       <Card>
         <CardHeader><CardTitle>Configured minimums</CardTitle></CardHeader>
@@ -208,10 +211,12 @@ export const StaffingRequirementsPage = () => {
                 <p className="font-medium">{requirement.unitName} ({requirement.unitCode}) · {requirement.shiftName}</p>
                 <p className="text-sm text-muted-foreground">{requirement.roleName ?? "All roles"} · Minimum {requirement.minStaff}</p>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" disabled={saving} onClick={() => edit(requirement)} className="cursor-pointer">Edit</Button>
-                <Button variant="destructive" disabled={saving} onClick={() => void remove(requirement)} className="cursor-pointer">Remove</Button>
-              </div>
+              {canWriteRequirements ? (
+                <div className="flex gap-2">
+                  <Button variant="outline" disabled={saving} onClick={() => edit(requirement)} className="cursor-pointer">Edit</Button>
+                  <Button variant="destructive" disabled={saving} onClick={() => void remove(requirement)} className="cursor-pointer">Remove</Button>
+                </div>
+              ) : null}
             </div>
           ))}
         </CardContent>

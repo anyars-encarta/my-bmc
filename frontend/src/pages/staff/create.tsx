@@ -192,6 +192,7 @@ export const StaffCreate = () => {
           />
 
           <TextField form={form} name="email" label="Email" type="email" />
+          <TextField form={form} name="userId" label="Linked User ID" required={false} />
           <TextField form={form} name="employeeId" label="Employee ID" />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
           <TextField form={form} name="momoName" label="MoMo Name" />

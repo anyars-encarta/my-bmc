@@ -93,7 +93,6 @@ export const authProvider: AuthProvider = {
       clearMeCache();
       return {
         success: true,
-        redirectTo: "/dashboard",
       };
     }
 
@@ -107,7 +106,6 @@ export const authProvider: AuthProvider = {
     clearMeCache();
     return {
       success: true,
-      redirectTo: "/dashboard",
     };
   },
   logout: async () => {
