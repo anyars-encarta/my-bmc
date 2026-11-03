@@ -184,6 +184,7 @@ export const hostingRenewal = pgTable(
     paymentReference: varchar("payment_reference", { length: 120 }),
     serviceChargeReference: varchar("service_charge_reference", { length: 120 }),
     usdToGhsRate: numeric("usd_to_ghs_rate", { precision: 12, scale: 6 }),
+    paymentStartedAt: timestamp("payment_started_at", { withTimezone: true }),
     status: varchar("status", { length: 12 }).$type<"PENDING" | "COMPLETED">().notNull().default("COMPLETED"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

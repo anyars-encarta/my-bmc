@@ -204,11 +204,17 @@ router.patch("/:id", requireAnyRole([...LIST_ROLES]), async (req, res, next) => 
   }
 });
 
-router.get("/:id/roles", requireAnyRole([...LIST_ROLES]), async (req, res, next) => {
+router.get("/:id/roles", async (req, res, next) => {
   try {
     const userId = parseRouteId(req.params.id);
     if (!userId) {
       throw badRequest("User ID is required.", "USER_ID_REQUIRED");
+    }
+    if (
+      req.user?.id !== userId &&
+      !(req.user?.roles ?? []).some((role) => LIST_ROLES.includes(role as (typeof LIST_ROLES)[number]))
+    ) {
+      throw forbidden("You are not allowed to view these roles.", "ROLE_READ_FORBIDDEN");
     }
 
     const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.id, userId)).limit(1);

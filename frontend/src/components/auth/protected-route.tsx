@@ -43,11 +43,15 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
         const expiryDate = payload.success ? payload.data?.hostingExpiryDate ?? null : null;
 
         if (expiryDate) {
-          const dueDate = new Date(`${expiryDate}T00:00:00`);
+          const dueDate = new Date(`${expiryDate}T00:00:00Z`);
           const today = new Date();
-          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          const todayStart = new Date(Date.UTC(
+            today.getUTCFullYear(),
+            today.getUTCMonth(),
+            today.getUTCDate(),
+          ));
 
-          if (!Number.isNaN(dueDate.getTime()) && dueDate.getTime() <= todayStart.getTime()) {
+          if (!Number.isNaN(dueDate.getTime()) && dueDate.getTime() < todayStart.getTime()) {
             setRedirectPath("/hosting-renewal");
             return;
           }

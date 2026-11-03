@@ -61,7 +61,7 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1791984368655,
+      "when": 1792490000000,
       "tag": "0008_bitter_ultimatum",
       "breakpoints": true
     },
@@ -84,6 +84,13 @@
       "version": "7",
       "when": 1793613600000,
       "tag": "0011_sprint3_review_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793620000000,
+      "tag": "0012_hosting_payment_recovery",
       "breakpoints": true
     }
   ]

@@ -47,9 +47,13 @@ const getDaysUntilExpiry = (
 
 type HostingCriticalInfoModalProps = {
   setupInfo?: SetupRecord | null;
+  onStatusChange?: (status: "checking" | "ready" | "unavailable") => void;
 };
 
-const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModalProps) => {
+const HostingCriticalInfoModal = ({
+  setupInfo = null,
+  onStatusChange,
+}: HostingCriticalInfoModalProps) => {
   const navigate = useNavigate();
   const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(setupInfo);
   const [hasFetchedSettings, setHasFetchedSettings] = useState(false);
@@ -85,6 +89,7 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
     if (setupInfo) {
       setSystemSettings(setupInfo);
       setHasFetchedSettings(true);
+      setExpiryCheckStatus("idle");
       return () => {
         isActive = false;
       };
@@ -227,13 +232,25 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
     systemSettings?.hostingExpiryDate ?? undefined,
   );
 
+  const isExpired = isHostingExpired;
   const shouldBlockProtectedContent =
-    !hasFetchedSettings || !systemSettings || expiryCheckStatus !== "idle";
+    !hasFetchedSettings || !systemSettings || expiryCheckStatus !== "idle" || isExpired;
+  const accessStatus = !hasFetchedSettings || expiryCheckStatus === "checking"
+    ? "checking"
+    : !systemSettings || expiryCheckStatus === "unavailable"
+      ? "unavailable"
+      : isExpired
+        ? "checking"
+        : "ready";
+
+  useEffect(() => {
+    onStatusChange?.(accessStatus);
+  }, [accessStatus, onStatusChange]);
 
   return (
     <>
     {shouldBlockProtectedContent ? (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/95 p-6">
+      <div className="flex min-h-[50vh] items-center justify-center bg-background p-6">
         <div className="w-full max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-lg">
           <p className="font-semibold">
             {expiryCheckStatus === "checking" ? "Checking hosting status" : "Hosting status unavailable"}

@@ -63,6 +63,7 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
   const [temporaryOpen, setTemporaryOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const effectiveUnitRequestId = useRef(0);
+  const effectiveOnRef = useRef(effectiveOn);
   const [transfer, setTransfer] = useState({
     toUnitId: "",
     effectiveFrom: "",
@@ -76,6 +77,10 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
     effectiveTo: "",
     note: "",
   });
+
+  useEffect(() => {
+    effectiveOnRef.current = effectiveOn;
+  }, [effectiveOn]);
 
   const loadAssignments = useCallback(async () => {
     const response = await fetch(`${apiBase}/v1/staff/${staffId}/assignments`, {
@@ -203,7 +208,7 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
       if (kind === "transfer") setTransferOpen(false);
       else setTemporaryOpen(false);
       await loadAssignments();
-      await loadEffectiveUnit(effectiveOn);
+      await loadEffectiveUnit(effectiveOnRef.current);
     } catch (error) {
       notify?.({
         type: "error",
@@ -383,7 +388,14 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
           </TabsContent>
           <TabsContent value="effective" className="space-y-3">
             <FieldLabel label="Resolve assignment on">
-              <Input type="date" value={effectiveOn} onChange={(event) => setEffectiveOn(event.target.value)} />
+              <Input
+                type="date"
+                value={effectiveOn}
+                onChange={(event) => {
+                  effectiveOnRef.current = event.target.value;
+                  setEffectiveOn(event.target.value);
+                }}
+              />
             </FieldLabel>
             {effectiveAssignment ? (
               <div className="rounded-md border p-3">

@@ -73,14 +73,19 @@ type RenewalReference = {
   totalCediEquivalent: number;
   startDate: string;
   endDate: string;
+  expiresAt: string;
 };
 
 type AcceptedCharge = {
   reference: string;
   quantityInMonths: number;
   amount: number;
+  exchangeRate: number;
+  startDate: string;
   endDate: string;
 };
+
+const ACCEPTED_CHARGE_STORAGE_KEY = "hosting-renewal-accepted-charge";
 
 const fetchUsdToGhsRate = async (): Promise<number> => {
   const response = await fetch("https://api.frankfurter.dev/v2/rate/USD/GHS");
@@ -136,6 +141,42 @@ const HostingRenewal = () => {
   const displayedEndDate = renewalReference?.quantityInMonths === quantityInMonths
     ? renewalReference.endDate
     : endDate;
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ACCEPTED_CHARGE_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Partial<AcceptedCharge>;
+      if (
+        typeof parsed.reference !== "string" ||
+        !parsed.reference ||
+        !Number.isInteger(parsed.quantityInMonths) ||
+        typeof parsed.amount !== "number" ||
+        !Number.isFinite(parsed.amount) ||
+        typeof parsed.exchangeRate !== "number" ||
+        !Number.isFinite(parsed.exchangeRate) ||
+        typeof parsed.startDate !== "string" ||
+        typeof parsed.endDate !== "string"
+      ) {
+        window.localStorage.removeItem(ACCEPTED_CHARGE_STORAGE_KEY);
+        return;
+      }
+      const charge = parsed as AcceptedCharge;
+      setMonths(String(charge.quantityInMonths));
+      setAcceptedCharge(charge);
+      setRenewalReference({
+        reference: charge.reference,
+        quantityInMonths: charge.quantityInMonths,
+        exchangeRate: charge.exchangeRate,
+        totalCediEquivalent: charge.amount,
+        startDate: charge.startDate,
+        endDate: charge.endDate,
+        expiresAt: "",
+      });
+    } catch (error) {
+      console.error("Unable to restore the accepted hosting renewal payment:", error);
+    }
+  }, []);
 
   useEffect(() => {
     const loadInfo = async () => {
@@ -202,19 +243,10 @@ const HostingRenewal = () => {
   }, [loadExchangeRate]);
 
   const confirmRenewal = useCallback(async (charge: AcceptedCharge) => {
-      const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/confirm`, {
+      const response = await fetch(`${getPublicApiBase()}/public/hosting-renewal/reconcile`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quantityInMonths: charge.quantityInMonths,
-          totalCediEquivalent: charge.amount,
-          payment: {
-            reference: charge.reference,
-            status: "success",
-            amount: charge.amount,
-            currency: "GHS",
-          },
-        }),
+        body: JSON.stringify({ reference: charge.reference }),
       });
 
       const payload = (await response.json()) as {
@@ -239,6 +271,11 @@ const HostingRenewal = () => {
         paymentReference: payload.data?.paymentReference ?? charge.reference,
       });
       setAcceptedCharge(null);
+      try {
+        window.localStorage.removeItem(ACCEPTED_CHARGE_STORAGE_KEY);
+      } catch (error) {
+        console.error("Unable to clear the confirmed hosting renewal payment:", error);
+      }
     }, []);
 
   const handlePay = useCallback(async () => {
@@ -295,17 +332,38 @@ const HostingRenewal = () => {
         quote.quantityInMonths !== quantityInMonths ||
         !Number.isFinite(quote.exchangeRate) ||
         !Number.isFinite(quote.totalCediEquivalent) ||
-        quote.totalCediEquivalent <= 0
+        quote.totalCediEquivalent <= 0 ||
+        typeof quote.expiresAt !== "string"
       ) {
         throw new Error("The server returned an invalid hosting renewal quote.");
       }
 
       setRenewalReference(quote);
       setExchangeRate({ status: "loaded", rate: quote.exchangeRate, fetchedAt: new Date() });
+      if (
+        totalCediEquivalent === null ||
+        Math.round(quote.totalCediEquivalent * 100) !== Math.round(paymentAmount * 100)
+      ) {
+        setSubmitState({ status: "idle" });
+        return;
+      }
+
+      const startResponse = await fetch(`${getPublicApiBase()}/public/hosting-renewal/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference: quote.reference }),
+      });
+      const startPayload = (await startResponse.json()) as { success?: boolean; error?: string };
+      if (!startResponse.ok || !startPayload.success) {
+        throw new Error(startPayload.error || "This hosting renewal quote is no longer valid.");
+      }
+
       const charge: AcceptedCharge = {
         reference: quote.reference,
         quantityInMonths: quote.quantityInMonths,
         amount: quote.totalCediEquivalent,
+        exchangeRate: quote.exchangeRate,
+        startDate: quote.startDate,
         endDate: quote.endDate,
       };
       let successReported = false;
@@ -323,6 +381,11 @@ const HostingRenewal = () => {
             return;
           }
           successReported = true;
+          try {
+            window.localStorage.setItem(ACCEPTED_CHARGE_STORAGE_KEY, JSON.stringify(charge));
+          } catch (error) {
+            console.error("Unable to persist the accepted hosting renewal payment:", error);
+          }
           setAcceptedCharge(charge);
           void confirmRenewal(charge).catch((error: unknown) => {
             setSubmitState({
@@ -351,6 +414,8 @@ const HostingRenewal = () => {
     monthlyDollarRate,
     paystackPublicKey,
     quantityInMonths,
+    paymentAmount,
+    totalCediEquivalent,
   ]);
 
   if (infoLoading) {
@@ -529,7 +594,7 @@ const HostingRenewal = () => {
                   <Input readOnly value={`1 USD = ${displayedExchangeRate.toFixed(6)} GHS`} className="bg-muted cursor-not-allowed" />
                   <p className="text-xs text-muted-foreground">
                     {renewalReference?.quantityInMonths === quantityInMonths
-                      ? "Rate locked for this quote."
+                      ? "Saved rate for this quote."
                       : exchangeRate.status === "loaded"
                         ? `Rate fetched at ${exchangeRate.fetchedAt.toLocaleTimeString()}`
                         : "Rate unavailable."}

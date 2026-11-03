@@ -95,6 +95,7 @@ function App() {
   const [showSplash, setShowSplash] = useState(true);
   const notificationProvider = useNotificationProvider();
   const [info, setInfo] = useState<SetupRecord | null>(null);
+  const [hostingStatus, setHostingStatus] = useState<"checking" | "ready" | "unavailable">("checking");
   const [splashLogoLoaded, setSplashLogoLoaded] = useState(false);
 
   useEffect(() => {
@@ -240,10 +241,15 @@ function App() {
                           redirectOnFail="/login"
                         >
                           <>
-                            <HostingCriticalInfoModal setupInfo={info} />
-                            <Layout>
-                              <Outlet />
-                            </Layout>
+                            <HostingCriticalInfoModal
+                              setupInfo={info}
+                              onStatusChange={setHostingStatus}
+                            />
+                            {hostingStatus === "ready" ? (
+                              <Layout>
+                                <Outlet />
+                              </Layout>
+                            ) : null}
                           </>
                         </Authenticated>
                       }

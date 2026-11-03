@@ -2,7 +2,7 @@ import type { AuthProvider } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { authClient } from "@/lib/auth-client";
-import { clearMeCache, fetchMe } from "./me";
+import { clearMeCache, createAuthHeaders, fetchMe } from "./me";
 
 type AuthUser = {
   id: string;
@@ -283,6 +283,34 @@ export const authProvider: AuthProvider = {
       if (!sessionUser?.id || !sessionUser.email) {
         return null;
       }
+      let explicitRoles: string[] = [];
+      let roleLookupSucceeded = false;
+      try {
+        const response = await fetch(
+          `${BACKEND_BASE_URL.replace(/\/+$/, "")}/v1/users/${encodeURIComponent(sessionUser.id)}/roles`,
+          {
+            credentials: "include",
+            cache: "no-store",
+            headers: createAuthHeaders(),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`Role lookup failed with status ${response.status}.`);
+        }
+        const payload = (await response.json()) as { data?: unknown };
+        explicitRoles = Array.isArray(payload.data)
+          ? payload.data.filter((role): role is string => typeof role === "string")
+          : [];
+        roleLookupSucceeded = true;
+      } catch (error) {
+        console.error("Unable to load application roles for the current user:", error);
+      }
+
+      const legacyAdminFallback =
+        roleLookupSucceeded && explicitRoles.length === 0 && sessionUser.role === "admin"
+          ? ["SUPER_ADMIN"]
+          : [];
+      const roles = explicitRoles.length > 0 ? explicitRoles : legacyAdminFallback;
 
       const fallbackName =
         typeof sessionUser.name === "string" && sessionUser.name.trim().length > 0
@@ -298,8 +326,8 @@ export const authProvider: AuthProvider = {
         lastName,
         fullName: fallbackName,
         avatar: typeof sessionUser.image === "string" ? sessionUser.image : undefined,
-        role: sessionUser.role || undefined,
-        roles: [],
+        role: roles[0] || sessionUser.role || undefined,
+        roles,
         permissions: [],
         status: sessionUser.status || undefined,
       };
