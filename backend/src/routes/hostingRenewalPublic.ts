@@ -1,5 +1,5 @@
 import express from "express";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
@@ -358,7 +358,12 @@ router.post("/start", async (req, res) => {
 });
 
 type RenewalCompletionOutcome =
-  | { kind: "completed"; renewal: typeof hostingRenewal.$inferSelect; school: typeof facilitySetup.$inferSelect; alreadyCompleted: boolean }
+  | {
+      kind: "completed";
+      renewal: typeof hostingRenewal.$inferSelect;
+      school: { id: string; hosted: boolean; hostingExpiryDate: string | null };
+      alreadyCompleted: boolean;
+    }
   | { kind: "conflict" }
   | { kind: "facility-missing" };
 
@@ -371,16 +376,14 @@ const persistVerifiedRenewal = async (
   if (!configuredSchool) return { kind: "facility-missing" };
 
   const facilityClock = await nowAtFacility();
-  const startDate = startDateForRenewal(
-    facilityClock.localDateTime.slice(0, 10),
-    configuredSchool.hostingExpiryDate,
-  );
-  const endDate = addMonths(startDate, renewal.quantityInMonths);
+  const facilityDate = facilityClock.localDateTime.slice(0, 10);
   let completion: {
     candidate_id: string;
     candidate_status: "PENDING" | "COMPLETED";
     completed_id: string | null;
     facility_id: string | null;
+    facility_hosted: boolean;
+    facility_expiry_date: string | null;
   } | undefined;
 
   try {
@@ -389,9 +392,12 @@ const persistVerifiedRenewal = async (
       candidate_status: "PENDING" | "COMPLETED";
       completed_id: string | null;
       facility_id: string | null;
+      facility_hosted: boolean;
+      facility_expiry_date: string | null;
     }>`
       WITH candidate AS MATERIALIZED (
-        SELECT renewal.id, renewal.status, renewal.end_date
+        SELECT renewal.id, renewal.status, renewal.start_date, renewal.end_date,
+               renewal.quantity_in_months
         FROM ${hostingRenewal} AS renewal
         WHERE renewal.id = ${renewal.id}
           AND renewal.status IN ('PENDING', 'COMPLETED')
@@ -400,31 +406,53 @@ const persistVerifiedRenewal = async (
             OR renewal.service_charge_reference = ${serviceChargeReference})
         FOR UPDATE
       ),
+      facility AS MATERIALIZED (
+        SELECT setup.id,
+               setup.hosted,
+               setup.hosting_expiry_date,
+               GREATEST(
+                 ${facilityDate}::date,
+                 COALESCE(setup.hosting_expiry_date, ${facilityDate}::date)
+               ) AS renewal_start_date
+        FROM ${facilitySetup} AS setup
+        WHERE setup.id = ${configuredSchool.id}
+        FOR UPDATE
+      ),
+      renewal_dates AS MATERIALIZED (
+        SELECT candidate.id,
+               candidate.status,
+               CASE
+                 WHEN candidate.status = 'PENDING' THEN facility.renewal_start_date
+                 ELSE candidate.start_date
+               END AS start_date,
+               CASE
+                 WHEN candidate.status = 'PENDING' THEN
+                   (facility.renewal_start_date
+                     + make_interval(months => candidate.quantity_in_months))::date
+                 ELSE candidate.end_date
+               END AS end_date
+        FROM candidate
+        CROSS JOIN facility
+      ),
       facility_updated AS (
         UPDATE ${facilitySetup} AS setup
-        SET hosted = TRUE,
+        SET hosted = CASE
+              WHEN renewal_dates.status = 'PENDING' THEN TRUE
+              ELSE setup.hosted
+            END,
             hosting_expiry_date = GREATEST(
               COALESCE(setup.hosting_expiry_date, DATE '0001-01-01'),
-              CASE
-                WHEN candidate.status = 'PENDING' THEN ${endDate}::date
-                ELSE candidate.end_date
-              END
+              renewal_dates.end_date
             )
-        FROM candidate
-        WHERE setup.id = ${configuredSchool.id}
-        RETURNING setup.id
+        FROM renewal_dates, facility
+        WHERE setup.id = facility.id
+        RETURNING setup.id, setup.hosted, setup.hosting_expiry_date
       ),
       completed AS (
         UPDATE ${hostingRenewal} AS renewal
         SET status = 'COMPLETED',
-            start_date = CASE
-              WHEN renewal.status = 'PENDING' THEN ${startDate}::date
-              ELSE renewal.start_date
-            END,
-            end_date = CASE
-              WHEN renewal.status = 'PENDING' THEN ${endDate}::date
-              ELSE renewal.end_date
-            END,
+            start_date = renewal_dates.start_date,
+            end_date = renewal_dates.end_date,
             total_cedi_equivalent = CASE
               WHEN renewal.status = 'PENDING' THEN ${String(totalCediEquivalent)}
               ELSE renewal.total_cedi_equivalent
@@ -434,6 +462,7 @@ const persistVerifiedRenewal = async (
               renewal.service_charge_reference
             )
         FROM candidate
+        JOIN renewal_dates ON renewal_dates.id = candidate.id
         WHERE renewal.id = candidate.id
           AND renewal.status = candidate.status
           AND EXISTS (SELECT 1 FROM facility_updated)
@@ -442,7 +471,9 @@ const persistVerifiedRenewal = async (
       SELECT candidate.id AS candidate_id,
              candidate.status AS candidate_status,
              completed.id AS completed_id,
-             facility_updated.id AS facility_id
+             facility_updated.id AS facility_id,
+             facility_updated.hosted AS facility_hosted,
+             facility_updated.hosting_expiry_date::text AS facility_expiry_date
       FROM candidate
       LEFT JOIN completed ON completed.id = candidate.id
       LEFT JOIN facility_updated ON TRUE
@@ -453,13 +484,17 @@ const persistVerifiedRenewal = async (
       typeof row.candidate_id === "string" &&
       (row.candidate_status === "PENDING" || row.candidate_status === "COMPLETED") &&
       (typeof row.completed_id === "string" || row.completed_id === null) &&
-      (typeof row.facility_id === "string" || row.facility_id === null)
+      (typeof row.facility_id === "string" || row.facility_id === null) &&
+      typeof row.facility_hosted === "boolean" &&
+      (typeof row.facility_expiry_date === "string" || row.facility_expiry_date === null)
     ) {
       completion = {
         candidate_id: row.candidate_id,
         candidate_status: row.candidate_status,
         completed_id: row.completed_id,
         facility_id: row.facility_id,
+        facility_hosted: row.facility_hosted,
+        facility_expiry_date: row.facility_expiry_date,
       };
     }
   } catch (error) {
@@ -486,17 +521,16 @@ const persistVerifiedRenewal = async (
       eq(hostingRenewal.status, "COMPLETED"),
     ))
     .limit(1);
-  const [updatedSchool] = await db
-    .select()
-    .from(facilitySetup)
-    .where(eq(facilitySetup.id, configuredSchool.id))
-    .limit(1);
-  if (!completedRenewal || !updatedSchool) return { kind: "facility-missing" };
+  if (!completedRenewal) return { kind: "conflict" };
 
   return {
     kind: "completed",
     renewal: completedRenewal,
-    school: updatedSchool,
+    school: {
+      id: completion.facility_id,
+      hosted: completion.facility_hosted,
+      hostingExpiryDate: completion.facility_expiry_date,
+    },
     alreadyCompleted: completion.candidate_status === "COMPLETED",
   };
 };
@@ -578,6 +612,16 @@ const confirmHostingRenewal = async (req: express.Request, res: express.Response
       return res.status(409).json({
         success: false,
         error: "This hosting renewal is no longer awaiting confirmation.",
+      });
+    }
+    if (
+      storedRenewal.status === "PENDING" &&
+      storedRenewal.paymentStartedAt === null &&
+      isQuoteExpired(storedRenewal.createdAt)
+    ) {
+      return res.status(410).json({
+        success: false,
+        error: "This hosting renewal quote expired before payment started. Prepare a new quote.",
       });
     }
     if (storedRenewal.quantityInMonths !== quantityInMonths) {
@@ -695,6 +739,16 @@ const reconcileHostingRenewal = async (req: express.Request, res: express.Respon
     if (!storedRenewal) {
       return res.status(404).json({ success: false, error: "Hosting renewal quote not found." });
     }
+    if (
+      storedRenewal.status === "PENDING" &&
+      storedRenewal.paymentStartedAt === null &&
+      isQuoteExpired(storedRenewal.createdAt)
+    ) {
+      return res.status(410).json({
+        success: false,
+        error: "This hosting renewal quote expired before payment started. Prepare a new quote.",
+      });
+    }
 
     const monthlyDollarRate = Number(storedRenewal.monthlyDollarRate);
     const exchangeRate = Number(storedRenewal.usdToGhsRate);
@@ -727,6 +781,93 @@ const reconcileHostingRenewal = async (req: express.Request, res: express.Respon
 };
 
 router.post("/reconcile", reconcileHostingRenewal);
+
+router.post("/webhook", async (req, res) => {
+  try {
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(503).json({ success: false, error: "Paystack secret key is not configured" });
+    }
+
+    const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+    const signature = req.get("x-paystack-signature") ?? "";
+    if (!rawBody || !/^[a-f\d]{128}$/i.test(signature)) {
+      return res.status(401).json({ success: false, error: "Invalid Paystack webhook signature." });
+    }
+    const expectedSignature = createHmac("sha512", PAYSTACK_SECRET_KEY).update(rawBody).digest();
+    const receivedSignature = Buffer.from(signature, "hex");
+    if (
+      receivedSignature.length !== expectedSignature.length ||
+      !timingSafeEqual(receivedSignature, expectedSignature)
+    ) {
+      return res.status(401).json({ success: false, error: "Invalid Paystack webhook signature." });
+    }
+
+    const event = req.body as { event?: unknown; data?: unknown } | null;
+    if (!event || event.event !== "charge.success") {
+      return res.status(200).json({ success: true, ignored: true });
+    }
+    if (!event.data || typeof event.data !== "object" || Array.isArray(event.data)) {
+      return res.status(400).json({ success: false, error: "Invalid Paystack charge event." });
+    }
+
+    const charge = event.data as Record<string, unknown>;
+    const reference = typeof charge.reference === "string" ? charge.reference.trim() : "";
+    const amount = Number(charge.amount);
+    const currency = typeof charge.currency === "string" ? charge.currency.toUpperCase() : "";
+    const status = typeof charge.status === "string" ? charge.status.toLowerCase() : "";
+    if (!reference || status !== "success" || currency !== "GHS" || !Number.isInteger(amount)) {
+      return res.status(400).json({ success: false, error: "Invalid Paystack charge details." });
+    }
+
+    const [storedRenewal] = await db
+      .select()
+      .from(hostingRenewal)
+      .where(eq(hostingRenewal.paymentReference, reference))
+      .limit(1);
+    if (
+      !storedRenewal ||
+      !storedRenewal.paymentStartedAt ||
+      (storedRenewal.status !== "PENDING" && storedRenewal.status !== "COMPLETED")
+    ) {
+      console.warn("Ignoring Paystack charge without a started hosting renewal:", reference);
+      return res.status(200).json({ success: true, ignored: true });
+    }
+
+    const monthlyDollarRate = Number(storedRenewal.monthlyDollarRate);
+    const exchangeRate = Number(storedRenewal.usdToGhsRate);
+    if (!Number.isFinite(monthlyDollarRate) || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+      return res.status(409).json({ success: false, error: "The stored renewal quote is invalid." });
+    }
+    const totalCediEquivalent = Number(
+      (monthlyDollarRate * storedRenewal.quantityInMonths * exchangeRate).toFixed(2),
+    );
+    if (amount !== Math.round(totalCediEquivalent * 100)) {
+      return res.status(400).json({ success: false, error: "Paystack charge amount mismatch." });
+    }
+
+    const verification = await verifyPaystackPayment(reference, totalCediEquivalent, "GHS");
+    if (!verification.success || verification.reference !== storedRenewal.paymentReference) {
+      return res.status(400).json({
+        success: false,
+        error: verification.success
+          ? "Verified payment reference does not match the started renewal."
+          : verification.reason,
+      });
+    }
+
+    const outcome = await persistVerifiedRenewal(storedRenewal, totalCediEquivalent, null);
+    if (outcome.kind === "conflict") {
+      return res.status(409).json({ success: false, error: "Hosting renewal completion conflicted." });
+    }
+    if (outcome.kind === "facility-missing") {
+      return res.status(422).json({ success: false, error: "Facility details could not be updated." });
+    }
+    return res.status(200).json({ success: true, paymentReference: reference });
+  } catch (error) {
+    console.error("POST /public/hosting-renewal/webhook error:", error);
+    return res.status(500).json({ success: false, error: "Failed to process Paystack webhook." });
+  }
+});
 
 /**
  * GET /public/hosting-renewal/info

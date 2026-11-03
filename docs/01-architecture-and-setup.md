@@ -214,6 +214,10 @@ the **device** chain. A future patient portal or payment webhook mounts under
 `/api/public/**` with its own chain and IP-keyed rate limit; MoMo callbacks use
 signature/secret verification on `/api/v1/integrations/momo/callback`.
 
+Until the legacy Express API is retired, hosting renewals receive Paystack
+`charge.success` events at `/public/hosting-renewal/webhook`. The handler verifies
+the raw-body signature and reconciles only references whose checkout was started.
+
 ## 6. Environments
 
 | Environment | Frontend | Backend | Database | Purpose |

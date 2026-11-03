@@ -64,7 +64,7 @@ type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "success"; months: number; endDate: string; totalCedi: number; paymentReference: string | null }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; statusCode?: number };
 
 type RenewalReference = {
   reference: string;
@@ -86,6 +86,69 @@ type AcceptedCharge = {
 };
 
 const ACCEPTED_CHARGE_STORAGE_KEY = "hosting-renewal-accepted-charge";
+
+class RenewalConfirmationError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = "RenewalConfirmationError";
+  }
+}
+
+const isAcceptedCharge = (value: unknown): value is AcceptedCharge => {
+  if (!value || typeof value !== "object") return false;
+  const charge = value as Partial<AcceptedCharge>;
+  return (
+    typeof charge.reference === "string" &&
+    charge.reference.length > 0 &&
+    typeof charge.quantityInMonths === "number" &&
+    Number.isInteger(charge.quantityInMonths) &&
+    charge.quantityInMonths > 0 &&
+    typeof charge.amount === "number" &&
+    Number.isFinite(charge.amount) &&
+    charge.amount > 0 &&
+    typeof charge.exchangeRate === "number" &&
+    Number.isFinite(charge.exchangeRate) &&
+    charge.exchangeRate > 0 &&
+    typeof charge.startDate === "string" &&
+    typeof charge.endDate === "string"
+  );
+};
+
+const readAcceptedChargeStore = (): Record<string, AcceptedCharge> => {
+  const saved = window.localStorage.getItem(ACCEPTED_CHARGE_STORAGE_KEY);
+  if (!saved) return {};
+
+  const parsed = JSON.parse(saved) as unknown;
+  if (isAcceptedCharge(parsed)) return { [parsed.reference]: parsed };
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+  const charges: Record<string, AcceptedCharge> = {};
+  for (const [reference, value] of Object.entries(parsed)) {
+    if (isAcceptedCharge(value) && value.reference === reference) {
+      charges[reference] = value;
+    }
+  }
+  return charges;
+};
+
+const persistAcceptedCharge = (charge: AcceptedCharge) => {
+  const charges = readAcceptedChargeStore();
+  charges[charge.reference] = charge;
+  window.localStorage.setItem(ACCEPTED_CHARGE_STORAGE_KEY, JSON.stringify(charges));
+};
+
+const removeStoredAcceptedCharge = (reference: string) => {
+  const charges = readAcceptedChargeStore();
+  if (charges[reference]?.reference !== reference) return false;
+
+  delete charges[reference];
+  if (Object.keys(charges).length > 0) {
+    window.localStorage.setItem(ACCEPTED_CHARGE_STORAGE_KEY, JSON.stringify(charges));
+  } else {
+    window.localStorage.removeItem(ACCEPTED_CHARGE_STORAGE_KEY);
+  }
+  return true;
+};
 
 const fetchUsdToGhsRate = async (): Promise<number> => {
   const response = await fetch("https://api.frankfurter.dev/v2/rate/USD/GHS");
@@ -112,7 +175,12 @@ const HostingRenewal = () => {
   const [exchangeRate, setExchangeRate] = useState<ExchangeRateState>({ status: "idle" });
   const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
   const [renewalReference, setRenewalReference] = useState<RenewalReference | null>(null);
-  const [acceptedCharge, setAcceptedCharge] = useState<AcceptedCharge | null>(null);
+  const [acceptedCharges, setAcceptedCharges] = useState<AcceptedCharge[]>([]);
+  const [activeChargeReference, setActiveChargeReference] = useState<string | null>(null);
+  const acceptedCharge =
+    acceptedCharges.find((charge) => charge.reference === activeChargeReference) ??
+    acceptedCharges[0] ??
+    null;
 
   const paystackPublicKey =
     (import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string | undefined) ?? "";
@@ -143,39 +211,34 @@ const HostingRenewal = () => {
     : endDate;
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(ACCEPTED_CHARGE_STORAGE_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved) as Partial<AcceptedCharge>;
-      if (
-        typeof parsed.reference !== "string" ||
-        !parsed.reference ||
-        !Number.isInteger(parsed.quantityInMonths) ||
-        typeof parsed.amount !== "number" ||
-        !Number.isFinite(parsed.amount) ||
-        typeof parsed.exchangeRate !== "number" ||
-        !Number.isFinite(parsed.exchangeRate) ||
-        typeof parsed.startDate !== "string" ||
-        typeof parsed.endDate !== "string"
-      ) {
-        window.localStorage.removeItem(ACCEPTED_CHARGE_STORAGE_KEY);
-        return;
+    const restoreCharges = () => {
+      try {
+        const charges = Object.values(readAcceptedChargeStore());
+        setAcceptedCharges(charges);
+        const charge = charges[0];
+        if (!charge) return;
+        setActiveChargeReference(charge.reference);
+        setMonths(String(charge.quantityInMonths));
+        setRenewalReference({
+          reference: charge.reference,
+          quantityInMonths: charge.quantityInMonths,
+          exchangeRate: charge.exchangeRate,
+          totalCediEquivalent: charge.amount,
+          startDate: charge.startDate,
+          endDate: charge.endDate,
+          expiresAt: "",
+        });
+      } catch (error) {
+        console.error("Unable to restore accepted hosting renewal payments:", error);
       }
-      const charge = parsed as AcceptedCharge;
-      setMonths(String(charge.quantityInMonths));
-      setAcceptedCharge(charge);
-      setRenewalReference({
-        reference: charge.reference,
-        quantityInMonths: charge.quantityInMonths,
-        exchangeRate: charge.exchangeRate,
-        totalCediEquivalent: charge.amount,
-        startDate: charge.startDate,
-        endDate: charge.endDate,
-        expiresAt: "",
-      });
-    } catch (error) {
-      console.error("Unable to restore the accepted hosting renewal payment:", error);
-    }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === ACCEPTED_CHARGE_STORAGE_KEY) restoreCharges();
+    };
+
+    restoreCharges();
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   useEffect(() => {
@@ -260,7 +323,10 @@ const HostingRenewal = () => {
       };
 
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || payload.message || "Failed to confirm hosting renewal");
+        throw new RenewalConfirmationError(
+          payload.error || payload.message || "Failed to confirm hosting renewal",
+          response.status,
+        );
       }
 
       setSubmitState({
@@ -270,12 +336,15 @@ const HostingRenewal = () => {
         totalCedi: charge.amount,
         paymentReference: payload.data?.paymentReference ?? charge.reference,
       });
-      setAcceptedCharge(null);
       try {
-        window.localStorage.removeItem(ACCEPTED_CHARGE_STORAGE_KEY);
+        removeStoredAcceptedCharge(charge.reference);
       } catch (error) {
         console.error("Unable to clear the confirmed hosting renewal payment:", error);
       }
+      setAcceptedCharges((current) =>
+        current.filter((pendingCharge) => pendingCharge.reference !== charge.reference),
+      );
+      setActiveChargeReference((current) => current === charge.reference ? null : current);
     }, []);
 
   const handlePay = useCallback(async () => {
@@ -287,6 +356,7 @@ const HostingRenewal = () => {
         setSubmitState({
           status: "error",
           message: error instanceof Error ? error.message : "Unable to confirm hosting renewal.",
+          statusCode: error instanceof RenewalConfirmationError ? error.statusCode : undefined,
         });
       }
       return;
@@ -382,15 +452,21 @@ const HostingRenewal = () => {
           }
           successReported = true;
           try {
-            window.localStorage.setItem(ACCEPTED_CHARGE_STORAGE_KEY, JSON.stringify(charge));
+            persistAcceptedCharge(charge);
+            setAcceptedCharges(Object.values(readAcceptedChargeStore()));
           } catch (error) {
             console.error("Unable to persist the accepted hosting renewal payment:", error);
+            setAcceptedCharges((current) => [
+              ...current.filter((pendingCharge) => pendingCharge.reference !== charge.reference),
+              charge,
+            ]);
           }
-          setAcceptedCharge(charge);
+          setActiveChargeReference(charge.reference);
           void confirmRenewal(charge).catch((error: unknown) => {
             setSubmitState({
               status: "error",
               message: error instanceof Error ? error.message : "Unable to confirm hosting renewal.",
+              statusCode: error instanceof RenewalConfirmationError ? error.statusCode : undefined,
             });
           });
         },
@@ -417,6 +493,44 @@ const HostingRenewal = () => {
     paymentAmount,
     totalCediEquivalent,
   ]);
+
+  const recoverFromMissingRenewal = useCallback(() => {
+    if (!acceptedCharge) return;
+    try {
+      const removed = removeStoredAcceptedCharge(acceptedCharge.reference);
+      if (!removed) {
+        setAcceptedCharges(Object.values(readAcceptedChargeStore()));
+        setSubmitState({ status: "idle" });
+        return;
+      }
+      setAcceptedCharges(Object.values(readAcceptedChargeStore()));
+      setActiveChargeReference(null);
+      setSubmitState({ status: "idle" });
+    } catch (error) {
+      console.error("Unable to remove the missing hosting renewal payment:", error);
+      setSubmitState({
+        status: "error",
+        message: "Unable to clear the saved payment. Please try again.",
+        statusCode: 404,
+      });
+    }
+  }, [acceptedCharge]);
+
+  const selectAcceptedCharge = useCallback((charge: AcceptedCharge) => {
+    setActiveChargeReference(charge.reference);
+    setMonths(String(charge.quantityInMonths));
+    setRenewalReference({
+      reference: charge.reference,
+      quantityInMonths: charge.quantityInMonths,
+      exchangeRate: charge.exchangeRate,
+      totalCediEquivalent: charge.amount,
+      startDate: charge.startDate,
+      endDate: charge.endDate,
+      expiresAt: "",
+    });
+    setExchangeRate({ status: "loaded", rate: charge.exchangeRate, fetchedAt: new Date() });
+    setSubmitState({ status: "idle" });
+  }, []);
 
   if (infoLoading) {
     return (
@@ -481,6 +595,22 @@ const HostingRenewal = () => {
             <p className="text-xs text-muted-foreground text-center">
               The facility hosting status and expiry date were updated in the background.
             </p>
+            {acceptedCharges.length > 0 ? (
+              <div className="space-y-2 border-t pt-4">
+                <p className="text-sm font-medium">Other accepted payments need confirmation</p>
+                {acceptedCharges.map((charge) => (
+                  <Button
+                    key={charge.reference}
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start break-all"
+                    onClick={() => selectAcceptedCharge(charge)}
+                  >
+                    Retry confirmation: {charge.reference}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -548,6 +678,23 @@ const HostingRenewal = () => {
                 required
               />
             </div>
+
+            {acceptedCharges.length > 1 ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Saved accepted payments</p>
+                {acceptedCharges.map((charge) => (
+                  <Button
+                    key={charge.reference}
+                    type="button"
+                    variant={acceptedCharge?.reference === charge.reference ? "secondary" : "outline"}
+                    className="w-full justify-start break-all"
+                    onClick={() => selectAcceptedCharge(charge)}
+                  >
+                    {charge.reference}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -627,6 +774,27 @@ const HostingRenewal = () => {
                 <AlertCircle className="h-4 w-4" />
                 {submitState.message}
               </p>
+            ) : null}
+            {submitState.status === "error" &&
+            submitState.statusCode === 404 &&
+            acceptedCharge ? (
+              <div className="space-y-3 rounded-md border border-destructive/40 p-3 text-sm">
+                <p className="break-all">
+                  Saved payment reference: <strong>{acceptedCharge.reference}</strong>
+                </p>
+                <p className="text-destructive">
+                  This reference was not found. The earlier payment may still have been accepted;
+                  starting a new payment could charge you again.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={recoverFromMissingRenewal}
+                >
+                  Clear this saved payment and start a new one
+                </Button>
+              </div>
             ) : null}
 
             <Button

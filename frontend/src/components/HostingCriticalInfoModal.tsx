@@ -86,16 +86,8 @@ const HostingCriticalInfoModal = ({
   useEffect(() => {
     let isActive = true;
 
-    if (setupInfo) {
-      setSystemSettings(setupInfo);
-      setHasFetchedSettings(true);
-      setExpiryCheckStatus("idle");
-      return () => {
-        isActive = false;
-      };
-    }
-
     setHasFetchedSettings(false);
+    setExpiryCheckStatus("checking");
 
     const loadSystemSettings = async () => {
       let lastError: unknown;
@@ -133,7 +125,7 @@ const HostingCriticalInfoModal = ({
     return () => {
       isActive = false;
     };
-  }, [fetchHostingInfo, setupInfo]);
+  }, [fetchHostingInfo]);
 
   const daysUntilExpiry = getDaysUntilExpiry(systemSettings?.hostingExpiryDate, clockNow);
 
@@ -245,6 +237,7 @@ const HostingCriticalInfoModal = ({
 
   useEffect(() => {
     onStatusChange?.(accessStatus);
+    return () => onStatusChange?.("checking");
   }, [accessStatus, onStatusChange]);
 
   return (

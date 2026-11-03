@@ -208,7 +208,9 @@ export const StaffAssignments = ({ staffId }: { staffId: string }) => {
       if (kind === "transfer") setTransferOpen(false);
       else setTemporaryOpen(false);
       await loadAssignments();
-      await loadEffectiveUnit(effectiveOnRef.current);
+      if (effectiveOnRef.current) {
+        await loadEffectiveUnit(effectiveOnRef.current);
+      }
     } catch (error) {
       notify?.({
         type: "error",

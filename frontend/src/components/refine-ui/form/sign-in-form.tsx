@@ -55,10 +55,7 @@ export const SignInForm = () => {
           result?.error?.message || "Invalid email or password.";
         throw new Error(message);
       }
-      const refreshedUser = await refreshSession();
-      if (!refreshedUser) {
-        throw new Error("Login did not establish a session. Please try again.");
-      }
+      await refreshSession();
       navigate("/dashboard", { replace: true });
     } catch (error) {
       const message =

@@ -88,7 +88,13 @@ app.use(securityHeaders);
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Middleware
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, body) => {
+    if ((req as express.Request).originalUrl.split("?")[0] === "/public/hosting-renewal/webhook") {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
 app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
