@@ -647,7 +647,7 @@ export const RostersPage = () => {
                       {topSpacer > 0 ? <tr aria-hidden="true"><td colSpan={grid.dates.length + 1} style={{ height: topSpacer, padding: 0 }} /></tr> : null}
                       {visibleStaff.map((person) => (
                         <tr key={person.id} style={{ height: ROW_HEIGHT }}>
-                          <th className="sticky left-0 z-[1] border-b border-r bg-background p-2 text-left align-top">
+                          <th className="sticky left-0 z-1 border-b border-r bg-background p-2 text-left align-top">
                             <span className="block font-medium">{person.firstName} {person.lastName}</span>
                             <span className="block text-xs text-muted-foreground">Staff ID: {person.employeeId}</span>
                             <span className="block text-xs text-muted-foreground">{person.jobRoleName ?? person.staffCategory}</span>
