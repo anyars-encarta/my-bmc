@@ -14,6 +14,7 @@ import {
   updateStaffSchema,
   workforceEvent,
 } from "../../db/schema/index.js";
+import { materializeFixedScheduleForStaff } from "../../jobs/fixedScheduleMaterializer.js";
 import { session, user } from "../../db/schema/auth.js";
 import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
@@ -23,6 +24,28 @@ import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
 const router = Router();
 
 const STAFF_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"] as const;
+
+const normalizeEmptyStaffInputs = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  const payload = { ...value } as Record<string, unknown>;
+  for (const field of [
+    "defaultShiftTypeId",
+    "jobRoleId",
+    "orgUnitId",
+    "hireDate",
+    "terminationDate",
+    "userId",
+  ]) {
+    if (typeof payload[field] === "string" && payload[field].trim() === "") {
+      payload[field] = undefined;
+    }
+  }
+  if (typeof payload.badgeNumber === "string" && payload.badgeNumber.trim() === "") {
+    payload.badgeNumber = null;
+  }
+  return payload;
+};
 
 const licenseCreateSchema = z.object({
   licensingBody: z.enum(["MDC", "NMC", "PC", "HPC", "AHPC", "OTHER"]),
@@ -34,20 +57,24 @@ const licenseCreateSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
-const staffCreateSchema = insertStaffSchema
-  .extend({
-    userId: z.string().optional(),
-    orgUnitId: z.string().uuid().optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.staffCategory === "NON_CLINICAL" && value.scheduleMode !== "FIXED_WEEKDAY") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["scheduleMode"],
-        message: "Non-clinical staff must use FIXED_WEEKDAY schedule mode.",
-      });
-    }
-  });
+const staffCreateSchema = z.preprocess(
+  normalizeEmptyStaffInputs,
+  insertStaffSchema
+    .extend({
+      userId: z.string().optional(),
+      orgUnitId: z.string().uuid().optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.staffCategory === "NON_CLINICAL" && value.scheduleMode !== "FIXED_WEEKDAY") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["scheduleMode"],
+          message: "Non-clinical staff must use FIXED_WEEKDAY schedule mode.",
+        });
+      }
+    }),
+);
+const staffUpdateInputSchema = z.preprocess(normalizeEmptyStaffInputs, updateStaffSchema);
 
 const parseRouteId = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
@@ -316,7 +343,15 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
       }
     }
 
-    res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []) });
+    const warnings: string[] = [];
+    try {
+      await materializeFixedScheduleForStaff(created.id);
+    } catch (error) {
+      console.error("Staff member created, but the fixed weekday schedule could not be materialized.", error);
+      warnings.push("Staff member created, but the automatic schedule could not be refreshed.");
+    }
+
+    res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []), warnings });
   } catch (error) {
     next(error);
   }
@@ -357,7 +392,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       throw validationError("Use the transfer workflow to change a staff member's org unit.", "USE_TRANSFER_WORKFLOW");
     }
 
-    const parsed = updateStaffSchema.safeParse(req.body);
+    const parsed = staffUpdateInputSchema.safeParse(req.body);
     if (!parsed.success) {
       throw validationError("Validation failed.", "VALIDATION_FAILED", {
         fieldErrors: parsed.error.flatten().fieldErrors,
@@ -407,6 +442,21 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
       throw validationError("Deactivation reason must be 500 characters or fewer.", "STAFF_DEACTIVATION_REASON_TOO_LONG");
     }
 
+    const [existing] = await db
+      .select({ userId: staff.userId })
+      .from(staff)
+      .where(eq(staff.id, staffId))
+      .limit(1);
+    if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    const [linkedUser] = existing.userId
+      ? await db
+        .select({ status: user.status })
+        .from(user)
+        .where(eq(user.id, existing.userId))
+        .limit(1)
+      : [];
+    const linkedUserWasActive = linkedUser?.status === "active";
+
     const [updated] = await db
       .update(staff)
       .set({ status: "inactive", terminationDate: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
@@ -447,10 +497,90 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
     await db.insert(workforceEvent).values({
       eventType: "StaffDeactivated",
       aggregateId: staffId,
-      payload: { staffId, reason, deactivatedBy: req.user?.id ?? null },
+      payload: { staffId, reason, linkedUserWasActive, deactivatedBy: req.user?.id ?? null },
     });
 
     res.json({ data: { ...updated, deactivationReason: reason } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
+
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    if (!reason) {
+      throw validationError("Reactivation reason is required.", "STAFF_REACTIVATION_REASON_REQUIRED");
+    }
+    if (reason.length > 500) {
+      throw validationError("Reactivation reason must be 500 characters or fewer.", "STAFF_REACTIVATION_REASON_TOO_LONG");
+    }
+
+    const [existing] = await db
+      .select({ userId: staff.userId, status: staff.status })
+      .from(staff)
+      .where(eq(staff.id, staffId))
+      .limit(1);
+    if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    if (existing.status !== "inactive") {
+      throw conflict("Only inactive staff can be reactivated.", "STAFF_NOT_INACTIVE");
+    }
+
+    const [deactivationEvent] = await db
+      .select({ payload: workforceEvent.payload })
+      .from(workforceEvent)
+      .where(
+        and(
+          eq(workforceEvent.eventType, "StaffDeactivated"),
+          eq(workforceEvent.aggregateId, staffId),
+        ),
+      )
+      .orderBy(desc(workforceEvent.occurredAt))
+      .limit(1);
+    const linkedUserWasActive = deactivationEvent?.payload.linkedUserWasActive === true;
+
+    const [updated] = await db
+      .update(staff)
+      .set({ status: "active", terminationDate: null, updatedAt: new Date() })
+      .where(and(eq(staff.id, staffId), eq(staff.status, "inactive")))
+      .returning();
+    if (!updated) {
+      throw conflict("Staff status changed before reactivation could be completed.", "STAFF_STATUS_CHANGED");
+    }
+
+    const linkedUserReactivated = Boolean(existing.userId && linkedUserWasActive);
+    if (linkedUserReactivated && existing.userId) {
+      await db
+        .update(user)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(eq(user.id, existing.userId));
+    }
+
+    await db.insert(workforceEvent).values({
+      eventType: "StaffReactivated",
+      aggregateId: staffId,
+      payload: {
+        staffId,
+        reason,
+        linkedUserReactivated,
+        reactivatedBy: req.user?.id ?? null,
+      },
+    });
+
+    const warnings: string[] = [];
+    try {
+      await materializeFixedScheduleForStaff(staffId);
+    } catch (error) {
+      console.error("Staff member reactivated, but the fixed weekday schedule could not be materialized.", error);
+      warnings.push("Staff member reactivated, but the automatic schedule could not be refreshed.");
+    }
+
+    res.json({ data: { ...updated, linkedUserReactivated }, warnings });
   } catch (error) {
     next(error);
   }

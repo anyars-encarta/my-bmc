@@ -7,6 +7,7 @@ const SQLSTATE_ERROR_MAP: Record<string, { status: number; code: string; message
   "23503": { status: 409, code: "FOREIGN_KEY_CONSTRAINT", message: "Related record does not exist." },
   "23514": { status: 422, code: "CHECK_CONSTRAINT", message: "Value violates a database check constraint." },
   "22P02": { status: 400, code: "INVALID_PARAMETER", message: "Invalid parameter format." },
+  "22007": { status: 422, code: "INVALID_DATE", message: "Date value is invalid." },
   "42P01": { status: 500, code: "DB_SCHEMA_ERROR", message: "Required database object is missing." },
 };
 

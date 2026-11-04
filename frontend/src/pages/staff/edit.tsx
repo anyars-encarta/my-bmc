@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router";
 import { SubmitHandler } from "react-hook-form";
-import { BaseRecord, HttpError, useNotification } from "@refinedev/core";
+import { BaseRecord, HttpError, useNotification, useOne } from "@refinedev/core";
 import { useForm } from "@refinedev/react-hook-form";
 
-import { staffCategoryOptions, scheduleModeOptions } from "@/constants/options";
+import { staffCategoryOptions, staffStatusOptions, scheduleModeOptions } from "@/constants/options";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -22,12 +22,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { EditView, EditViewHeader } from "@/components/refine-ui/views/edit-view";
 import PageLoader from "@/components/PageLoader";
 import UploadWidget from "@/components/upload-widget";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
-import type { JobRoleRecord, ShiftTypeRecord, StaffCategory, ScheduleMode } from "@/types/domain";
+import { fetchFacilityLocalDate } from "@/lib/facility-clock";
+import type {
+  JobRoleRecord,
+  OrgUnitRecord,
+  ShiftTypeRecord,
+  StaffCategory,
+  ScheduleMode,
+  StaffRecord,
+  StaffStatus,
+} from "@/types/domain";
 import type { UploadWidgetValue } from "@/types";
 
 type StaffEditValues = {
@@ -48,19 +59,52 @@ type StaffEditValues = {
   badgeNumber?: string | null;
   hireDate?: string;
   terminationDate?: string;
-  userId?: string;
 };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 
+const requestWorkflow = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${apiBase}/v1/${path}`, {
+    ...init,
+    credentials: "include",
+    headers: createAuthHeaders(init?.headers),
+  });
+  const payload = (await response.json()) as T & { message?: string; error?: string };
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || "The request failed.");
+  }
+  return payload;
+};
+
 export const StaffEdit = () => {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const staffId = id ?? "";
   const { open: notify } = useNotification();
+  const [orgUnits, setOrgUnits] = useState<OrgUnitRecord[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRoleRecord[]>([]);
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeRecord[]>([]);
+  const [statusValue, setStatusValue] = useState<StaffStatus | "">("");
+  const [statusReason, setStatusReason] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [pendingOrgUnitId, setPendingOrgUnitId] = useState("");
+  const [facilityDate, setFacilityDate] = useState("");
+  const [transferEffectiveFrom, setTransferEffectiveFrom] = useState("");
+  const [transferSaving, setTransferSaving] = useState(false);
+  const hydratedStaffId = useRef("");
+  const { query: staffQuery } = useOne<StaffRecord>({
+    resource: "staff",
+    id: staffId,
+    queryOptions: { enabled: Boolean(staffId) },
+  });
+  const record = staffQuery.data?.data;
 
   const form = useForm<BaseRecord, HttpError, StaffEditValues>({
-    refineCoreProps: {},
+    refineCoreProps: {
+      resource: "staff",
+      action: "edit",
+      id: staffId,
+    },
     defaultValues: {
       firstName: "",
       lastName: "",
@@ -79,7 +123,6 @@ export const StaffEdit = () => {
       badgeNumber: "",
       hireDate: "",
       terminationDate: "",
-      userId: "",
     },
   });
 
@@ -87,6 +130,7 @@ export const StaffEdit = () => {
     refineCore: { onFinish },
     formState: { isSubmitting },
     watch,
+    reset,
   } = form;
 
   const selectedCategory = watch("staffCategory");
@@ -120,11 +164,13 @@ export const StaffEdit = () => {
 
     const loadReferences = async () => {
       try {
-        const [allJobRoles, allShiftTypes] = await Promise.all([
+        const [allOrgUnits, allJobRoles, allShiftTypes] = await Promise.all([
+          fetchPaged<OrgUnitRecord>("org-units"),
           fetchPaged<JobRoleRecord>("job-roles"),
           fetchPaged<ShiftTypeRecord>("shift-types"),
         ]);
 
+        setOrgUnits(allOrgUnits);
         setJobRoles(allJobRoles);
         setShiftTypes(allShiftTypes);
       } catch (error) {
@@ -138,7 +184,154 @@ export const StaffEdit = () => {
     loadReferences();
   }, [notify]);
 
-  const filteredJobRoles = jobRoles.filter((role) => role.staffCategory === selectedCategory);
+  useEffect(() => {
+    fetchFacilityLocalDate()
+      .then((date) => {
+        setFacilityDate(date);
+        setTransferEffectiveFrom(date);
+      })
+      .catch((error) => {
+        notify?.({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to load the facility date.",
+        });
+      });
+  }, [notify]);
+
+  useEffect(() => {
+    if (!record || hydratedStaffId.current === record.id) return;
+
+    hydratedStaffId.current = record.id;
+    reset({
+      firstName: record.firstName ?? "",
+      lastName: record.lastName ?? "",
+      imageUrl: record.imageUrl ?? "",
+      email: record.email ?? "",
+      employeeId: record.employeeId ?? "",
+      momoNumber: record.momoNumber ?? "",
+      momoName: record.momoName ?? "",
+      department: record.department ?? "",
+      position: record.position ?? "",
+      phone: record.phone ?? "",
+      staffCategory: record.staffCategory ?? "NON_CLINICAL",
+      scheduleMode: record.scheduleMode ?? "FIXED_WEEKDAY",
+      defaultShiftTypeId: record.defaultShiftTypeId ?? "",
+      jobRoleId: record.jobRoleId ?? "",
+      badgeNumber: record.badgeNumber ?? "",
+      hireDate: record.hireDate?.slice(0, 10) ?? "",
+      terminationDate: record.terminationDate?.slice(0, 10) ?? "",
+    });
+    setStatusValue(record.status);
+    setPendingOrgUnitId(record.orgUnitId ?? "");
+  }, [record, reset]);
+
+  const filteredJobRoles = jobRoles.filter(
+    (role) => role.staffCategory === selectedCategory || role.id === record?.jobRoleId,
+  );
+  const jobRoleOptions = [
+    ...filteredJobRoles.map((option) => ({ value: option.id, label: option.name })),
+    ...(record?.jobRoleId && !jobRoles.some((option) => option.id === record.jobRoleId)
+      ? [{ value: record.jobRoleId, label: "Current job role unavailable" }]
+      : []),
+  ];
+  const shiftTypeOptions = [
+    ...shiftTypes.map((option) => ({
+      value: option.id,
+      label: `${option.code} — ${option.name}`,
+    })),
+    ...(record?.defaultShiftTypeId && !shiftTypes.some((option) => option.id === record.defaultShiftTypeId)
+      ? [{ value: record.defaultShiftTypeId, label: "Current shift type unavailable" }]
+      : []),
+  ];
+  const unitOptions = [
+    {
+      value: "__none__",
+      label: record?.orgUnitId ? "Choose an org unit" : "Unassigned",
+    },
+    ...orgUnits
+      .filter((unit) => unit.active || unit.id === record?.orgUnitId)
+      .map((unit) => ({ value: unit.id, label: `${unit.name} (${unit.code})` })),
+    ...(record?.orgUnitId && !orgUnits.some((unit) => unit.id === record.orgUnitId)
+      ? [{ value: record.orgUnitId, label: "Current org unit unavailable" }]
+      : []),
+  ];
+
+  const updateStatus = async () => {
+    if (!record || !statusValue || statusValue === record.status) return;
+    if (!statusReason.trim()) {
+      notify?.({ type: "error", message: "A reason is required to change staff status." });
+      return;
+    }
+
+    const action = statusValue === "inactive" ? "deactivate" : "reactivate";
+    try {
+      setStatusSaving(true);
+      const payload = await requestWorkflow<{
+        data?: { linkedUserReactivated?: boolean };
+      }>(`staff/${record.id}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ reason: statusReason.trim() }),
+      });
+      const nextStatus = statusValue;
+      setStatusReason("");
+      await staffQuery.refetch();
+      setStatusValue(nextStatus);
+      const linkedLoginNote =
+        action === "reactivate" &&
+        record.userId &&
+        payload.data?.linkedUserReactivated === false
+          ? " The linked login remains inactive because it was not active before deactivation."
+          : "";
+      notify?.({
+        type: "success",
+        message: `Staff status updated to ${nextStatus}.${linkedLoginNote}`,
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to update staff status.",
+      });
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  const createTransferDraft = async () => {
+    if (
+      !record ||
+      !record.orgUnitId ||
+      !pendingOrgUnitId ||
+      pendingOrgUnitId === record.orgUnitId ||
+      record.status !== "active" ||
+      !facilityDate
+    ) {
+      return;
+    }
+
+    try {
+      setTransferSaving(true);
+      await requestWorkflow<{ data?: { id: string } }>("transfer-batches", {
+        method: "POST",
+        body: JSON.stringify({
+          title: `Staff transfer for ${record.firstName} ${record.lastName}`,
+          effectiveFrom: transferEffectiveFrom,
+          items: [{ staffId: record.id, toUnitId: pendingOrgUnitId, reason: "TRANSFER" }],
+        }),
+      });
+      setPendingOrgUnitId(record.orgUnitId);
+      notify?.({
+        type: "success",
+        message: "Transfer draft created. Preview, approve, and apply it from Transfers.",
+      });
+    } catch (error) {
+      notify?.({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to create a transfer draft.",
+      });
+    } finally {
+      setTransferSaving(false);
+    }
+  };
 
   const onSubmit: SubmitHandler<StaffEditValues> = (values) => {
     onFinish({
@@ -148,10 +341,32 @@ export const StaffEdit = () => {
       badgeNumber: values.badgeNumber || null,
       hireDate: values.hireDate || undefined,
       terminationDate: values.terminationDate || undefined,
-      userId: values.userId || undefined,
       department: values.department || undefined,
     });
   };
+
+  if (staffQuery.isLoading) {
+    return (
+      <EditView className="space-y-4">
+        <EditViewHeader title="Edit Staff Record" />
+        <PageLoader />
+      </EditView>
+    );
+  }
+
+  if (!record) {
+    return (
+      <EditView className="space-y-4">
+        <EditViewHeader title="Edit Staff Record" />
+        <p className="text-sm text-destructive">Failed to load staff details.</p>
+        <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+          Go Back
+        </Button>
+      </EditView>
+    );
+  }
+
+  const currentOrgUnit = orgUnits.find((unit) => unit.id === record.orgUnitId);
 
   return (
     <EditView className="space-y-4">
@@ -192,6 +407,47 @@ export const StaffEdit = () => {
           <TextField form={form} name="badgeNumber" label="Badge Number" required={false} />
           <TextField form={form} name="hireDate" label="Hire Date" type="date" required={false} />
           <TextField form={form} name="terminationDate" label="Termination Date" type="date" required={false} />
+          <div className="space-y-3 rounded-md border p-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-status">Status</Label>
+              <Select
+                value={statusValue || record.status}
+                onValueChange={(value) => setStatusValue(value as StaffStatus)}
+              >
+                <SelectTrigger id="staff-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {staffStatusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Input
+              value={statusReason}
+              onChange={(event) => setStatusReason(event.target.value)}
+              placeholder={statusValue === "active" ? "Reason for reactivation" : "Reason for deactivation"}
+              aria-label={statusValue === "active" ? "Reactivation reason" : "Deactivation reason"}
+              maxLength={500}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void updateStatus()}
+              disabled={
+                statusSaving ||
+                !statusValue ||
+                statusValue === record.status ||
+                !statusReason.trim()
+              }
+              className="cursor-pointer"
+            >
+              {statusSaving ? "Updating status..." : "Update Status"}
+            </Button>
+          </div>
 
           <SelectField
             form={form}
@@ -205,23 +461,82 @@ export const StaffEdit = () => {
             label="Schedule Mode"
             options={scheduleModeOptions.map((option) => ({ value: option.value, label: option.label }))}
           />
+          <div className="space-y-3 rounded-md border p-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-current-org-unit">Current Org Unit</Label>
+              <SearchableSelect
+                value={pendingOrgUnitId || "__none__"}
+                onValueChange={(value) =>
+                  setPendingOrgUnitId(value === "__none__" ? "" : value)
+                }
+                options={unitOptions}
+                placeholder="Choose an org unit"
+                searchPlaceholder="Search org units..."
+                emptyMessage="No matching org units."
+                aria-label="Current Org Unit"
+                id="staff-current-org-unit"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-effective-from">Transfer effective from</Label>
+              <Input
+                id="transfer-effective-from"
+                type="date"
+                min={facilityDate}
+                value={transferEffectiveFrom}
+                disabled={!facilityDate}
+                onChange={(event) => setTransferEffectiveFrom(event.target.value)}
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              A unit change creates a transfer draft. The current unit changes only after the draft is approved and applied.
+              {currentOrgUnit ? ` Current unit: ${currentOrgUnit.name} (${currentOrgUnit.code}).` : ""}
+              {!record.orgUnitId ? " This staff member has no current unit to transfer from." : ""}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void createTransferDraft()}
+                disabled={
+                  transferSaving ||
+                  !record.orgUnitId ||
+                  record.status !== "active" ||
+                  !pendingOrgUnitId ||
+                  pendingOrgUnitId === record.orgUnitId ||
+                  !facilityDate
+                }
+                className="cursor-pointer"
+              >
+                {transferSaving ? "Creating draft..." : "Create Transfer Draft"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate("/transfers")}
+                className="cursor-pointer"
+              >
+                Review Transfers
+              </Button>
+            </div>
+          </div>
           <SelectField
             form={form}
             name="jobRoleId"
             label="Job Role"
             required={false}
-            options={filteredJobRoles.map((option) => ({ value: option.id, label: option.name }))}
+            options={jobRoleOptions}
           />
           <SelectField
             form={form}
             name="defaultShiftTypeId"
             label="Default Shift Type"
             required={false}
-            options={shiftTypes.map((option) => ({ value: option.id, label: `${option.code} — ${option.name}` }))}
+            options={shiftTypeOptions}
           />
 
           <div className="md:col-span-2 flex gap-2">
-            <Button type="submit" className="cursor-pointer" {...form.saveButtonProps}>
+            <Button type="submit" className="cursor-pointer" disabled={isSubmitting}>
               {isSubmitting ? (
                 <span className="inline-flex items-center gap-2">
                   <PageLoader inline />

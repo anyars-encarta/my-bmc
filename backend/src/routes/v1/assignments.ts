@@ -33,6 +33,7 @@ import { isRetroactiveAssignmentDate, resolveEffectiveAssignment } from "../../l
 import { isAppRole, requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
 import { nowAtFacility } from "../../lib/facilityClock.js";
+import { materializeFixedScheduleForStaff } from "../../jobs/fixedScheduleMaterializer.js";
 
 const router = Router();
 
@@ -420,7 +421,14 @@ router.post(
         ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
         ...(req.user?.id ? { actorId: req.user.id } : {}),
       });
-      res.status(201).json({ data: created });
+      const warnings: string[] = [];
+      try {
+        await materializeFixedScheduleForStaff(staffId);
+      } catch (error) {
+        console.error("Staff transfer applied, but fixed weekday schedules could not be refreshed.", error);
+        warnings.push("Transfer applied, but the automatic schedule could not be refreshed.");
+      }
+      res.status(201).json({ data: created, warnings });
     } catch (error) {
       next(error);
     }
@@ -940,6 +948,14 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
           batchId,
           ...(req.user?.id ? { actorId: req.user.id } : {}),
         });
+        try {
+          await materializeFixedScheduleForStaff(item.staffId);
+        } catch (error) {
+          console.error("Transfer applied, but fixed weekday schedules could not be refreshed.", {
+            staffId: item.staffId,
+            error,
+          });
+        }
       }
       const [applied] = await db
         .update(transferBatch)

@@ -51,7 +51,6 @@ type StaffCreateValues = {
   badgeNumber?: string;
   hireDate?: string;
   terminationDate?: string;
-  userId?: string;
 };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
@@ -85,7 +84,6 @@ export const StaffCreate = () => {
       badgeNumber: "",
       hireDate: "",
       terminationDate: "",
-      userId: "",
     },
   });
 
@@ -157,7 +155,6 @@ export const StaffCreate = () => {
       badgeNumber: values.badgeNumber || undefined,
       hireDate: values.hireDate || undefined,
       terminationDate: values.terminationDate || undefined,
-      userId: values.userId || undefined,
       department: values.department || undefined,
     });
   };
@@ -190,9 +187,7 @@ export const StaffCreate = () => {
               </FormItem>
             )}
           />
-
           <TextField form={form} name="email" label="Email" type="email" />
-          <TextField form={form} name="userId" label="Linked User ID" required={false} />
           <TextField form={form} name="employeeId" label="Employee ID" />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
           <TextField form={form} name="momoName" label="MoMo Name" />
@@ -245,7 +240,7 @@ export const StaffCreate = () => {
           />
 
           <div className="md:col-span-2 flex gap-2">
-            <Button type="submit" className="cursor-pointer" {...form.saveButtonProps}>
+            <Button type="submit" className="cursor-pointer" disabled={isSubmitting}>
               {isSubmitting ? (
                 <span className="inline-flex items-center gap-2">
                   <PageLoader inline />

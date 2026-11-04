@@ -92,6 +92,13 @@
       "when": 1793620000000,
       "tag": "0012_hosting_payment_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793780000000,
+      "tag": "0013_sprint4_roster",
+      "breakpoints": true
     }
   ]
 }

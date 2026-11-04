@@ -5,6 +5,8 @@ import {
   ClipboardList,
   Coins,
   Building2,
+  CalendarDays,
+  CalendarRange,
   LayoutDashboard,
   Layers3,
   Settings2,
@@ -50,6 +52,24 @@ export const appResources: AppResource[] = [
     list: "/transfers",
     label: "Assignments & Transfers",
     icon: ArrowLeftRight,
+  },
+  {
+    name: "rosters",
+    list: "/rosters",
+    label: "Rosters",
+    icon: CalendarDays,
+  },
+  {
+    name: "my-schedule",
+    list: "/my-schedule",
+    label: "My Schedule",
+    icon: CalendarRange,
+  },
+  {
+    name: "public-holidays",
+    list: "/public-holidays",
+    label: "Public Holidays",
+    icon: CalendarDays,
   },
   {
     name: "staffing-requirements",
