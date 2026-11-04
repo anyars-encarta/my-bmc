@@ -98,6 +98,7 @@ const HostingCriticalInfoModal = ({
             const settings = await fetchHostingInfo();
             if (isActive) {
               setSystemSettings(settings);
+              setExpiryCheckStatus("idle");
             }
             return;
           } catch (error) {
@@ -225,8 +226,7 @@ const HostingCriticalInfoModal = ({
   );
 
   const isExpired = isHostingExpired;
-  const shouldBlockProtectedContent =
-    !hasFetchedSettings || !systemSettings || expiryCheckStatus !== "idle" || isExpired;
+  const shouldBlockProtectedContent = isExpired;
   const accessStatus = !hasFetchedSettings || expiryCheckStatus === "checking"
     ? "checking"
     : !systemSettings || expiryCheckStatus === "unavailable"
