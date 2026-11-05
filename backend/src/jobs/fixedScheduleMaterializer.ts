@@ -95,7 +95,6 @@ export const materializeFixedSchedules = async (
       staffId: rosterEntry.staffId,
       rosterDate: rosterEntry.rosterDate,
       plannedStart: rosterEntry.plannedStart,
-      plannedEnd: rosterEntry.plannedEnd,
     }).from(rosterEntry).where(and(
       inArray(rosterEntry.staffId, staffIds),
       gte(rosterEntry.rosterDate, from),
@@ -106,7 +105,7 @@ export const materializeFixedSchedules = async (
   const manualKeys = new Set(existingManualRows.map((entry) => `${entry.staffId}:${entry.rosterDate}`));
   const now = new Date();
   const inProgressManualKeys = new Set(existingManualRows
-    .filter((entry) => entry.plannedStart <= now && entry.plannedEnd > now)
+    .filter((entry) => entry.plannedStart <= now)
     .map((entry) => `${entry.staffId}:${entry.rosterDate}`));
 
   for (const person of activeStaff) {

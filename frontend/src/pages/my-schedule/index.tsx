@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { BACKEND_BASE_URL } from "@/constants";
@@ -66,6 +66,9 @@ const addDays = (date: string, count: number) => {
 export const MySchedulePage = () => {
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(() => addDays(today(), 30));
+  const currentScheduleRange = `${from}:${to}`;
+  const currentScheduleRangeRef = useRef(currentScheduleRange);
+  currentScheduleRangeRef.current = currentScheduleRange;
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [swaps, setSwaps] = useState<SwapRequest[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
@@ -76,8 +79,10 @@ export const MySchedulePage = () => {
   const [loading, setLoading] = useState(false);
   const [scheduleUnavailable, setScheduleUnavailable] = useState(false);
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
-  const [scheduleLoadError, setScheduleLoadError] = useState("");
+  const [scheduleLoadedRange, setScheduleLoadedRange] = useState<string | null>(null);
+  const [scheduleLoadError, setScheduleLoadError] = useState<{ range: string; message: string } | null>(null);
   const [swapLoadError, setSwapLoadError] = useState("");
+  const scheduleRequestSequence = useRef(0);
 
   const request = useCallback(async <T,>(path: string, init?: RequestInit): Promise<Envelope<T>> => {
     const response = await fetch(`${apiBase}/v1/${path}`, {
@@ -96,35 +101,51 @@ export const MySchedulePage = () => {
   }, []);
 
   const loadSelfService = useCallback(async () => {
+    const requestSequence = ++scheduleRequestSequence.current;
+    const range = `${from}:${to}`;
+    const isCurrentRequest = () =>
+      requestSequence === scheduleRequestSequence.current &&
+      range === currentScheduleRangeRef.current;
     setLoading(true);
     setScheduleLoaded(false);
     try {
       const suffix = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-      const [scheduleResult, swapsResult, notificationsResult] = await Promise.allSettled([
-        request<ScheduleEntry[]>(`me/schedule${suffix}`),
+      const scheduleTask = (async () => {
+        try {
+          const result = await request<ScheduleEntry[]>(`me/schedule${suffix}`);
+          if (!isCurrentRequest()) return false;
+          setSchedule(result.data ?? []);
+          setScheduleLoaded(true);
+          setScheduleLoadedRange(range);
+          setScheduleLoadError(null);
+          setScheduleUnavailable(false);
+          return false;
+        } catch (error) {
+          if (!isCurrentRequest()) return false;
+          setSchedule([]);
+          setScheduleLoaded(false);
+          setScheduleLoadedRange(null);
+          if (error instanceof ScheduleRequestError && error.code === "STAFF_PROFILE_NOT_FOUND") {
+            setScheduleUnavailable(true);
+            setScheduleLoadError(null);
+            return true;
+          }
+          const message = error instanceof Error ? error.message : "Unable to load your schedule.";
+          setScheduleUnavailable(false);
+          setScheduleLoadError({ range, message });
+          toast.error(message);
+          return false;
+        }
+      })();
+      const otherRequests = Promise.allSettled([
         request<SwapRequest[]>("shift-swaps"),
         request<NotificationRecord[]>("me/notifications"),
       ]);
-      let profileUnavailable = false;
-
-      if (scheduleResult.status === "fulfilled") {
-        setSchedule(scheduleResult.value.data ?? []);
-        setScheduleLoaded(true);
-        setScheduleLoadError("");
-      } else {
-        setSchedule([]);
-        if (scheduleResult.reason instanceof ScheduleRequestError &&
-          scheduleResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
-          profileUnavailable = true;
-          setScheduleLoadError("");
-        } else {
-          const message = scheduleResult.reason instanceof Error
-            ? scheduleResult.reason.message
-            : "Unable to load your schedule.";
-          setScheduleLoadError(message);
-          toast.error(message);
-        }
-      }
+      const [scheduleProfileUnavailable, [swapsResult, notificationsResult]] = await Promise.all([
+        scheduleTask,
+        otherRequests,
+      ]);
+      if (!isCurrentRequest()) return;
 
       if (swapsResult.status === "fulfilled") {
         setSwaps(swapsResult.value.data ?? []);
@@ -150,16 +171,16 @@ export const MySchedulePage = () => {
         setNotifications([]);
         if (notificationsResult.reason instanceof ScheduleRequestError &&
           notificationsResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
-          profileUnavailable = true;
+          setScheduleUnavailable(true);
         } else {
           toast.error(notificationsResult.reason instanceof Error
             ? notificationsResult.reason.message
             : "Unable to load notifications.");
         }
       }
-      setScheduleUnavailable(profileUnavailable);
+      if (scheduleProfileUnavailable) setScheduleUnavailable(true);
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [from, request, to]);
 
@@ -212,6 +233,10 @@ export const MySchedulePage = () => {
     return dates;
   }, [from, to]);
   const unreadNotifications = notifications.filter((notification) => notification.status !== "READ");
+  const currentScheduleLoaded = scheduleLoaded && scheduleLoadedRange === currentScheduleRange;
+  const currentScheduleLoadError = scheduleLoadError?.range === currentScheduleRange
+    ? scheduleLoadError.message
+    : "";
 
   const submitSwap = async () => {
     if (!selectedEntryId || !counterpartyEntryId || !reason.trim()) {
@@ -278,8 +303,8 @@ export const MySchedulePage = () => {
             <Field label="To"><Input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></Field>
             <Button variant="outline" onClick={() => void loadSelfService()} disabled={loading} className="cursor-pointer">Refresh schedule</Button>
           </div>
-          {loading && !scheduleLoaded && !scheduleLoadError ? <p className="text-sm text-muted-foreground">Loading your schedule…</p> : null}
-          {scheduleLoadError ? <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert">{scheduleLoadError}</p> : null}
+          {loading && !currentScheduleLoaded && !currentScheduleLoadError ? <p className="text-sm text-muted-foreground">Loading your schedule…</p> : null}
+          {currentScheduleLoadError ? <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert">{currentScheduleLoadError}</p> : null}
           {scheduleUnavailable ? (
             <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm" role="status">
               A staff profile is not linked to your login, so your personal schedule and notifications are unavailable. Contact an administrator to link your account. Shift swap requests are loaded separately when available.
@@ -287,7 +312,7 @@ export const MySchedulePage = () => {
           ) : null}
           {from > to ? <p className="text-sm text-destructive">The start date must be on or before the end date.</p> : null}
           {calendarDays.length === 0 && from <= to ? <p className="text-sm text-destructive">Choose a date range of no more than 93 days.</p> : null}
-          {!scheduleUnavailable && scheduleLoaded && !scheduleLoadError ? <div className="space-y-2">
+          {!scheduleUnavailable && currentScheduleLoaded && !currentScheduleLoadError ? <div className="space-y-2">
             {calendarDays.map((date) => {
               const entries = scheduleByDate.get(date) ?? [];
               return (
