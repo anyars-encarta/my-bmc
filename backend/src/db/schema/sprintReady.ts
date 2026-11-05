@@ -15,6 +15,7 @@ import {
   timestamp,
   uuid,
   varchar,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -302,6 +303,31 @@ export const rosterPeriod = pgTable("roster_period", {
 export type RosterPeriod = typeof rosterPeriod.$inferSelect;
 export type NewRosterPeriod = typeof rosterPeriod.$inferInsert;
 
+export const rosterTemplate = pgTable("roster_template", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgUnitId: uuid("org_unit_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type RosterTemplate = typeof rosterTemplate.$inferSelect;
+export type NewRosterTemplate = typeof rosterTemplate.$inferInsert;
+
+export const rosterTemplateEntry = pgTable("roster_template_entry", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rosterTemplateId: uuid("roster_template_id").notNull(),
+  staffId: uuid("staff_id").notNull(),
+  dayOfWeek: smallint("day_of_week").notNull(),
+  shiftTypeId: uuid("shift_type_id").notNull(),
+}, (table) => ({
+  templateStaffDay: uniqueIndex("roster_template_entry_template_staff_day_uq")
+    .on(table.rosterTemplateId, table.staffId, table.dayOfWeek),
+}));
+
+export type RosterTemplateEntry = typeof rosterTemplateEntry.$inferSelect;
+export type NewRosterTemplateEntry = typeof rosterTemplateEntry.$inferInsert;
+
 export const rosterEntry = pgTable("roster_entry", {
   id: uuid("id").primaryKey().defaultRandom(),
   rosterPeriodId: uuid("roster_period_id"),
@@ -314,10 +340,32 @@ export const rosterEntry = pgTable("roster_entry", {
   source: varchar("source", { length: 12 }).notNull(),
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
   version: integer("version").default(0).notNull(),
-});
+  overrideReason: text("override_reason"),
+}, (table) => ({
+  activeStaffDateShift: uniqueIndex("roster_entry_active_staff_date_shift_uq")
+    .on(table.staffId, table.rosterDate, table.shiftTypeId)
+    .where(sql`${table.status} = 'ACTIVE'`),
+}));
 
 export type RosterEntry = typeof rosterEntry.$inferSelect;
 export type NewRosterEntry = typeof rosterEntry.$inferInsert;
+
+export const rosterEntryChange = pgTable("roster_entry_change", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rosterPeriodId: uuid("roster_period_id").notNull(),
+  rosterEntryId: uuid("roster_entry_id"),
+  staffId: uuid("staff_id").notNull(),
+  rosterDate: date("roster_date").notNull(),
+  action: varchar("action", { length: 12 }).notNull(),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  reason: text("reason"),
+  actorUserId: text("actor_user_id").notNull(),
+  changedAt: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type RosterEntryChange = typeof rosterEntryChange.$inferSelect;
+export type NewRosterEntryChange = typeof rosterEntryChange.$inferInsert;
 
 export const unitStaffingRequirement = pgTable("unit_staffing_requirement", {
   id: uuid("id").primaryKey().defaultRandom(),

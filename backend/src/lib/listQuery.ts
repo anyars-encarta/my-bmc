@@ -32,6 +32,7 @@ export type ListSpec = {
   defaultSort: string;
   defaultLimit?: number;
   maxLimit?: number;
+  ignoredQueryParams?: string[];
 };
 
 const LIST_OPERATORS: ListOperator[] = ["eq", "in", "gt", "gte", "lt", "lte", "ne", "null"];
@@ -64,7 +65,7 @@ const parseBoolean = (value: string) => {
   throw validationError("Null filter must be true or false.", "LIST_FILTER_INVALID");
 };
 
-export const parseListQuery = (req: Request, spec: ListSpec): ListQuery => {
+export const parseListQuery = (req: Pick<Request, "query">, spec: ListSpec): ListQuery => {
   const defaultLimit = spec.defaultLimit ?? 25;
   const maxLimit = spec.maxLimit ?? 200;
 
@@ -105,7 +106,14 @@ export const parseListQuery = (req: Request, spec: ListSpec): ListQuery => {
   }
 
   const filters: ListFilter[] = [];
-  const reserved = new Set(["page", "limit", "sort", "q", "include"]);
+  const reserved = new Set([
+    "page",
+    "limit",
+    "sort",
+    "q",
+    "include",
+    ...(spec.ignoredQueryParams ?? []),
+  ]);
 
   for (const [rawKey, rawValue] of Object.entries(req.query)) {
     if (reserved.has(rawKey)) {

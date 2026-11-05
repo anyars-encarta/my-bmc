@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useNotification } from "@refinedev/core";
+import { toast } from "sonner";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
@@ -44,8 +45,8 @@ type BatchPreview = {
 };
 type UnitEnvelope = { data?: OrgUnitRecord[]; message?: string; error?: string };
 type StaffEnvelope = { data?: StaffRecord[]; pagination?: { hasMore?: boolean }; message?: string; error?: string };
-type BatchEnvelope = { data?: BatchRecord; message?: string; error?: string };
-type BatchesEnvelope = { data?: BatchRecord[]; message?: string; error?: string };
+type BatchEnvelope = { data?: BatchRecord; message?: string; error?: string; warnings?: string[] };
+type BatchesEnvelope = { data?: BatchRecord[]; message?: string; error?: string; warnings?: string[] };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 const errorMessage = (payload: { message?: string; error?: string }, fallback: string) =>
@@ -345,16 +346,19 @@ export const TransfersPage = () => {
     setActiveBatchId(batchId);
     try {
       setSaving(true);
-      await request<BatchEnvelope>(`transfer-batches/${batchId}/${action}`, { method: "POST" });
-      notify?.({
-        type: "success",
-        message:
-          action === "approve"
-            ? "Batch approved."
-            : action === "apply"
-              ? "Batch applied."
-              : "Batch cancelled.",
-      });
+      const payload = await request<BatchEnvelope>(`transfer-batches/${batchId}/${action}`, { method: "POST" });
+      payload.warnings?.forEach((warning) => toast.warning(warning));
+      if (!payload.warnings?.length) {
+        notify?.({
+          type: "success",
+          message:
+            action === "approve"
+              ? "Batch approved."
+              : action === "apply"
+                ? "Batch applied."
+                : "Batch cancelled.",
+        });
+      }
       await loadBatches();
       setPreviewedBatchId("");
       if (action !== "approve") setPreview(null);

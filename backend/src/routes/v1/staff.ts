@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -8,21 +8,53 @@ import {
   jobRole,
   orgUnit,
   rosterEntry,
+  shiftType,
   staff,
   staffAssignment,
   staffLicense,
   updateStaffSchema,
   workforceEvent,
 } from "../../db/schema/index.js";
+import {
+  getScheduleDateAfterDays,
+  materializeFixedScheduleForStaff,
+  materializeFixedSchedules,
+} from "../../jobs/fixedScheduleMaterializer.js";
 import { session, user } from "../../db/schema/auth.js";
 import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import { isAppRole, requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
+import { nowAtFacility } from "../../lib/facilityClock.js";
 
 const router = Router();
 
 const STAFF_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"] as const;
+
+const normalizeEmptyStaffInputs = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  const payload = { ...value } as Record<string, unknown>;
+  for (const field of [
+    "defaultShiftTypeId",
+    "jobRoleId",
+    "orgUnitId",
+    "userId",
+  ]) {
+    if (typeof payload[field] === "string" && payload[field].trim() === "") {
+      payload[field] = undefined;
+    }
+  }
+  if (typeof payload.badgeNumber === "string" && payload.badgeNumber.trim() === "") {
+    payload.badgeNumber = null;
+  }
+  for (const field of ["hireDate", "terminationDate"]) {
+    if (typeof payload[field] === "string" && payload[field].trim() === "") {
+      payload[field] = null;
+    }
+  }
+  return payload;
+};
 
 const licenseCreateSchema = z.object({
   licensingBody: z.enum(["MDC", "NMC", "PC", "HPC", "AHPC", "OTHER"]),
@@ -34,20 +66,24 @@ const licenseCreateSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
-const staffCreateSchema = insertStaffSchema
-  .extend({
-    userId: z.string().optional(),
-    orgUnitId: z.string().uuid().optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.staffCategory === "NON_CLINICAL" && value.scheduleMode !== "FIXED_WEEKDAY") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["scheduleMode"],
-        message: "Non-clinical staff must use FIXED_WEEKDAY schedule mode.",
-      });
-    }
-  });
+const staffCreateSchema = z.preprocess(
+  normalizeEmptyStaffInputs,
+  insertStaffSchema
+    .extend({
+      userId: z.string().optional(),
+      orgUnitId: z.string().uuid().optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.staffCategory === "NON_CLINICAL" && value.scheduleMode !== "FIXED_WEEKDAY") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["scheduleMode"],
+          message: "Non-clinical staff must use FIXED_WEEKDAY schedule mode.",
+        });
+      }
+    }),
+);
+const staffUpdateInputSchema = z.preprocess(normalizeEmptyStaffInputs, updateStaffSchema);
 
 const parseRouteId = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
@@ -103,6 +139,38 @@ const ensureStaffRules = async (payload: Partial<typeof staff.$inferInsert>) => 
     );
   }
   await validateJobRoleCategory(payload.jobRoleId, category);
+};
+
+const ensureStaffUserLinkAvailable = async (
+  userId: string | null | undefined,
+  staffId?: string,
+  currentUserId?: string | null,
+) => {
+  if (!userId) return;
+
+  const [account] = await db
+    .select({ id: user.id, status: user.status })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!account) {
+    throw validationError("The selected login account could not be found.", "STAFF_USER_NOT_FOUND");
+  }
+  if (account.status !== "active" && userId !== currentUserId) {
+    throw validationError("Only active login accounts can be linked.", "STAFF_USER_INACTIVE");
+  }
+
+  const existingLink = staffId
+    ? and(eq(staff.userId, userId), ne(staff.id, staffId))
+    : eq(staff.userId, userId);
+  const [linkedStaff] = await db
+    .select({ id: staff.id })
+    .from(staff)
+    .where(existingLink)
+    .limit(1);
+  if (linkedStaff) {
+    throw conflict("The selected login account is already linked to another staff member.", "STAFF_USER_ALREADY_LINKED");
+  }
 };
 
 const attachCurrentOrgUnits = async <T extends { id: string }>(rows: T[]) => {
@@ -281,6 +349,7 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
     }
 
     await ensureStaffRules(parsed.data);
+    await ensureStaffUserLinkAvailable(parsed.data.userId);
 
     if (parsed.data.orgUnitId) {
       const [unit] = await db
@@ -316,7 +385,78 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
       }
     }
 
-    res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []) });
+    const warnings: string[] = [];
+    try {
+      await materializeFixedScheduleForStaff(created.id);
+    } catch (error) {
+      console.error("Staff member created, but the fixed weekday schedule could not be materialized.", error);
+      warnings.push("Staff member created, but the automatic schedule could not be refreshed.");
+    }
+
+    res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []), warnings });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/linkable-users", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) => {
+  try {
+    const parsed = z.object({ staffId: z.string().uuid().optional() }).safeParse(req.query);
+    if (!parsed.success) {
+      throw validationError("Provide a valid staff record.", "STAFF_ID_INVALID");
+    }
+
+    let currentUserId: string | null = null;
+    if (parsed.data.staffId) {
+      const [existingStaff] = await db
+        .select({ userId: staff.userId })
+        .from(staff)
+        .where(eq(staff.id, parsed.data.staffId))
+        .limit(1);
+      if (!existingStaff) {
+        throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+      }
+      currentUserId = existingStaff.userId;
+    }
+
+    const query = parseListQuery(req, {
+      sortable: ["name", "email"],
+      filterable: [],
+      defaultSort: "name",
+      ignoredQueryParams: ["staffId"],
+    });
+    const statusFilter = currentUserId
+      ? or(eq(user.status, "active"), eq(user.id, currentUserId))
+      : eq(user.status, "active");
+    const assignmentQuery = db
+      .select({ id: staff.id })
+      .from(staff)
+      .where(parsed.data.staffId
+        ? and(eq(staff.userId, user.id), ne(staff.id, parsed.data.staffId))
+        : eq(staff.userId, user.id));
+    const searchFilter = query.q
+      ? or(ilike(user.name, `%${query.q}%`), ilike(user.email, `%${query.q}%`))
+      : undefined;
+    const where = and(statusFilter, notExists(assignmentQuery), searchFilter);
+    const sort = query.sort[0] ?? { field: "name", descending: false };
+    const sortColumn = sort.field === "email" ? user.email : user.name;
+    const [accounts, totalRows] = await Promise.all([
+      db
+        .select({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+        })
+        .from(user)
+        .where(where)
+        .orderBy(sort.descending ? desc(sortColumn) : asc(sortColumn))
+        .limit(query.limit)
+        .offset(query.offset),
+      db.select({ total: count() }).from(user).where(where),
+    ]);
+
+    res.json(toPageResponse(accounts, query, Number(totalRows[0]?.total ?? 0)));
   } catch (error) {
     next(error);
   }
@@ -357,7 +497,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       throw validationError("Use the transfer workflow to change a staff member's org unit.", "USE_TRANSFER_WORKFLOW");
     }
 
-    const parsed = updateStaffSchema.safeParse(req.body);
+    const parsed = staffUpdateInputSchema.safeParse(req.body);
     if (!parsed.success) {
       throw validationError("Validation failed.", "VALIDATION_FAILED", {
         fieldErrors: parsed.error.flatten().fieldErrors,
@@ -374,6 +514,46 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       ...Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value !== undefined)),
     };
     await ensureStaffRules(mergedForValidation);
+    await ensureStaffUserLinkAvailable(parsed.data.userId, staffId, existing.userId);
+    const wasFixedWeekdayStaff =
+      existing.status === "active" &&
+      existing.staffCategory === "NON_CLINICAL" &&
+      existing.scheduleMode === "FIXED_WEEKDAY";
+    const isFixedWeekdayStaff =
+      mergedForValidation.status === "active" &&
+      mergedForValidation.staffCategory === "NON_CLINICAL" &&
+      mergedForValidation.scheduleMode === "FIXED_WEEKDAY";
+    const enteringFixedWeekdayMode = isFixedWeekdayStaff && !wasFixedWeekdayStaff;
+    let fixedScheduleWindow: { from: string; to: string } | null = null;
+    let previousFixedRows: Array<typeof rosterEntry.$inferSelect> = [];
+
+    if (enteringFixedWeekdayMode) {
+      const activeShiftTypes = await db.select({
+        id: shiftType.id,
+        code: shiftType.code,
+        category: shiftType.category,
+      }).from(shiftType).where(eq(shiftType.active, true));
+      const hasConfiguredShift = mergedForValidation.defaultShiftTypeId
+        ? activeShiftTypes.some((shift) => shift.id === mergedForValidation.defaultShiftTypeId)
+        : activeShiftTypes.some((shift) => shift.code === "STD" || shift.category === "STANDARD");
+      if (!hasConfiguredShift) {
+        throw validationError(
+          "Configure an active default shift or standard shift before switching to a fixed weekday schedule.",
+          "FIXED_SCHEDULE_SHIFT_NOT_CONFIGURED",
+        );
+      }
+
+      const from = (await nowAtFacility()).localDateTime.slice(0, 10);
+      const to = getScheduleDateAfterDays(from, 60);
+      fixedScheduleWindow = { from, to };
+      previousFixedRows = await db.select().from(rosterEntry).where(and(
+        eq(rosterEntry.staffId, staffId),
+        eq(rosterEntry.source, "AUTO_FIXED"),
+        eq(rosterEntry.status, "ACTIVE"),
+        gte(rosterEntry.rosterDate, from),
+        lte(rosterEntry.rosterDate, to),
+      ));
+    }
 
     const [updated] = await db
       .update(staff)
@@ -386,7 +566,129 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
     }
 
     const [withUnit] = await attachCurrentOrgUnits([updated]);
-    res.json({ data: sanitizeStaffRecord(withUnit ?? { ...updated, orgUnitId: null }, req.user?.roles ?? []) });
+    const warnings: string[] = [];
+    if (wasFixedWeekdayStaff && !isFixedWeekdayStaff) {
+      try {
+        await db.update(rosterEntry)
+          .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+          .where(and(
+            eq(rosterEntry.staffId, staffId),
+            eq(rosterEntry.source, "AUTO_FIXED"),
+            eq(rosterEntry.status, "ACTIVE"),
+            gte(rosterEntry.plannedStart, new Date()),
+          ));
+      } catch (error) {
+        console.error("Staff record updated, but future fixed weekday schedules could not be cancelled.", error);
+        warnings.push("Staff record updated, but future automatic weekday shifts could not be cancelled.");
+      }
+    } else if (enteringFixedWeekdayMode && fixedScheduleWindow) {
+      let cancelledManualRows: Array<typeof rosterEntry.$inferSelect> = [];
+      try {
+        cancelledManualRows = await db.update(rosterEntry)
+          .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+          .where(and(
+            eq(rosterEntry.staffId, staffId),
+            ne(rosterEntry.source, "AUTO_FIXED"),
+            eq(rosterEntry.status, "ACTIVE"),
+            gte(rosterEntry.plannedStart, new Date()),
+          ))
+          .returning();
+        await materializeFixedSchedules(fixedScheduleWindow.from, fixedScheduleWindow.to, [staffId]);
+      } catch (error) {
+        const compensationErrors: Array<{ step: string; error: unknown }> = [];
+        const attemptCompensation = async (step: string, action: () => Promise<unknown>) => {
+          try {
+            await action();
+          } catch (compensationError) {
+            compensationErrors.push({ step, error: compensationError });
+          }
+        };
+        let currentFixedRows: Array<{ id: string }> = [];
+        await attemptCompensation("finding generated fixed shifts", async () => {
+          currentFixedRows = await db.select({ id: rosterEntry.id })
+            .from(rosterEntry)
+            .where(and(
+              eq(rosterEntry.staffId, staffId),
+              eq(rosterEntry.source, "AUTO_FIXED"),
+              eq(rosterEntry.status, "ACTIVE"),
+              gte(rosterEntry.rosterDate, fixedScheduleWindow.from),
+              lte(rosterEntry.rosterDate, fixedScheduleWindow.to),
+            ));
+        });
+        const originalFixedIds = new Set(previousFixedRows.map((entry) => entry.id));
+        const newFixedIds = currentFixedRows
+          .map((entry) => entry.id)
+          .filter((id) => !originalFixedIds.has(id));
+        if (newFixedIds.length > 0) {
+          await attemptCompensation("cancelling generated fixed shifts", () =>
+            db.update(rosterEntry)
+              .set({
+                status: "CANCELLED",
+                version: sql`${rosterEntry.version} + 1`,
+              })
+              .where(and(inArray(rosterEntry.id, newFixedIds), eq(rosterEntry.status, "ACTIVE"))),
+          );
+        }
+        for (const previousEntry of previousFixedRows) {
+          await attemptCompensation(`restoring fixed shift ${previousEntry.id}`, () =>
+            db.update(rosterEntry)
+              .set({
+                orgUnitId: previousEntry.orgUnitId,
+                rosterDate: previousEntry.rosterDate,
+                shiftTypeId: previousEntry.shiftTypeId,
+                plannedStart: previousEntry.plannedStart,
+                plannedEnd: previousEntry.plannedEnd,
+                rosterPeriodId: previousEntry.rosterPeriodId,
+                source: previousEntry.source,
+                status: "ACTIVE",
+                overrideReason: previousEntry.overrideReason,
+                version: sql`${rosterEntry.version} + 1`,
+              })
+              .where(eq(rosterEntry.id, previousEntry.id)),
+          );
+        }
+        for (let index = 0; index < cancelledManualRows.length; index += 500) {
+          const batch = cancelledManualRows.slice(index, index + 500);
+          await attemptCompensation(`restoring cancelled manual shifts ${index}-${index + batch.length - 1}`, () =>
+            db.update(rosterEntry)
+              .set({ status: "ACTIVE", version: sql`${rosterEntry.version} + 1` })
+              .where(and(
+                inArray(rosterEntry.id, batch.map((entry) => entry.id)),
+                eq(rosterEntry.status, "CANCELLED"),
+              )),
+          );
+        }
+        await attemptCompensation("restoring staff scheduling fields", () =>
+          db.update(staff)
+            .set({
+              staffCategory: existing.staffCategory,
+              scheduleMode: existing.scheduleMode,
+              defaultShiftTypeId: existing.defaultShiftTypeId,
+              updatedAt: new Date(),
+            })
+            .where(eq(staff.id, staffId)),
+        );
+        if (compensationErrors.length > 0) {
+          console.error("Fixed weekday transition failed and its schedule compensation was incomplete.", {
+            staffId,
+            error,
+            compensationErrors,
+          });
+        }
+        throw error;
+      }
+    } else if (isFixedWeekdayStaff) {
+      try {
+        await materializeFixedScheduleForStaff(staffId);
+      } catch (error) {
+        console.error("Staff record updated, but the fixed weekday schedule could not be refreshed.", error);
+        warnings.push("Staff record updated, but the automatic weekday schedule could not be refreshed.");
+      }
+    }
+    res.json({
+      data: sanitizeStaffRecord(withUnit ?? { ...updated, orgUnitId: null }, req.user?.roles ?? []),
+      warnings,
+    });
   } catch (error) {
     next(error);
   }
@@ -406,6 +708,21 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
     if (reason.length > 500) {
       throw validationError("Deactivation reason must be 500 characters or fewer.", "STAFF_DEACTIVATION_REASON_TOO_LONG");
     }
+
+    const [existing] = await db
+      .select({ userId: staff.userId })
+      .from(staff)
+      .where(eq(staff.id, staffId))
+      .limit(1);
+    if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    const [linkedUser] = existing.userId
+      ? await db
+        .select({ status: user.status })
+        .from(user)
+        .where(eq(user.id, existing.userId))
+        .limit(1)
+      : [];
+    const linkedUserWasActive = linkedUser?.status === "active";
 
     const [updated] = await db
       .update(staff)
@@ -447,10 +764,148 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
     await db.insert(workforceEvent).values({
       eventType: "StaffDeactivated",
       aggregateId: staffId,
-      payload: { staffId, reason, deactivatedBy: req.user?.id ?? null },
+      payload: {
+        staffId,
+        reason,
+        linkedUserId: existing.userId,
+        linkedUserWasActive,
+        deactivatedBy: req.user?.id ?? null,
+      },
     });
 
     res.json({ data: { ...updated, deactivationReason: reason } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+  try {
+    const staffId = parseRouteId(req.params.id);
+    if (!staffId) {
+      throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
+    }
+
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    if (!reason) {
+      throw validationError("Reactivation reason is required.", "STAFF_REACTIVATION_REASON_REQUIRED");
+    }
+    if (reason.length > 500) {
+      throw validationError("Reactivation reason must be 500 characters or fewer.", "STAFF_REACTIVATION_REASON_TOO_LONG");
+    }
+
+    const [existing] = await db
+      .select({ userId: staff.userId, status: staff.status })
+      .from(staff)
+      .where(eq(staff.id, staffId))
+      .limit(1);
+    if (!existing) throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+    if (existing.status !== "inactive") {
+      throw conflict("Only inactive staff can be reactivated.", "STAFF_NOT_INACTIVE");
+    }
+
+    type ReactivationResult = {
+      staff_id: string;
+      linked_user_reactivated: boolean;
+      linked_user_was_active: boolean;
+      has_deactivation_event: boolean;
+      has_linked_user_status: boolean;
+      linked_user_id_matches: boolean;
+    };
+    const result = await db.execute(sql<ReactivationResult>`
+      WITH prior_deactivation AS MATERIALIZED (
+        SELECT payload
+        FROM workforce_event
+        WHERE event_type = 'StaffDeactivated'
+          AND aggregate_id = ${staffId}
+        ORDER BY occurred_at DESC
+        LIMIT 1
+      ),
+      updated_staff AS (
+        UPDATE staff
+        SET status = 'active',
+            termination_date = NULL,
+            updated_at = now()
+        WHERE id = ${staffId}
+          AND status = 'inactive'
+        RETURNING id, user_id, status
+      ),
+      updated_linked_user AS (
+        UPDATE "user" AS linked
+        SET status = 'active',
+            updated_at = now()
+        FROM updated_staff AS person
+        JOIN prior_deactivation AS event ON TRUE
+        WHERE linked.id = person.user_id
+          AND linked.id = event.payload->>'linkedUserId'
+          AND event.payload->>'linkedUserWasActive' = 'true'
+        RETURNING linked.id
+      ),
+      inserted_event AS (
+        INSERT INTO workforce_event (event_type, aggregate_id, payload)
+        SELECT
+          'StaffReactivated',
+          person.id,
+          jsonb_build_object(
+            'staffId', person.id,
+            'reason', ${reason}::text,
+            'linkedUserReactivated', EXISTS (SELECT 1 FROM updated_linked_user),
+            'reactivatedBy', ${req.user?.id ?? null}::text
+          )
+        FROM updated_staff AS person
+        RETURNING aggregate_id
+      )
+      SELECT
+        person.id AS staff_id,
+        EXISTS (SELECT 1 FROM updated_linked_user) AS linked_user_reactivated,
+        COALESCE((
+          SELECT event.payload->>'linkedUserWasActive' = 'true'
+          FROM prior_deactivation AS event
+        ), false) AS linked_user_was_active,
+        EXISTS (SELECT 1 FROM prior_deactivation) AS has_deactivation_event,
+        COALESCE((
+          SELECT event.payload ? 'linkedUserWasActive'
+          FROM prior_deactivation AS event
+        ), false) AS has_linked_user_status,
+        COALESCE((
+          SELECT event.payload->>'linkedUserId' = person.user_id
+          FROM prior_deactivation AS event
+        ), false) AS linked_user_id_matches
+      FROM updated_staff AS person
+      JOIN inserted_event ON inserted_event.aggregate_id = person.id
+    `);
+    const reactivated = result.rows[0];
+    if (!reactivated) {
+      throw conflict("Staff status changed before reactivation could be completed.", "STAFF_STATUS_CHANGED");
+    }
+
+    const warnings: string[] = [];
+    if (
+      existing.userId &&
+      (
+        !reactivated.has_deactivation_event ||
+        !reactivated.has_linked_user_status ||
+        !reactivated.linked_user_id_matches
+      )
+    ) {
+      warnings.push("The linked login may need manual re-enabling because its prior status or staff linkage could not be verified.");
+    }
+    try {
+      await materializeFixedScheduleForStaff(staffId);
+    } catch (error) {
+      console.error("Staff member reactivated, but the fixed weekday schedule could not be materialized.", error);
+      warnings.push("Staff member reactivated, but the automatic schedule could not be refreshed.");
+    }
+
+    res.json({
+      data: {
+        id: reactivated.staff_id,
+        status: "active",
+        linkedUserReactivated: reactivated.linked_user_reactivated,
+        linkedUserWasActive: reactivated.linked_user_was_active,
+      },
+      warnings,
+    });
   } catch (error) {
     next(error);
   }

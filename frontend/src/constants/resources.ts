@@ -5,6 +5,8 @@ import {
   ClipboardList,
   Coins,
   Building2,
+  CalendarDays,
+  CalendarRange,
   LayoutDashboard,
   Layers3,
   Settings2,
@@ -19,6 +21,7 @@ type AppResource = {
   edit?: string;
   show?: string;
   canDelete?: boolean;
+  allowedRoles?: string[];
   label: string;
   icon: LucideIcon;
 };
@@ -42,18 +45,42 @@ export const appResources: AppResource[] = [
     create: "/staff/create",
     edit: "/staff/edit/:id",
     show: "/staff/show/:id",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "UNIT_MANAGER", "ROSTER_OFFICER"],
     label: "Staff",
     icon: Users,
   },
   {
     name: "transfers",
     list: "/transfers",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"],
     label: "Assignments & Transfers",
     icon: ArrowLeftRight,
   },
   {
+    name: "rosters",
+    list: "/rosters",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"],
+    label: "Rosters",
+    icon: CalendarDays,
+  },
+  {
+    name: "my-schedule",
+    list: "/my-schedule",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER", "STAFF"],
+    label: "My Schedule",
+    icon: CalendarRange,
+  },
+  {
+    name: "public-holidays",
+    list: "/public-holidays",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"],
+    label: "Public Holidays",
+    icon: CalendarDays,
+  },
+  {
     name: "staffing-requirements",
     list: "/staffing-requirements",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "UNIT_MANAGER", "ROSTER_OFFICER"],
     label: "Staffing Minimums",
     icon: ClipboardList,
   },

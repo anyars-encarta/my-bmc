@@ -47,13 +47,9 @@ const getDaysUntilExpiry = (
 
 type HostingCriticalInfoModalProps = {
   setupInfo?: SetupRecord | null;
-  onStatusChange?: (status: "checking" | "ready" | "unavailable") => void;
 };
 
-const HostingCriticalInfoModal = ({
-  setupInfo = null,
-  onStatusChange,
-}: HostingCriticalInfoModalProps) => {
+const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModalProps) => {
   const navigate = useNavigate();
   const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(setupInfo);
   const [hasFetchedSettings, setHasFetchedSettings] = useState(false);
@@ -98,6 +94,7 @@ const HostingCriticalInfoModal = ({
             const settings = await fetchHostingInfo();
             if (isActive) {
               setSystemSettings(settings);
+              setExpiryCheckStatus("idle");
             }
             return;
           } catch (error) {
@@ -112,6 +109,7 @@ const HostingCriticalInfoModal = ({
         if (isActive) {
           console.error("GET /public/hosting-renewal/info failed after retries:", lastError);
           setSystemSettings(null);
+          setExpiryCheckStatus("unavailable");
         }
       } finally {
         if (isActive) {
@@ -225,31 +223,36 @@ const HostingCriticalInfoModal = ({
   );
 
   const isExpired = isHostingExpired;
-  const shouldBlockProtectedContent =
-    !hasFetchedSettings || !systemSettings || expiryCheckStatus !== "idle" || isExpired;
-  const accessStatus = !hasFetchedSettings || expiryCheckStatus === "checking"
-    ? "checking"
-    : !systemSettings || expiryCheckStatus === "unavailable"
-      ? "unavailable"
-      : isExpired
-        ? "checking"
-        : "ready";
-
-  useEffect(() => {
-    onStatusChange?.(accessStatus);
-    return () => onStatusChange?.("checking");
-  }, [accessStatus, onStatusChange]);
+  const shouldBlockProtectedContent = isExpired;
 
   return (
     <>
+    {!systemSettings && hasFetchedSettings && expiryCheckStatus !== "idle" ? (
+      <div className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border bg-card p-4 shadow-lg" role="status">
+        <p className="text-sm">Hosting status is unavailable. Protected access remains available unless hosting is confirmed expired.</p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void retryHostingCheck()}
+          disabled={expiryCheckStatus === "checking"}
+          className="shrink-0 cursor-pointer"
+        >
+          {expiryCheckStatus === "checking" ? "Checking..." : "Retry"}
+        </Button>
+      </div>
+    ) : null}
     {shouldBlockProtectedContent ? (
-      <div className="flex min-h-[50vh] items-center justify-center bg-background p-6">
+      <div className="fixed inset-0 z-100 flex items-center justify-center bg-background p-6">
         <div className="w-full max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-lg">
           <p className="font-semibold">
-            {expiryCheckStatus === "checking" ? "Checking hosting status" : "Hosting status unavailable"}
+            {expiryCheckStatus === "checking"
+              ? "Checking hosting status"
+              : expiryCheckStatus === "unavailable"
+                ? "Hosting status could not be revalidated"
+                : "Hosting has expired"}
           </p>
           <p className="text-sm text-muted-foreground">
-            Protected pages are unavailable until the facility hosting status can be confirmed.
+            Hosting expiry blocks access to protected pages until the facility renews its hosting.
           </p>
           <Button
             type="button"

@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useActiveAuthProvider,
+  useGetIdentity,
   useLink,
   useLogout,
   useMenu,
@@ -39,6 +40,14 @@ import { SetupRecord } from "@/types/domain";
 export function Sidebar() {
   const { open } = useShadcnSidebar();
   const { menuItems, selectedKey } = useMenu();
+  const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const roles = new Set(identity?.roles ?? []);
+  if (identity?.role) roles.add(identity.role);
+  const visibleMenuItems = menuItems.filter((item) => {
+    const allowedRoles = item.meta?.allowedRoles;
+    return !Array.isArray(allowedRoles) ||
+      allowedRoles.some((role: string) => roles.has(role));
+  });
 
   return (
     <ShadcnSidebar
@@ -66,7 +75,7 @@ export function Sidebar() {
           },
         )}
       >
-        {menuItems.map((item: TreeMenuItem) => (
+        {visibleMenuItems.map((item: TreeMenuItem) => (
           <SidebarItem
             key={item.key || item.name}
             item={item}
