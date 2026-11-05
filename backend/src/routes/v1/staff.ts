@@ -544,6 +544,26 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
         console.error("Staff record updated, but future fixed weekday schedules could not be cancelled.", error);
         warnings.push("Staff record updated, but future automatic weekday shifts could not be cancelled.");
       }
+    } else if (isFixedWeekdayStaff && !wasFixedWeekdayStaff) {
+      try {
+        await db.update(rosterEntry)
+          .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+          .where(and(
+            eq(rosterEntry.staffId, staffId),
+            ne(rosterEntry.source, "AUTO_FIXED"),
+            eq(rosterEntry.status, "ACTIVE"),
+            gte(rosterEntry.plannedStart, new Date()),
+          ));
+      } catch (error) {
+        console.error("Staff record updated, but future rostered shifts could not be cancelled before switching to fixed weekdays.", error);
+        warnings.push("Staff record updated, but future rostered shifts could not be cancelled before refreshing the automatic schedule.");
+      }
+      try {
+        await materializeFixedScheduleForStaff(staffId);
+      } catch (error) {
+        console.error("Staff record updated, but the fixed weekday schedule could not be refreshed.", error);
+        warnings.push("Staff record updated, but the automatic weekday schedule could not be refreshed.");
+      }
     } else if (isFixedWeekdayStaff) {
       try {
         await materializeFixedScheduleForStaff(staffId);
@@ -715,9 +735,9 @@ router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
           person.id,
           jsonb_build_object(
             'staffId', person.id,
-            'reason', ${reason},
+            'reason', ${reason}::text,
             'linkedUserReactivated', EXISTS (SELECT 1 FROM updated_linked_user),
-            'reactivatedBy', ${req.user?.id ?? null}
+            'reactivatedBy', ${req.user?.id ?? null}::text
           )
         FROM updated_staff AS person
         RETURNING aggregate_id

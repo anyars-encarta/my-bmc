@@ -66,7 +66,7 @@ export const appResources: AppResource[] = [
   {
     name: "my-schedule",
     list: "/my-schedule",
-    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "UNIT_MANAGER", "ROSTER_OFFICER", "STAFF"],
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER", "STAFF"],
     label: "My Schedule",
     icon: CalendarRange,
   },

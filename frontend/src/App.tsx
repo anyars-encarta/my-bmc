@@ -108,7 +108,14 @@ const staffWriteRoles = [
   "HR_MANAGER",
   "PAYROLL_OFFICER",
 ];
-const workforceSelfServiceRoles = [...workforceReadRoles, "STAFF"];
+const workforceSelfServiceRoles = [
+  "SUPER_ADMIN",
+  "HOSPITAL_ADMIN",
+  "HR_MANAGER",
+  "UNIT_MANAGER",
+  "ROSTER_OFFICER",
+  "STAFF",
+];
 
 function WorkforceRoleGate({
   allowedRoles,

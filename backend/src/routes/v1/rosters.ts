@@ -374,7 +374,8 @@ const persistRosterEntries = async (
   const { context, currentPeriodRows } = await buildRuleContext(period, replacements);
   const violations = validateRoster({
     ...context,
-    allowRestOverride: hasAny(roles, HR_OVERRIDE_ROLES),
+    allowRestOverride:
+      hasAny(roles, HR_OVERRIDE_ROLES) || hasPersistedRestOverrides(context),
   });
   const blocking = violations.filter((violation) => violation.level === "error");
   if (blocking.length > 0) {
@@ -674,7 +675,10 @@ router.post("/roster-periods/:id/validate", requireAnyRole([...READ_ROLES]), asy
     const period = await getPeriod(periodId);
     await ensureUnitAccess(req.user?.id, getRoles(req.user?.roles), period.orgUnitId);
     const { context } = await buildRuleContext(period);
-    const violations = validateRoster(context);
+    const violations = validateRoster({
+      ...context,
+      allowRestOverride: hasPersistedRestOverrides(context),
+    });
     res.json({ data: violations, valid: violations.every((item) => item.level !== "error") });
   } catch (error) {
     next(error);
@@ -816,7 +820,11 @@ router.post("/roster-periods/:id/copy", requireAnyRole([...EDIT_ROLES]), async (
               staffId,
               rosterDate: targetDate,
               shiftTypeId: sourceEntry.shiftTypeId,
-              overrideReason: sourceEntry.overrideReason ?? null,
+              ...(sourceDate === targetDate &&
+                hasAny(roles, HR_OVERRIDE_ROLES) &&
+                sourceEntry.overrideReason
+                ? { overrideReason: sourceEntry.overrideReason }
+                : {}),
             });
           }
         }
@@ -1684,7 +1692,10 @@ router.post("/shift-swaps/:id/approve", requireAnyRole(["SUPER_ADMIN", "HR_MANAG
       additionalEntries: [requesterReplacement, counterpartyReplacement],
       excludedEntryIds: new Set(originalIds),
     });
-    const violations = validateRoster(context);
+    const violations = validateRoster({
+      ...context,
+      allowRestOverride: hasPersistedRestOverrides(context),
+    });
     if (violations.some((violation) => violation.level === "error")) {
       res.status(422).json({ error: "The swap violates roster rules.", code: "SHIFT_SWAP_VALIDATION_FAILED", violations });
       return;

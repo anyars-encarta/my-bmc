@@ -9,7 +9,12 @@ import { Label } from "@/components/ui/label";
 import { ListView, ListViewHeader } from "@/components/refine-ui/views/list-view";
 import { createAuthHeaders } from "@/providers/me";
 
-type Envelope<T> = { data?: T; error?: string; message?: string };
+type Envelope<T> = { data?: T; error?: string; message?: string; code?: string };
+class ScheduleRequestError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 type ScheduleEntry = {
   id: string;
   rosterPeriodId: string | null;
@@ -69,6 +74,8 @@ export const MySchedulePage = () => {
   const [counterpartyEntryId, setCounterpartyEntryId] = useState("");
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
+  const [scheduleUnavailable, setScheduleUnavailable] = useState(false);
+  const [swapLoadError, setSwapLoadError] = useState("");
 
   const request = useCallback(async <T,>(path: string, init?: RequestInit): Promise<Envelope<T>> => {
     const response = await fetch(`${apiBase}/v1/${path}`, {
@@ -77,7 +84,12 @@ export const MySchedulePage = () => {
       headers: createAuthHeaders(init?.headers),
     });
     const payload = (await response.json()) as Envelope<T>;
-    if (!response.ok) throw new Error(payload.message || payload.error || "The schedule request failed.");
+    if (!response.ok) {
+      throw new ScheduleRequestError(
+        payload.message || payload.error || "The schedule request failed.",
+        payload.code,
+      );
+    }
     return payload;
   }, []);
 
@@ -85,16 +97,59 @@ export const MySchedulePage = () => {
     setLoading(true);
     try {
       const suffix = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-      const [schedulePayload, swapPayload, notificationPayload] = await Promise.all([
+      const [scheduleResult, swapsResult, notificationsResult] = await Promise.allSettled([
         request<ScheduleEntry[]>(`me/schedule${suffix}`),
         request<SwapRequest[]>("shift-swaps"),
         request<NotificationRecord[]>("me/notifications"),
       ]);
-      setSchedule(schedulePayload.data ?? []);
-      setSwaps(swapPayload.data ?? []);
-      setNotifications(notificationPayload.data ?? []);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to load your schedule.");
+      let profileUnavailable = false;
+
+      if (scheduleResult.status === "fulfilled") {
+        setSchedule(scheduleResult.value.data ?? []);
+      } else {
+        setSchedule([]);
+        if (scheduleResult.reason instanceof ScheduleRequestError &&
+          scheduleResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
+          profileUnavailable = true;
+        } else {
+          toast.error(scheduleResult.reason instanceof Error
+            ? scheduleResult.reason.message
+            : "Unable to load your schedule.");
+        }
+      }
+
+      if (swapsResult.status === "fulfilled") {
+        setSwaps(swapsResult.value.data ?? []);
+        setSwapLoadError("");
+      } else {
+        setSwaps([]);
+        if (swapsResult.reason instanceof ScheduleRequestError &&
+          swapsResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
+          setSwapLoadError("Shift swap requests are unavailable until your login is linked to a staff profile.");
+        } else {
+          setSwapLoadError(swapsResult.reason instanceof Error
+            ? swapsResult.reason.message
+            : "Unable to load shift swap requests.");
+          toast.error(swapsResult.reason instanceof Error
+            ? swapsResult.reason.message
+            : "Unable to load shift swap requests.");
+        }
+      }
+
+      if (notificationsResult.status === "fulfilled") {
+        setNotifications(notificationsResult.value.data ?? []);
+      } else {
+        setNotifications([]);
+        if (notificationsResult.reason instanceof ScheduleRequestError &&
+          notificationsResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
+          profileUnavailable = true;
+        } else {
+          toast.error(notificationsResult.reason instanceof Error
+            ? notificationsResult.reason.message
+            : "Unable to load notifications.");
+        }
+      }
+      setScheduleUnavailable(profileUnavailable);
     } finally {
       setLoading(false);
     }
@@ -216,9 +271,14 @@ export const MySchedulePage = () => {
             <Button variant="outline" onClick={() => void loadSelfService()} disabled={loading} className="cursor-pointer">Refresh schedule</Button>
           </div>
           {loading && schedule.length === 0 ? <p className="text-sm text-muted-foreground">Loading your schedule…</p> : null}
+          {scheduleUnavailable ? (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm" role="status">
+              A staff profile is not linked to your login, so your personal schedule and notifications are unavailable. Contact an administrator to link your account. Shift swap requests are loaded separately when available.
+            </p>
+          ) : null}
           {from > to ? <p className="text-sm text-destructive">The start date must be on or before the end date.</p> : null}
           {calendarDays.length === 0 && from <= to ? <p className="text-sm text-destructive">Choose a date range of no more than 93 days.</p> : null}
-          <div className="space-y-2">
+          {!scheduleUnavailable ? <div className="space-y-2">
             {calendarDays.map((date) => {
               const entries = scheduleByDate.get(date) ?? [];
               return (
@@ -234,7 +294,7 @@ export const MySchedulePage = () => {
                 </div>
               );
             })}
-          </div>
+          </div> : null}
         </CardContent>
       </Card>
 
@@ -267,7 +327,9 @@ export const MySchedulePage = () => {
       <Card>
         <CardHeader><CardTitle>Shift swap requests</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {swaps.length === 0 ? <p className="text-sm text-muted-foreground">No shift swap requests.</p> : swaps.map((swap) => (
+          {swapLoadError ? <p className="text-sm text-muted-foreground" role="status">{swapLoadError}</p> : null}
+          {!swapLoadError && swaps.length === 0 ? <p className="text-sm text-muted-foreground">No shift swap requests.</p> : null}
+          {!swapLoadError ? swaps.map((swap) => (
             <div key={swap.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
               <div>
                 <p className="font-medium">{swap.requester.name} · {swap.requester.date} · {swap.requester.shift}</p>
@@ -281,14 +343,16 @@ export const MySchedulePage = () => {
                 {swap.canReject ? <Button variant="outline" disabled={loading} onClick={() => void decideSwap(swap.id, "reject")} className="cursor-pointer">Reject</Button> : null}
               </div>
             </div>
-          ))}
+          )) : null}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle>Notifications ({unreadNotifications.length} unread)</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          {notifications.length === 0 ? <p className="text-sm text-muted-foreground">No notifications.</p> : notifications.map((notification) => {
+          {scheduleUnavailable ? <p className="text-sm text-muted-foreground">Notifications are unavailable until your login is linked to a staff profile.</p> : null}
+          {!scheduleUnavailable && notifications.length === 0 ? <p className="text-sm text-muted-foreground">No notifications.</p> : null}
+          {!scheduleUnavailable ? notifications.map((notification) => {
             const payload = notification.payload;
             const publishedMessage = notification.template === "ROSTER_PUBLISHED"
               ? `Your roster for ${String(payload.unitName ?? "your unit")} (${String(payload.startDate ?? "")} – ${String(payload.endDate ?? "")}) is published.`
@@ -304,7 +368,7 @@ export const MySchedulePage = () => {
                 {notification.status !== "READ" ? <Button variant="outline" disabled={loading} onClick={() => void markRead(notification.id)}>Mark read</Button> : null}
               </div>
             );
-          })}
+          }) : null}
         </CardContent>
       </Card>
     </ListView>

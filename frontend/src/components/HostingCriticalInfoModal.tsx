@@ -109,6 +109,7 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
         if (isActive) {
           console.error("GET /public/hosting-renewal/info failed after retries:", lastError);
           setSystemSettings(null);
+          setExpiryCheckStatus("unavailable");
         }
       } finally {
         if (isActive) {
@@ -226,6 +227,20 @@ const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModal
 
   return (
     <>
+    {!systemSettings && hasFetchedSettings && expiryCheckStatus !== "idle" ? (
+      <div className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border bg-card p-4 shadow-lg" role="status">
+        <p className="text-sm">Hosting status is unavailable. Protected access remains available unless hosting is confirmed expired.</p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void retryHostingCheck()}
+          disabled={expiryCheckStatus === "checking"}
+          className="shrink-0 cursor-pointer"
+        >
+          {expiryCheckStatus === "checking" ? "Checking..." : "Retry"}
+        </Button>
+      </div>
+    ) : null}
     {shouldBlockProtectedContent ? (
       <div className="fixed inset-0 z-100 flex items-center justify-center bg-background p-6">
         <div className="w-full max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-lg">
