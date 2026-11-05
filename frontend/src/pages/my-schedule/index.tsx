@@ -75,6 +75,8 @@ export const MySchedulePage = () => {
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [scheduleUnavailable, setScheduleUnavailable] = useState(false);
+  const [scheduleLoaded, setScheduleLoaded] = useState(false);
+  const [scheduleLoadError, setScheduleLoadError] = useState("");
   const [swapLoadError, setSwapLoadError] = useState("");
 
   const request = useCallback(async <T,>(path: string, init?: RequestInit): Promise<Envelope<T>> => {
@@ -95,6 +97,7 @@ export const MySchedulePage = () => {
 
   const loadSelfService = useCallback(async () => {
     setLoading(true);
+    setScheduleLoaded(false);
     try {
       const suffix = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
       const [scheduleResult, swapsResult, notificationsResult] = await Promise.allSettled([
@@ -106,15 +109,20 @@ export const MySchedulePage = () => {
 
       if (scheduleResult.status === "fulfilled") {
         setSchedule(scheduleResult.value.data ?? []);
+        setScheduleLoaded(true);
+        setScheduleLoadError("");
       } else {
         setSchedule([]);
         if (scheduleResult.reason instanceof ScheduleRequestError &&
           scheduleResult.reason.code === "STAFF_PROFILE_NOT_FOUND") {
           profileUnavailable = true;
+          setScheduleLoadError("");
         } else {
-          toast.error(scheduleResult.reason instanceof Error
+          const message = scheduleResult.reason instanceof Error
             ? scheduleResult.reason.message
-            : "Unable to load your schedule.");
+            : "Unable to load your schedule.";
+          setScheduleLoadError(message);
+          toast.error(message);
         }
       }
 
@@ -270,7 +278,8 @@ export const MySchedulePage = () => {
             <Field label="To"><Input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></Field>
             <Button variant="outline" onClick={() => void loadSelfService()} disabled={loading} className="cursor-pointer">Refresh schedule</Button>
           </div>
-          {loading && schedule.length === 0 ? <p className="text-sm text-muted-foreground">Loading your schedule…</p> : null}
+          {loading && !scheduleLoaded && !scheduleLoadError ? <p className="text-sm text-muted-foreground">Loading your schedule…</p> : null}
+          {scheduleLoadError ? <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert">{scheduleLoadError}</p> : null}
           {scheduleUnavailable ? (
             <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm" role="status">
               A staff profile is not linked to your login, so your personal schedule and notifications are unavailable. Contact an administrator to link your account. Shift swap requests are loaded separately when available.
@@ -278,7 +287,7 @@ export const MySchedulePage = () => {
           ) : null}
           {from > to ? <p className="text-sm text-destructive">The start date must be on or before the end date.</p> : null}
           {calendarDays.length === 0 && from <= to ? <p className="text-sm text-destructive">Choose a date range of no more than 93 days.</p> : null}
-          {!scheduleUnavailable ? <div className="space-y-2">
+          {!scheduleUnavailable && scheduleLoaded && !scheduleLoadError ? <div className="space-y-2">
             {calendarDays.map((date) => {
               const entries = scheduleByDate.get(date) ?? [];
               return (

@@ -94,6 +94,8 @@ export const materializeFixedSchedules = async (
     : await db.select({
       staffId: rosterEntry.staffId,
       rosterDate: rosterEntry.rosterDate,
+      plannedStart: rosterEntry.plannedStart,
+      plannedEnd: rosterEntry.plannedEnd,
     }).from(rosterEntry).where(and(
       inArray(rosterEntry.staffId, staffIds),
       gte(rosterEntry.rosterDate, from),
@@ -102,6 +104,10 @@ export const materializeFixedSchedules = async (
       sql`${rosterEntry.source} <> 'AUTO_FIXED'`,
     ));
   const manualKeys = new Set(existingManualRows.map((entry) => `${entry.staffId}:${entry.rosterDate}`));
+  const now = new Date();
+  const inProgressManualKeys = new Set(existingManualRows
+    .filter((entry) => entry.plannedStart <= now && entry.plannedEnd > now)
+    .map((entry) => `${entry.staffId}:${entry.rosterDate}`));
 
   for (const person of activeStaff) {
     const personAssignments = assignments
@@ -121,6 +127,7 @@ export const materializeFixedSchedules = async (
     }
 
     for (const date of datesBetween(from, to)) {
+      if (inProgressManualKeys.has(`${person.id}:${date}`)) continue;
       const weekday = getDayOfWeek(date);
       const isLeave = leaveDatesByStaff.get(person.id)?.has(date) ?? false;
       const assignment = resolveEffectiveAssignment(

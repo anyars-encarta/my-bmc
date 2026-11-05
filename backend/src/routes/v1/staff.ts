@@ -8,18 +8,24 @@ import {
   jobRole,
   orgUnit,
   rosterEntry,
+  shiftType,
   staff,
   staffAssignment,
   staffLicense,
   updateStaffSchema,
   workforceEvent,
 } from "../../db/schema/index.js";
-import { materializeFixedScheduleForStaff } from "../../jobs/fixedScheduleMaterializer.js";
+import {
+  getScheduleDateAfterDays,
+  materializeFixedScheduleForStaff,
+  materializeFixedSchedules,
+} from "../../jobs/fixedScheduleMaterializer.js";
 import { session, user } from "../../db/schema/auth.js";
 import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import { isAppRole, requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
+import { nowAtFacility } from "../../lib/facilityClock.js";
 
 const router = Router();
 
@@ -517,6 +523,37 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       mergedForValidation.status === "active" &&
       mergedForValidation.staffCategory === "NON_CLINICAL" &&
       mergedForValidation.scheduleMode === "FIXED_WEEKDAY";
+    const enteringFixedWeekdayMode = isFixedWeekdayStaff && !wasFixedWeekdayStaff;
+    let fixedScheduleWindow: { from: string; to: string } | null = null;
+    let previousFixedRows: Array<typeof rosterEntry.$inferSelect> = [];
+
+    if (enteringFixedWeekdayMode) {
+      const activeShiftTypes = await db.select({
+        id: shiftType.id,
+        code: shiftType.code,
+        category: shiftType.category,
+      }).from(shiftType).where(eq(shiftType.active, true));
+      const hasConfiguredShift = mergedForValidation.defaultShiftTypeId
+        ? activeShiftTypes.some((shift) => shift.id === mergedForValidation.defaultShiftTypeId)
+        : activeShiftTypes.some((shift) => shift.code === "STD" || shift.category === "STANDARD");
+      if (!hasConfiguredShift) {
+        throw validationError(
+          "Configure an active default shift or standard shift before switching to a fixed weekday schedule.",
+          "FIXED_SCHEDULE_SHIFT_NOT_CONFIGURED",
+        );
+      }
+
+      const from = (await nowAtFacility()).localDateTime.slice(0, 10);
+      const to = getScheduleDateAfterDays(from, 60);
+      fixedScheduleWindow = { from, to };
+      previousFixedRows = await db.select().from(rosterEntry).where(and(
+        eq(rosterEntry.staffId, staffId),
+        eq(rosterEntry.source, "AUTO_FIXED"),
+        eq(rosterEntry.status, "ACTIVE"),
+        gte(rosterEntry.rosterDate, from),
+        lte(rosterEntry.rosterDate, to),
+      ));
+    }
 
     const [updated] = await db
       .update(staff)
@@ -544,25 +581,101 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
         console.error("Staff record updated, but future fixed weekday schedules could not be cancelled.", error);
         warnings.push("Staff record updated, but future automatic weekday shifts could not be cancelled.");
       }
-    } else if (isFixedWeekdayStaff && !wasFixedWeekdayStaff) {
+    } else if (enteringFixedWeekdayMode && fixedScheduleWindow) {
+      let cancelledManualRows: Array<typeof rosterEntry.$inferSelect> = [];
       try {
-        await db.update(rosterEntry)
+        cancelledManualRows = await db.update(rosterEntry)
           .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
           .where(and(
             eq(rosterEntry.staffId, staffId),
             ne(rosterEntry.source, "AUTO_FIXED"),
             eq(rosterEntry.status, "ACTIVE"),
             gte(rosterEntry.plannedStart, new Date()),
-          ));
+          ))
+          .returning();
+        await materializeFixedSchedules(fixedScheduleWindow.from, fixedScheduleWindow.to, [staffId]);
       } catch (error) {
-        console.error("Staff record updated, but future rostered shifts could not be cancelled before switching to fixed weekdays.", error);
-        warnings.push("Staff record updated, but future rostered shifts could not be cancelled before refreshing the automatic schedule.");
-      }
-      try {
-        await materializeFixedScheduleForStaff(staffId);
-      } catch (error) {
-        console.error("Staff record updated, but the fixed weekday schedule could not be refreshed.", error);
-        warnings.push("Staff record updated, but the automatic weekday schedule could not be refreshed.");
+        const compensationErrors: Array<{ step: string; error: unknown }> = [];
+        const attemptCompensation = async (step: string, action: () => Promise<unknown>) => {
+          try {
+            await action();
+          } catch (compensationError) {
+            compensationErrors.push({ step, error: compensationError });
+          }
+        };
+        let currentFixedRows: Array<{ id: string }> = [];
+        await attemptCompensation("finding generated fixed shifts", async () => {
+          currentFixedRows = await db.select({ id: rosterEntry.id })
+            .from(rosterEntry)
+            .where(and(
+              eq(rosterEntry.staffId, staffId),
+              eq(rosterEntry.source, "AUTO_FIXED"),
+              eq(rosterEntry.status, "ACTIVE"),
+              gte(rosterEntry.rosterDate, fixedScheduleWindow.from),
+              lte(rosterEntry.rosterDate, fixedScheduleWindow.to),
+            ));
+        });
+        const originalFixedIds = new Set(previousFixedRows.map((entry) => entry.id));
+        const newFixedIds = currentFixedRows
+          .map((entry) => entry.id)
+          .filter((id) => !originalFixedIds.has(id));
+        if (newFixedIds.length > 0) {
+          await attemptCompensation("cancelling generated fixed shifts", () =>
+            db.update(rosterEntry)
+              .set({
+                status: "CANCELLED",
+                version: sql`${rosterEntry.version} + 1`,
+              })
+              .where(and(inArray(rosterEntry.id, newFixedIds), eq(rosterEntry.status, "ACTIVE"))),
+          );
+        }
+        for (const previousEntry of previousFixedRows) {
+          await attemptCompensation(`restoring fixed shift ${previousEntry.id}`, () =>
+            db.update(rosterEntry)
+              .set({
+                orgUnitId: previousEntry.orgUnitId,
+                rosterDate: previousEntry.rosterDate,
+                shiftTypeId: previousEntry.shiftTypeId,
+                plannedStart: previousEntry.plannedStart,
+                plannedEnd: previousEntry.plannedEnd,
+                rosterPeriodId: previousEntry.rosterPeriodId,
+                source: previousEntry.source,
+                status: "ACTIVE",
+                overrideReason: previousEntry.overrideReason,
+                version: sql`${rosterEntry.version} + 1`,
+              })
+              .where(eq(rosterEntry.id, previousEntry.id)),
+          );
+        }
+        for (let index = 0; index < cancelledManualRows.length; index += 500) {
+          const batch = cancelledManualRows.slice(index, index + 500);
+          await attemptCompensation(`restoring cancelled manual shifts ${index}-${index + batch.length - 1}`, () =>
+            db.update(rosterEntry)
+              .set({ status: "ACTIVE", version: sql`${rosterEntry.version} + 1` })
+              .where(and(
+                inArray(rosterEntry.id, batch.map((entry) => entry.id)),
+                eq(rosterEntry.status, "CANCELLED"),
+              )),
+          );
+        }
+        await attemptCompensation("restoring staff scheduling fields", () =>
+          db.update(staff)
+            .set({
+              staffCategory: existing.staffCategory,
+              scheduleMode: existing.scheduleMode,
+              defaultShiftTypeId: existing.defaultShiftTypeId,
+              updatedAt: new Date(),
+            })
+            .where(eq(staff.id, staffId)),
+        );
+        if (compensationErrors.length > 0) {
+          console.error("Fixed weekday transition failed and its schedule compensation was incomplete.", {
+            staffId,
+            error,
+            compensationErrors,
+          });
+        }
+        throw error;
       }
     } else if (isFixedWeekdayStaff) {
       try {
