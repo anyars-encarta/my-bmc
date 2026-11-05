@@ -34,6 +34,8 @@ export type RosterViolation = {
   message: string;
   staffId: string | null;
   date: string;
+  shiftTypeId?: string;
+  jobRoleId?: string | null;
 };
 
 export type RosterRuleContext = {
@@ -55,6 +57,7 @@ export type RosterRuleContext = {
     shiftTypeId: string;
     jobRoleId: string | null;
     minStaff: number;
+    jobRoleName?: string | null;
   }>;
   allowRestOverride?: boolean;
   publishing?: boolean;
@@ -116,6 +119,13 @@ export const validateRoster = (context: RosterRuleContext): RosterViolation[] =>
       current.code === violation.code &&
       current.staffId === violation.staffId &&
       current.date === violation.date &&
+      (
+        violation.code !== "STAFFING_REQUIREMENT" ||
+        (
+          current.shiftTypeId === violation.shiftTypeId &&
+          current.jobRoleId === violation.jobRoleId
+        )
+      ) &&
       current.message === violation.message,
     )) violations.push(violation);
   };
@@ -199,16 +209,9 @@ export const validateRoster = (context: RosterRuleContext): RosterViolation[] =>
     }
 
     const rest = toMillis(current.plannedStart) - toMillis(previous.plannedEnd);
-    if (
-      rest < MIN_REST_MS &&
-      (previous.inPeriod || current.inPeriod) &&
-      !(
-        context.allowRestOverride &&
-        ((previous.inPeriod && previous.overrideReason?.trim()) ||
-          (current.inPeriod && current.overrideReason?.trim()))
-      )
-    ) {
-      const affected = current.inPeriod ? current : previous;
+    const affected = current.inPeriod ? current : previous.inPeriod ? previous : null;
+    const hasValidOverride = Boolean(context.allowRestOverride && affected?.overrideReason?.trim());
+    if (rest < MIN_REST_MS && affected && !hasValidOverride) {
       addViolation({
         level: "error",
         code: "MINIMUM_REST",
@@ -314,9 +317,13 @@ export const validateRoster = (context: RosterRuleContext): RosterViolation[] =>
         addViolation({
           level: context.publishing ? "error" : "warning",
           code: "STAFFING_REQUIREMENT",
-          message: `Coverage requires at least ${requirement.minStaff} staff; ${actual} are assigned.`,
+          message: `Coverage for ${shiftsById.get(requirement.shiftTypeId)?.name ?? "shift"}${
+            requirement.jobRoleName ? ` / ${requirement.jobRoleName}` : ""
+          } requires at least ${requirement.minStaff} staff; ${actual} are assigned.`,
           staffId: null,
           date,
+          shiftTypeId: requirement.shiftTypeId,
+          jobRoleId: requirement.jobRoleId,
         });
       }
     }
@@ -328,7 +335,7 @@ export const validateRoster = (context: RosterRuleContext): RosterViolation[] =>
           shiftsById.get(entry.shiftTypeId)?.category === category,
         );
         if (!covered) addViolation({
-          level: "error",
+          level: context.publishing ? "error" : "warning",
           code: "24H_SHIFT_COVERAGE",
           message: `A 24-hour unit requires at least one ${category.toLowerCase()} shift each day.`,
           staffId: null,

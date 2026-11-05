@@ -244,6 +244,15 @@ export const RostersPage = () => {
     const keys = new Set([...Object.keys(cells), ...Object.keys(savedCells)]);
     return Array.from(keys).filter((key) => !sameCellValues(cells[key], savedCells[key]));
   }, [cells, savedCells]);
+  useEffect(() => {
+    if (dirtyKeys.length === 0) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirtyKeys.length]);
   const visibleRange = useMemo(() => {
     if (!grid) return { start: 0, end: 0 };
     const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -421,6 +430,11 @@ export const RostersPage = () => {
         const selectedShift = cells[cellKey(person.id, date)]?.[0];
         if (selectedShift) {
           const dayOfWeek = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+          const existingShift = byDay.get(dayOfWeek);
+          if (existingShift && existingShift !== selectedShift) {
+            toast.error(`${person.firstName} ${person.lastName} has different shifts on the same weekday; the template was not saved.`);
+            return;
+          }
           byDay.set(dayOfWeek, selectedShift);
         }
       }
@@ -516,9 +530,13 @@ export const RostersPage = () => {
           <Field label="Org unit">
             <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={unitId} onChange={(event) => {
               const nextUnit = event.target.value;
+              if (nextUnit === unitId) return;
+              if (dirtyKeys.length > 0 && !window.confirm("Discard unsaved roster changes?")) return;
               setUnitId(nextUnit);
               setPeriodId("");
               setGrid(null);
+              setCells({});
+              setSavedCells({});
               void loadPeriods(nextUnit).catch((error) => toast.error(error.message));
             }}>
               <option value="">Choose an org unit</option>
@@ -528,6 +546,8 @@ export const RostersPage = () => {
           <Field label="Existing period">
             <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={periodId} onChange={(event) => {
               const nextId = event.target.value;
+              if (nextId === periodId) return;
+              if (dirtyKeys.length > 0 && !window.confirm("Discard unsaved roster changes?")) return;
               setPeriodId(nextId);
               void loadGrid(nextId);
             }}>
@@ -644,7 +664,7 @@ export const RostersPage = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {topSpacer > 0 ? <tr aria-hidden="true"><td colSpan={grid.dates.length + 1} style={{ height: topSpacer, padding: 0 }} /></tr> : null}
+                      {topSpacer > 0 ? <tr aria-hidden="true"><td colSpan={grid.dates.length + 1} style={{ height: topSpacer, padding: 0, border: 0, lineHeight: 0 }} /></tr> : null}
                       {visibleStaff.map((person) => (
                         <tr key={person.id} style={{ height: ROW_HEIGHT }}>
                           <th className="sticky left-0 z-1 border-b border-r bg-background p-2 text-left align-top">
@@ -660,10 +680,11 @@ export const RostersPage = () => {
                             return (
                               <td
                                 key={date}
-                                className={`border-b border-r p-1 align-top ${cellViolations.some((item) => item.level === "error") ? "bg-destructive/10" : cellViolations.length ? "bg-amber-500/10" : ""}`}
+                                className={`h-[76px] max-h-[76px] border-b border-r p-1 align-top ${cellViolations.some((item) => item.level === "error") ? "bg-destructive/10" : cellViolations.length ? "bg-amber-500/10" : ""}`}
                                 onClick={paintMode && !saving ? paint : undefined}
                                 title={paintMode ? "Click to paint this shift" : undefined}
                               >
+                                <div className="max-h-[64px] overflow-y-auto">
                                 {paintMode ? (
                                   <span className="text-xs text-muted-foreground">
                                     {selected.map((id) => shiftById.get(id)?.name).filter(Boolean).join(" + ") || "Off"}
@@ -695,12 +716,13 @@ export const RostersPage = () => {
                                 ) : (
                                   <span className="text-xs">{selected.map((id) => shiftById.get(id)?.name).filter(Boolean).join(" + ") || "Off"}</span>
                                 )}
+                                </div>
                               </td>
                             );
                           })}
                         </tr>
                       ))}
-                      {bottomSpacer > 0 ? <tr aria-hidden="true"><td colSpan={grid.dates.length + 1} style={{ height: bottomSpacer, padding: 0 }} /></tr> : null}
+                      {bottomSpacer > 0 ? <tr aria-hidden="true"><td colSpan={grid.dates.length + 1} style={{ height: bottomSpacer, padding: 0, border: 0, lineHeight: 0 }} /></tr> : null}
                       {grid.staff.length === 0 ? <tr><td colSpan={grid.dates.length + 1} className="p-8 text-center text-muted-foreground">No rostered staff are assigned to this unit during this period.</td></tr> : null}
                     </tbody>
                   </table>

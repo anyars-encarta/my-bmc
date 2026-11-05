@@ -929,6 +929,7 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
       throw conflict("The transfer batch status changed before it could be applied.", "TRANSFER_BATCH_NOT_APPROVED");
     }
 
+    const warnings: string[] = [];
     try {
       const items = await db
         .select()
@@ -955,6 +956,7 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
             staffId: item.staffId,
             error,
           });
+          warnings.push("Transfer applied, but an automatic weekday schedule could not be refreshed.");
         }
       }
       const [applied] = await db
@@ -976,7 +978,7 @@ router.post("/transfer-batches/:id/apply", requireAnyRole([...HR_ROLES]), async 
       }
       throw error;
     }
-    res.json({ data: await loadBatch(batchId) });
+    res.json({ data: await loadBatch(batchId), warnings });
   } catch (error) {
     next(error);
   }

@@ -5,6 +5,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lte,
   ne,
@@ -55,6 +56,7 @@ const READ_ROLES = [
 const EDIT_ROLES = ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"] as const;
 const HR_OVERRIDE_ROLES = ["SUPER_ADMIN", "HR_MANAGER"] as const;
 const PERIOD_CREATE_ROLES = ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"] as const;
+const periodMutationQueues = new Map<string, Promise<void>>();
 const periodInputSchema = z.object({
   orgUnitId: z.string().uuid(),
   startDate: z.string().date(),
@@ -142,18 +144,49 @@ const periodDates = (period: { startDate: string; endDate: string }) => {
 
 const entryKey = (staffId: string, rosterDate: string) => `${staffId}:${rosterDate}`;
 
+const withPeriodMutationLock = async <T,>(
+  periodId: string,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  const previous = periodMutationQueues.get(periodId) ?? Promise.resolve();
+  let release = () => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+  periodMutationQueues.set(periodId, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (periodMutationQueues.get(periodId) === queued) {
+      periodMutationQueues.delete(periodId);
+    }
+  }
+};
+
 const buildRuleContext = async (
   period: PeriodWithUnit,
   replacements: Map<string, RosterRuleEntry[]> = new Map(),
+  options: {
+    additionalEntries?: RosterRuleEntry[];
+    excludedEntryIds?: Set<string>;
+  } = {},
 ) => {
   const currentPeriodRows = await db.select().from(rosterEntry).where(and(
     eq(rosterEntry.rosterPeriodId, period.id),
     eq(rosterEntry.status, "ACTIVE"),
   ));
   const retainedPeriodRows = currentPeriodRows.filter(
-    (entry) => !replacements.has(entryKey(entry.staffId, entry.rosterDate)),
+    (entry) =>
+      !replacements.has(entryKey(entry.staffId, entry.rosterDate)) &&
+      !options.excludedEntryIds?.has(entry.id),
   );
-  const candidateEntries = Array.from(replacements.values()).flat();
+  const candidateEntries = [
+    ...Array.from(replacements.values()).flat(),
+    ...(options.additionalEntries ?? []),
+  ];
   const staffIds = Array.from(new Set([
     ...retainedPeriodRows.map((entry) => entry.staffId),
     ...candidateEntries.map((entry) => entry.staffId),
@@ -205,7 +238,10 @@ const buildRuleContext = async (
       shiftTypeId: unitStaffingRequirement.shiftTypeId,
       jobRoleId: unitStaffingRequirement.jobRoleId,
       minStaff: unitStaffingRequirement.minStaff,
-    }).from(unitStaffingRequirement).where(eq(unitStaffingRequirement.orgUnitId, period.orgUnitId)),
+      jobRoleName: jobRole.name,
+    }).from(unitStaffingRequirement)
+      .leftJoin(jobRole, eq(jobRole.id, unitStaffingRequirement.jobRoleId))
+      .where(eq(unitStaffingRequirement.orgUnitId, period.orgUnitId)),
     db.select({ timezone: facilitySetup.timezone }).from(facilitySetup).limit(1),
   ]);
   return {
@@ -228,6 +264,9 @@ const buildRuleContext = async (
     currentPeriodRows,
   };
 };
+
+const hasPersistedRestOverrides = (context: { entries: RosterRuleEntry[] }) =>
+  context.entries.some((entry) => entry.inPeriod && Boolean(entry.overrideReason?.trim()));
 
 const buildCandidateEntries = async (
   period: PeriodWithUnit,
@@ -324,7 +363,8 @@ const persistRosterEntries = async (
   roles: AppRole[],
   actorUserId: string,
   reason?: string,
-) => {
+) => withPeriodMutationLock(period.id, async () => {
+  period = await getPeriod(period.id);
   if (period.status === "LOCKED") {
     throw conflict("Locked rosters cannot be changed.", "ROSTER_PERIOD_LOCKED");
   }
@@ -345,6 +385,7 @@ const persistRosterEntries = async (
   const before = currentPeriodRows.filter((entry) => touched.has(entryKey(entry.staffId, entry.rosterDate)));
   const changedIds = before.map((entry) => entry.id);
   const created: Array<typeof rosterEntry.$inferSelect> = [];
+  let cancelledIds: string[] = [];
 
   try {
     if (changedIds.length > 0) {
@@ -358,8 +399,9 @@ const persistRosterEntries = async (
           eq(rosterEntry.status, "ACTIVE"),
           eq(rosterEntry.rosterPeriodId, period.id),
         ))
-        .returning();
-      if (cancelled.length !== changedIds.length) {
+        .returning({ id: rosterEntry.id });
+      cancelledIds = cancelled.map((entry) => entry.id);
+      if (cancelledIds.length !== changedIds.length) {
         throw conflict("Roster entries changed while you were editing. Reload the grid and retry.", "ROSTER_VERSION_CONFLICT");
       }
     }
@@ -381,11 +423,11 @@ const persistRosterEntries = async (
       created.push(...saved);
     }
   } catch (error) {
-    if (changedIds.length > 0) {
+    if (cancelledIds.length > 0) {
       try {
         await db.update(rosterEntry)
           .set({ status: "ACTIVE", version: sql`${rosterEntry.version} + 1` })
-          .where(and(inArray(rosterEntry.id, changedIds), eq(rosterEntry.status, "CANCELLED")));
+          .where(and(inArray(rosterEntry.id, cancelledIds), eq(rosterEntry.status, "CANCELLED")));
       } catch (compensationError) {
         console.error("Roster save compensation failed; manually review the affected period.", {
           periodId: period.id,
@@ -444,7 +486,7 @@ const persistRosterEntries = async (
   }
 
   return { saved: true, violations, warnings, changedCells: changes.length };
-};
+});
 
 router.get("/roster-periods", requireAnyRole([...READ_ROLES]), async (req, res, next) => {
   try {
@@ -568,7 +610,10 @@ router.get("/roster-periods/:id/grid", requireAnyRole([...READ_ROLES]), async (r
         ))
         .orderBy(asc(staff.lastName), asc(staff.firstName));
     const { context } = await buildRuleContext(period);
-    const violations = validateRoster(context);
+    const violations = validateRoster({
+      ...context,
+      allowRestOverride: hasPersistedRestOverrides(context),
+    });
     res.json({
       data: {
         period,
@@ -647,7 +692,11 @@ router.post("/roster-periods/:id/publish", requireAnyRole(["SUPER_ADMIN", "HR_MA
       throw conflict("Only a draft roster can be published.", "ROSTER_PERIOD_NOT_DRAFT");
     }
     const { context } = await buildRuleContext(period);
-    const violations = validateRoster({ ...context, publishing: true });
+    const violations = validateRoster({
+      ...context,
+      publishing: true,
+      allowRestOverride: hasPersistedRestOverrides(context),
+    });
     const blocking = violations.filter((violation) => violation.level === "error");
     if (blocking.length > 0) {
       res.status(422).json({ error: "Roster cannot be published.", code: "ROSTER_VALIDATION_FAILED", violations });
@@ -745,21 +794,32 @@ router.post("/roster-periods/:id/copy", requireAnyRole([...EDIT_ROLES]), async (
     const sourceDates = periodDates(sourcePeriod);
     const targetDates = periodDates(period);
     const staffIds = Array.from(new Set(sourceEntries.map((entry) => entry.staffId)));
-    const sourceMap = new Map<string, typeof sourceEntries[number]>();
-    for (const entry of sourceEntries) sourceMap.set(entryKey(entry.staffId, entry.rosterDate), entry);
+    const sourceMap = new Map<string, typeof sourceEntries>();
+    for (const entry of sourceEntries) {
+      const key = entryKey(entry.staffId, entry.rosterDate);
+      const entriesForDate = sourceMap.get(key) ?? [];
+      entriesForDate.push(entry);
+      sourceMap.set(key, entriesForDate);
+    }
     const entries: RequestEntry[] = [];
     for (const staffId of staffIds) {
       for (let index = 0; index < targetDates.length; index += 1) {
         const sourceDate = sourceDates[index % sourceDates.length];
         const targetDate = targetDates[index];
         if (!sourceDate || !targetDate) continue;
-        const sourceEntry = sourceMap.get(entryKey(staffId, sourceDate));
-        entries.push({
-          staffId,
-          rosterDate: targetDate,
-          shiftTypeId: sourceEntry?.shiftTypeId ?? null,
-          overrideReason: sourceEntry?.overrideReason ?? null,
-        });
+        const sourceDateEntries = sourceMap.get(entryKey(staffId, sourceDate)) ?? [];
+        if (sourceDateEntries.length === 0) {
+          entries.push({ staffId, rosterDate: targetDate, shiftTypeId: null });
+        } else {
+          for (const sourceEntry of sourceDateEntries) {
+            entries.push({
+              staffId,
+              rosterDate: targetDate,
+              shiftTypeId: sourceEntry.shiftTypeId,
+              overrideReason: sourceEntry.overrideReason ?? null,
+            });
+          }
+        }
       }
     }
     if (entries.length > 5000) throw validationError("The copied roster exceeds the bulk edit limit.", "ROSTER_COPY_TOO_LARGE");
@@ -929,17 +989,110 @@ const refreshFixedSchedulesForHolidayChange = async (holidayDate: string) => {
   await materializeFixedSchedules(today, windowEnd);
 };
 
+const reconcileNonClinicalHolidayEntries = async (
+  holidayDates: string[],
+  actorUserId: string,
+) => {
+  if (holidayDates.length === 0) return { cancelled: 0, auditFailed: false };
+  const candidates = await db.select({ entry: rosterEntry })
+    .from(rosterEntry)
+    .innerJoin(staff, eq(staff.id, rosterEntry.staffId))
+    .where(and(
+      inArray(rosterEntry.rosterDate, holidayDates),
+      eq(rosterEntry.status, "ACTIVE"),
+      ne(rosterEntry.source, "AUTO_FIXED"),
+      isNotNull(rosterEntry.rosterPeriodId),
+      eq(staff.staffCategory, "NON_CLINICAL"),
+    ));
+  if (candidates.length === 0) return { cancelled: 0, auditFailed: false };
+
+  const beforeById = new Map(candidates.map(({ entry }) => [entry.id, entry]));
+  const cancelled: Array<(typeof candidates)[number]["entry"]> = [];
+  const candidateIds = Array.from(beforeById.keys());
+  for (let index = 0; index < candidateIds.length; index += 500) {
+    const batch = await db.update(rosterEntry)
+      .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+      .where(and(
+        inArray(rosterEntry.id, candidateIds.slice(index, index + 500)),
+        eq(rosterEntry.status, "ACTIVE"),
+      ))
+      .returning();
+    cancelled.push(...batch);
+  }
+  if (cancelled.length === 0) return { cancelled: 0, auditFailed: false };
+
+  const changes = cancelled.flatMap((entry) => {
+    const before = beforeById.get(entry.id);
+    if (!before || !entry.rosterPeriodId) return [];
+    return [{
+      rosterPeriodId: entry.rosterPeriodId,
+      rosterEntryId: entry.id,
+      staffId: entry.staffId,
+      rosterDate: entry.rosterDate,
+      action: "CANCELLED",
+      before,
+      after: entry,
+      reason: `Cancelled because ${entry.rosterDate} is a public holiday.`,
+      actorUserId,
+    }];
+  });
+
+  try {
+    if (changes.length > 0) {
+      for (let index = 0; index < changes.length; index += 500) {
+        await db.insert(rosterEntryChange).values(changes.slice(index, index + 500));
+      }
+      const periodGroups = new Map<string, { holidayDates: Set<string>; cancelledCells: number }>();
+      for (const change of changes) {
+        const group = periodGroups.get(change.rosterPeriodId) ?? {
+          holidayDates: new Set<string>(),
+          cancelledCells: 0,
+        };
+        group.holidayDates.add(change.rosterDate);
+        group.cancelledCells += 1;
+        periodGroups.set(change.rosterPeriodId, group);
+      }
+      const events = Array.from(periodGroups, ([periodId, group]) => ({
+        eventType: "RosterEntryChanged",
+        aggregateId: periodId,
+        payload: {
+          rosterPeriodId: periodId,
+          holidayDates: Array.from(group.holidayDates),
+          cancelledCells: group.cancelledCells,
+          actorUserId,
+        },
+      }));
+      for (let index = 0; index < events.length; index += 500) {
+        await db.insert(workforceEvent).values(events.slice(index, index + 500));
+      }
+    }
+    return { cancelled: cancelled.length, auditFailed: false };
+  } catch (error) {
+    console.error("Non-clinical holiday shifts were cancelled, but their audit records could not be completed.", error);
+    return { cancelled: cancelled.length, auditFailed: true };
+  }
+};
+
 router.get("/public-holidays", requireAnyRole([...READ_ROLES]), async (req, res, next) => {
   try {
-    const from = typeof req.query.from === "string" ? req.query.from : `${new Date().getUTCFullYear()}-01-01`;
-    const to = typeof req.query.to === "string" ? req.query.to : `${new Date().getUTCFullYear() + 1}-12-31`;
-    if (!z.string().date().safeParse(from).success || !z.string().date().safeParse(to).success || from > to) {
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    if (Boolean(from) !== Boolean(to)) {
+      throw validationError("Provide both holiday range dates or neither.", "HOLIDAY_DATE_RANGE_INVALID");
+    }
+    if (from && to && (
+      !z.string().date().safeParse(from).success ||
+      !z.string().date().safeParse(to).success ||
+      from > to
+    )) {
       throw validationError("Provide a valid holiday date range.", "HOLIDAY_DATE_RANGE_INVALID");
     }
-    const holidays = await db.select().from(publicHoliday).where(and(
-      gte(publicHoliday.holidayDate, from),
-      lte(publicHoliday.holidayDate, to),
-    )).orderBy(asc(publicHoliday.holidayDate));
+    const holidays = from && to
+      ? await db.select().from(publicHoliday).where(and(
+        gte(publicHoliday.holidayDate, from),
+        lte(publicHoliday.holidayDate, to),
+      )).orderBy(asc(publicHoliday.holidayDate))
+      : await db.select().from(publicHoliday).orderBy(asc(publicHoliday.holidayDate));
     res.json({ data: holidays });
   } catch (error) {
     next(error);
@@ -949,10 +1102,31 @@ router.get("/public-holidays", requireAnyRole([...READ_ROLES]), async (req, res,
 router.post("/public-holidays/seed", requireAnyRole([...ADMIN_ROLES]), async (_req, res, next) => {
   try {
     const currentYear = (await nowAtFacility()).localDateTime.slice(0, 4);
-    const inserted = await seedGhanaPublicHolidays(Number(currentYear), 5);
+    const insertedHolidayDates = await seedGhanaPublicHolidays(Number(currentYear), 5);
     const today = (await nowAtFacility()).localDateTime.slice(0, 10);
-    await materializeFixedSchedules(today, addDays(today, 60));
-    res.json({ data: { inserted } });
+    const warnings: string[] = [];
+    try {
+      const reconciliation = await reconcileNonClinicalHolidayEntries(
+        insertedHolidayDates,
+        _req.user?.id ?? "system",
+      );
+      if (reconciliation.cancelled > 0) {
+        warnings.push(`Cancelled ${reconciliation.cancelled} non-clinical roster shift(s) on newly added holidays.`);
+      }
+      if (reconciliation.auditFailed) {
+        warnings.push("Holiday shifts were cancelled, but one or more audit records could not be saved.");
+      }
+    } catch (error) {
+      console.error("Holidays were seeded, but non-clinical roster shifts could not be reconciled.", error);
+      warnings.push("Holidays were seeded, but active non-clinical roster shifts could not be reconciled.");
+    }
+    try {
+      await materializeFixedSchedules(today, addDays(today, 60));
+    } catch (error) {
+      console.error("Holidays were seeded, but fixed weekday schedules could not be refreshed.", error);
+      warnings.push("Holidays were seeded, but fixed schedules could not be refreshed.");
+    }
+    res.json({ data: { inserted: insertedHolidayDates.length }, warnings });
   } catch (error) {
     next(error);
   }
@@ -969,6 +1143,21 @@ router.post("/public-holidays", requireAnyRole([...ADMIN_ROLES]), async (req, re
     const [created] = await db.insert(publicHoliday).values(parsed.data).returning();
     if (!created) throw badRequest("Unable to create public holiday.", "PUBLIC_HOLIDAY_CREATE_FAILED");
     const warnings: string[] = [];
+    try {
+      const reconciliation = await reconcileNonClinicalHolidayEntries(
+        [created.holidayDate],
+        req.user?.id ?? "system",
+      );
+      if (reconciliation.cancelled > 0) {
+        warnings.push(`Cancelled ${reconciliation.cancelled} non-clinical roster shift(s) on the holiday.`);
+      }
+      if (reconciliation.auditFailed) {
+        warnings.push("Holiday shifts were cancelled, but one or more audit records could not be saved.");
+      }
+    } catch (error) {
+      console.error("Public holiday saved, but non-clinical roster shifts could not be reconciled.", error);
+      warnings.push("Holiday saved, but active non-clinical roster shifts could not be reconciled.");
+    }
     try {
       await refreshFixedSchedulesForHolidayChange(created.holidayDate);
     } catch (error) {
@@ -1006,6 +1195,21 @@ router.patch("/public-holidays/:date", requireAnyRole([...ADMIN_ROLES]), async (
       .returning();
     if (!updated) throw notFound("Public holiday not found.", "PUBLIC_HOLIDAY_NOT_FOUND");
     const warnings: string[] = [];
+    try {
+      const reconciliation = await reconcileNonClinicalHolidayEntries(
+        [updated.holidayDate],
+        req.user?.id ?? "system",
+      );
+      if (reconciliation.cancelled > 0) {
+        warnings.push(`Cancelled ${reconciliation.cancelled} non-clinical roster shift(s) on the holiday.`);
+      }
+      if (reconciliation.auditFailed) {
+        warnings.push("Holiday shifts were cancelled, but one or more audit records could not be saved.");
+      }
+    } catch (error) {
+      console.error("Public holiday updated, but non-clinical roster shifts could not be reconciled.", error);
+      warnings.push("Holiday updated, but active non-clinical roster shifts could not be reconciled.");
+    }
     try {
       await refreshFixedSchedulesForHolidayChange(holidayDate);
       if (updated.holidayDate !== holidayDate) {
@@ -1269,6 +1473,11 @@ router.get("/shift-swaps", requireAnyRole([...READ_ROLES, "STAFF"]), async (req,
     const roles = getRoles(req.user?.roles);
     const selfOnly = !hasAny(roles, READ_ROLES);
     const person = selfOnly ? await getCurrentStaff(req.user?.id) : null;
+    const managedIds = selfOnly
+      ? null
+      : req.user?.id
+        ? await resolveManagedUnitIds(req.user.id, roles)
+        : [];
     const records = await db.select().from(shiftSwapRequest)
       .orderBy(desc(shiftSwapRequest.decidedAt))
       .limit(200);
@@ -1280,7 +1489,7 @@ router.get("/shift-swaps", requireAnyRole([...READ_ROLES, "STAFF"]), async (req,
         ? await getSwapEntry(record.counterpartyEntryId)
         : null;
       if (selfOnly && person?.id !== requester.staffId && person?.id !== counterparty?.staffId) continue;
-      if (!selfOnly) await ensureUnitAccess(req.user?.id, roles, requester.orgUnitId);
+      if (!selfOnly && managedIds !== null && !managedIds.includes(requester.orgUnitId)) continue;
       data.push({
         id: record.id,
         status: record.status,
@@ -1469,19 +1678,18 @@ router.post("/shift-swaps/:id/approve", requireAnyRole(["SUPER_ADMIN", "HR_MANAG
       source: "SWAP",
       inPeriod: true,
     };
-    const replacements = new Map<string, RosterRuleEntry[]>([
-      [entryKey(requesterEntry.staffId, requesterEntry.rosterDate), [requesterReplacement]],
-      [entryKey(counterpartyEntry.staffId, counterpartyEntry.rosterDate), [counterpartyReplacement]],
-    ]);
-    const { context } = await buildRuleContext(period, replacements);
+    const originalEntries = [requesterEntry, counterpartyEntry];
+    const originalIds = originalEntries.map((entry) => entry.id);
+    const { context } = await buildRuleContext(period, new Map(), {
+      additionalEntries: [requesterReplacement, counterpartyReplacement],
+      excludedEntryIds: new Set(originalIds),
+    });
     const violations = validateRoster(context);
     if (violations.some((violation) => violation.level === "error")) {
       res.status(422).json({ error: "The swap violates roster rules.", code: "SHIFT_SWAP_VALIDATION_FAILED", violations });
       return;
     }
 
-    const originalEntries = [requesterEntry, counterpartyEntry];
-    const originalIds = originalEntries.map((entry) => entry.id);
     const cancelled = await db.update(rosterEntry)
       .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
       .where(and(

@@ -40,7 +40,7 @@ export const PublicHolidaysPage = () => {
   const loadHolidays = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = await request<Holiday[]>("public-holidays?from=2025-01-01&to=2035-12-31");
+      const payload = await request<Holiday[]>("public-holidays");
       setHolidays(payload.data ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load public holidays.");
@@ -86,7 +86,10 @@ export const PublicHolidaysPage = () => {
     setLoading(true);
     try {
       const payload = await request<{ inserted: number }>("public-holidays/seed", { method: "POST" });
-      toast.success(`${payload.data?.inserted ?? 0} Ghana holiday date(s) added.`);
+      payload.warnings?.forEach((warning) => toast.warning(warning));
+      if (!payload.warnings?.length) {
+        toast.success(`${payload.data?.inserted ?? 0} Ghana holiday date(s) added.`);
+      }
       await loadHolidays();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to seed Ghana holidays.");

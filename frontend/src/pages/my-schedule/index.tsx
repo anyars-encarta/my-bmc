@@ -105,9 +105,9 @@ export const MySchedulePage = () => {
   }, [loadSelfService]);
 
   useEffect(() => {
+    setCounterpartyEntryId("");
+    setEligibleShifts([]);
     if (!selectedEntryId) {
-      setEligibleShifts([]);
-      setCounterpartyEntryId("");
       return;
     }
     let active = true;
@@ -124,6 +124,13 @@ export const MySchedulePage = () => {
   const ownSwapEntries = useMemo(() =>
     schedule.filter((entry) => entry.rosterPeriodId && entry.status === "PUBLISHED"),
   [schedule]);
+  useEffect(() => {
+    if (selectedEntryId && !ownSwapEntries.some((entry) => entry.id === selectedEntryId)) {
+      setSelectedEntryId("");
+      setCounterpartyEntryId("");
+      setEligibleShifts([]);
+    }
+  }, [ownSwapEntries, selectedEntryId]);
   const scheduleByDate = useMemo(() => {
     const grouped = new Map<string, ScheduleEntry[]>();
     for (const entry of schedule) {

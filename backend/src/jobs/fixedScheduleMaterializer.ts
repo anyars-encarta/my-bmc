@@ -174,32 +174,68 @@ export const materializeFixedSchedules = async (
       ));
   }
 
-  const cancelled = Array.from(cancelDatesByStaff.values()).reduce((sum, dates) => sum + dates.length, 0);
+  const desiredShiftByDate = new Map(
+    rows.map((row) => [`${row.staffId}:${row.rosterDate}`, row.shiftTypeId]),
+  );
+  const desiredStaffIds = Array.from(new Set(rows.map((row) => row.staffId)));
+  let staleShiftCancelled = 0;
+  if (desiredStaffIds.length > 0) {
+    const activeFixedRows = await db.select({
+      id: rosterEntry.id,
+      staffId: rosterEntry.staffId,
+      rosterDate: rosterEntry.rosterDate,
+      shiftTypeId: rosterEntry.shiftTypeId,
+    }).from(rosterEntry).where(and(
+      inArray(rosterEntry.staffId, desiredStaffIds),
+      gte(rosterEntry.rosterDate, from),
+      lte(rosterEntry.rosterDate, to),
+      eq(rosterEntry.source, "AUTO_FIXED"),
+      eq(rosterEntry.status, "ACTIVE"),
+    ));
+    const staleIds = activeFixedRows
+      .filter((entry) => desiredShiftByDate.get(`${entry.staffId}:${entry.rosterDate}`) !== entry.shiftTypeId)
+      .map((entry) => entry.id);
+    if (staleIds.length > 0) {
+      const cancelledRows = await db.update(rosterEntry)
+        .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+        .where(and(inArray(rosterEntry.id, staleIds), eq(rosterEntry.status, "ACTIVE")))
+        .returning({ id: rosterEntry.id });
+      staleShiftCancelled = cancelledRows.length;
+    }
+  }
+
+  const cancelled =
+    Array.from(cancelDatesByStaff.values()).reduce((sum, dates) => sum + dates.length, 0) +
+    staleShiftCancelled;
   if (rows.length === 0) return { materialized: 0, cancelled };
 
-  const inserted = await db.insert(rosterEntry)
-    .values(rows)
-    .onConflictDoUpdate({
-      target: [rosterEntry.staffId, rosterEntry.rosterDate, rosterEntry.shiftTypeId],
-      targetWhere: sql`${rosterEntry.status} = 'ACTIVE'`,
-      setWhere: eq(rosterEntry.source, "AUTO_FIXED"),
-      set: {
-        orgUnitId: sql`excluded.org_unit_id`,
-        rosterPeriodId: null,
-        plannedStart: sql`excluded.planned_start`,
-        plannedEnd: sql`excluded.planned_end`,
-        source: "AUTO_FIXED",
-        status: "ACTIVE",
-        version: sql`${rosterEntry.version} + 1`,
-      },
-    })
-    .returning({ id: rosterEntry.id });
+  let insertedCount = 0;
+  for (let offset = 0; offset < rows.length; offset += 500) {
+    const inserted = await db.insert(rosterEntry)
+      .values(rows.slice(offset, offset + 500))
+      .onConflictDoUpdate({
+        target: [rosterEntry.staffId, rosterEntry.rosterDate, rosterEntry.shiftTypeId],
+        targetWhere: sql`${rosterEntry.status} = 'ACTIVE'`,
+        setWhere: eq(rosterEntry.source, "AUTO_FIXED"),
+        set: {
+          orgUnitId: sql`excluded.org_unit_id`,
+          rosterPeriodId: null,
+          plannedStart: sql`excluded.planned_start`,
+          plannedEnd: sql`excluded.planned_end`,
+          source: "AUTO_FIXED",
+          status: "ACTIVE",
+          version: sql`${rosterEntry.version} + 1`,
+        },
+      })
+      .returning({ id: rosterEntry.id });
+    insertedCount += inserted.length;
+  }
 
-  if (inserted.length !== rows.length) {
+  if (insertedCount !== rows.length) {
     throw new Error("Some fixed schedules were not materialized because an active non-fixed roster entry conflicts.");
   }
 
-  return { materialized: inserted.length, cancelled };
+  return { materialized: insertedCount, cancelled };
 };
 
 export const materializeFixedScheduleWindow = async () => {

@@ -134,6 +134,7 @@ Role legend: `SA` SUPER_ADMIN · `HA` HOSPITAL_ADMIN · `HR` HR_MANAGER · `PO` 
 | POST/PATCH | `/org-units` | SA HA HR | deactivate, never delete |
 | GET | `/org-units/:id/staff?on=YYYY-MM-DD` | UM(scoped) HR RO | roster-effective assignment on a date |
 | GET/POST/PATCH | `/staff` | HR SA (write), UM(scoped, read) | port of existing; category/mode/role/badge; payout fields only for HR/PO |
+| GET | `/staff/linkable-users?staffId=...` | SA HA HR PO | active unlinked login accounts for the staff-account selector; returns the current account when editing |
 | GET | `/staff/:id` | HR UM(scoped) ST(own) | |
 | POST | `/staff/:id/deactivate` | HR | publishes `StaffDeactivated`; disables linked login and cancels future roster entries; reason required |
 | POST | `/staff/:id/reactivate` | HR | reason required; restores staff status and re-enables a linked login only if it was active before deactivation; refreshes fixed weekday schedules |
@@ -162,7 +163,7 @@ Role legend: `SA` SUPER_ADMIN · `HA` HOSPITAL_ADMIN · `HR` HR_MANAGER · `PO` 
 | GET | `/staff/:id/schedule?from&to` · `/me/schedule` | UM(scoped) HR · ST(own) | published periods and `AUTO_FIXED` weekdays |
 | GET/POST | `/shift-swaps` | ST | request a swap and list own requests |
 | POST | `/shift-swaps/:id/accept` · `/approve` · `/reject` | ST · UM HR | request → accept → rule-validated approval |
-| GET/POST/PATCH/DELETE | `/public-holidays` | any / HR | Ghana seed plus maintained holiday dates |
+| GET/POST/PATCH/DELETE | `/public-holidays` | any / HR | GET returns all dates unless both `from` and `to` are supplied; holiday additions reconcile non-clinical roster entries and refresh fixed schedules |
 | GET/POST | `/me/notifications` · `/me/notifications/:id/read` | ST(own) | in-app roster publication and swap notifications |
 | GET/POST/PATCH/DELETE | `/unit-staffing-requirements` | HR (read scoped) | minimum staff per unit/shift/optional role |
 

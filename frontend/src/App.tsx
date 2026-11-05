@@ -1,4 +1,4 @@
-import { Authenticated, Refine } from "@refinedev/core";
+import { Authenticated, Refine, useGetIdentity } from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 
@@ -7,8 +7,8 @@ import routerProvider, {
   NavigateToResource,
   UnsavedChangesNotifier,
 } from "@refinedev/react-router";
-import { BrowserRouter, Outlet, Route, Routes } from "react-router";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import "./App.css";
 import { appResources } from "./constants/resources";
 import { ErrorComponent } from "./components/refine-ui/layout/error-component";
@@ -94,11 +94,45 @@ const brandedTitle = ({
   return "Encarta | Hospital Management Suite";
 };
 
+const workforceReadRoles = [
+  "SUPER_ADMIN",
+  "HOSPITAL_ADMIN",
+  "HR_MANAGER",
+  "PAYROLL_OFFICER",
+  "UNIT_MANAGER",
+  "ROSTER_OFFICER",
+];
+const staffWriteRoles = [
+  "SUPER_ADMIN",
+  "HOSPITAL_ADMIN",
+  "HR_MANAGER",
+  "PAYROLL_OFFICER",
+];
+const workforceSelfServiceRoles = [...workforceReadRoles, "STAFF"];
+
+function WorkforceRoleGate({
+  allowedRoles,
+  children,
+}: {
+  allowedRoles: string[];
+  children: ReactNode;
+}) {
+  const { data: identity, isLoading } = useGetIdentity<{
+    role?: string;
+    roles?: string[];
+  }>();
+  if (isLoading) return <RouteLoading label="Checking access..." />;
+  const roles = new Set(identity?.roles ?? []);
+  if (identity?.role) roles.add(identity.role);
+  return allowedRoles.some((role) => roles.has(role))
+    ? children
+    : <Navigate to="/dashboard" replace />;
+}
+
 function App() {
   const [showSplash, setShowSplash] = useState(true);
   const notificationProvider = useNotificationProvider();
   const [info, setInfo] = useState<SetupRecord | null>(null);
-  const [hostingStatus, setHostingStatus] = useState<"checking" | "ready" | "unavailable">("checking");
   const [splashLogoLoaded, setSplashLogoLoaded] = useState(false);
 
   useEffect(() => {
@@ -202,6 +236,7 @@ function App() {
                     label: resource.label,
                     icon: <resource.icon className="h-4 w-4" />,
                     canDelete: resource.canDelete,
+                    allowedRoles: resource.allowedRoles,
                   },
                 }))}
                 options={{
@@ -244,15 +279,10 @@ function App() {
                           redirectOnFail="/login"
                         >
                           <>
-                            <HostingCriticalInfoModal
-                              setupInfo={info}
-                              onStatusChange={setHostingStatus}
-                            />
-                            {hostingStatus === "ready" ? (
-                              <Layout>
-                                <Outlet />
-                              </Layout>
-                            ) : null}
+                            <HostingCriticalInfoModal setupInfo={info} />
+                            <Layout>
+                              <Outlet />
+                            </Layout>
                           </>
                         </Authenticated>
                       }
@@ -263,17 +293,17 @@ function App() {
                       />
                       <Route path="dashboard" element={<DashboardPage />} />
                       <Route path="staff">
-                        <Route index element={<StaffList />} />
-                        <Route path="create" element={<StaffCreate />} />
-                        <Route path="edit/:id" element={<StaffEdit />} />
-                        <Route path="show/:id" element={<StaffShow />} />
+                        <Route index element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffList /></WorkforceRoleGate>} />
+                        <Route path="create" element={<WorkforceRoleGate allowedRoles={staffWriteRoles}><StaffCreate /></WorkforceRoleGate>} />
+                        <Route path="edit/:id" element={<WorkforceRoleGate allowedRoles={staffWriteRoles}><StaffEdit /></WorkforceRoleGate>} />
+                        <Route path="show/:id" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffShow /></WorkforceRoleGate>} />
                       </Route>
-                      <Route path="org-units" element={<OrgUnitList />} />
-                      <Route path="transfers" element={<TransfersPage />} />
-                      <Route path="rosters" element={<RostersPage />} />
-                      <Route path="my-schedule" element={<MySchedulePage />} />
-                      <Route path="public-holidays" element={<PublicHolidaysPage />} />
-                      <Route path="staffing-requirements" element={<StaffingRequirementsPage />} />
+                      <Route path="org-units" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><OrgUnitList /></WorkforceRoleGate>} />
+                      <Route path="transfers" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><TransfersPage /></WorkforceRoleGate>} />
+                      <Route path="rosters" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><RostersPage /></WorkforceRoleGate>} />
+                      <Route path="my-schedule" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MySchedulePage /></WorkforceRoleGate>} />
+                      <Route path="public-holidays" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><PublicHolidaysPage /></WorkforceRoleGate>} />
+                      <Route path="staffing-requirements" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffingRequirementsPage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />

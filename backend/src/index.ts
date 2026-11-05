@@ -8,20 +8,34 @@ const PORT = 8000;
 
 const start = async () => {
   await ensureAuditPartitions();
-  await seedGhanaPublicHolidays();
+  try {
+    await seedGhanaPublicHolidays();
+  } catch (error) {
+    console.error("Failed to seed Ghana public holidays at startup", error);
+  }
+
+  try {
+    await materializeFixedScheduleWindow();
+  } catch (error) {
+    console.error("Failed to materialize fixed weekday schedules", error);
+  }
 
   app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 
-  materializeFixedScheduleWindow().catch((error) => {
-    console.error("Failed to materialize fixed weekday schedules", error);
-  });
+  setInterval(async () => {
+    try {
+      await seedGhanaPublicHolidays();
+    } catch (error) {
+      console.error("Failed to refresh Ghana public holidays", error);
+    }
 
-  setInterval(() => {
-    materializeFixedScheduleWindow().catch((error) => {
+    try {
+      await materializeFixedScheduleWindow();
+    } catch (error) {
       console.error("Failed to refresh fixed weekday schedules", error);
-    });
+    }
   }, 24 * 60 * 60 * 1000);
 
   setInterval(() => {

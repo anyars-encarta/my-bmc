@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -33,8 +33,6 @@ const normalizeEmptyStaffInputs = (value: unknown) => {
     "defaultShiftTypeId",
     "jobRoleId",
     "orgUnitId",
-    "hireDate",
-    "terminationDate",
     "userId",
   ]) {
     if (typeof payload[field] === "string" && payload[field].trim() === "") {
@@ -43,6 +41,11 @@ const normalizeEmptyStaffInputs = (value: unknown) => {
   }
   if (typeof payload.badgeNumber === "string" && payload.badgeNumber.trim() === "") {
     payload.badgeNumber = null;
+  }
+  for (const field of ["hireDate", "terminationDate"]) {
+    if (typeof payload[field] === "string" && payload[field].trim() === "") {
+      payload[field] = null;
+    }
   }
   return payload;
 };
@@ -130,6 +133,38 @@ const ensureStaffRules = async (payload: Partial<typeof staff.$inferInsert>) => 
     );
   }
   await validateJobRoleCategory(payload.jobRoleId, category);
+};
+
+const ensureStaffUserLinkAvailable = async (
+  userId: string | null | undefined,
+  staffId?: string,
+  currentUserId?: string | null,
+) => {
+  if (!userId) return;
+
+  const [account] = await db
+    .select({ id: user.id, status: user.status })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!account) {
+    throw validationError("The selected login account could not be found.", "STAFF_USER_NOT_FOUND");
+  }
+  if (account.status !== "active" && userId !== currentUserId) {
+    throw validationError("Only active login accounts can be linked.", "STAFF_USER_INACTIVE");
+  }
+
+  const existingLink = staffId
+    ? and(eq(staff.userId, userId), ne(staff.id, staffId))
+    : eq(staff.userId, userId);
+  const [linkedStaff] = await db
+    .select({ id: staff.id })
+    .from(staff)
+    .where(existingLink)
+    .limit(1);
+  if (linkedStaff) {
+    throw conflict("The selected login account is already linked to another staff member.", "STAFF_USER_ALREADY_LINKED");
+  }
 };
 
 const attachCurrentOrgUnits = async <T extends { id: string }>(rows: T[]) => {
@@ -308,6 +343,7 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
     }
 
     await ensureStaffRules(parsed.data);
+    await ensureStaffUserLinkAvailable(parsed.data.userId);
 
     if (parsed.data.orgUnitId) {
       const [unit] = await db
@@ -352,6 +388,69 @@ router.post("/", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) 
     }
 
     res.status(201).json({ data: sanitizeStaffRecord(created, req.user?.roles ?? []), warnings });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/linkable-users", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, next) => {
+  try {
+    const parsed = z.object({ staffId: z.string().uuid().optional() }).safeParse(req.query);
+    if (!parsed.success) {
+      throw validationError("Provide a valid staff record.", "STAFF_ID_INVALID");
+    }
+
+    let currentUserId: string | null = null;
+    if (parsed.data.staffId) {
+      const [existingStaff] = await db
+        .select({ userId: staff.userId })
+        .from(staff)
+        .where(eq(staff.id, parsed.data.staffId))
+        .limit(1);
+      if (!existingStaff) {
+        throw notFound("Staff member not found.", "STAFF_NOT_FOUND");
+      }
+      currentUserId = existingStaff.userId;
+    }
+
+    const query = parseListQuery(req, {
+      sortable: ["name", "email"],
+      filterable: [],
+      defaultSort: "name",
+      ignoredQueryParams: ["staffId"],
+    });
+    const statusFilter = currentUserId
+      ? or(eq(user.status, "active"), eq(user.id, currentUserId))
+      : eq(user.status, "active");
+    const assignmentQuery = db
+      .select({ id: staff.id })
+      .from(staff)
+      .where(parsed.data.staffId
+        ? and(eq(staff.userId, user.id), ne(staff.id, parsed.data.staffId))
+        : eq(staff.userId, user.id));
+    const searchFilter = query.q
+      ? or(ilike(user.name, `%${query.q}%`), ilike(user.email, `%${query.q}%`))
+      : undefined;
+    const where = and(statusFilter, notExists(assignmentQuery), searchFilter);
+    const sort = query.sort[0] ?? { field: "name", descending: false };
+    const sortColumn = sort.field === "email" ? user.email : user.name;
+    const [accounts, totalRows] = await Promise.all([
+      db
+        .select({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+        })
+        .from(user)
+        .where(where)
+        .orderBy(sort.descending ? desc(sortColumn) : asc(sortColumn))
+        .limit(query.limit)
+        .offset(query.offset),
+      db.select({ total: count() }).from(user).where(where),
+    ]);
+
+    res.json(toPageResponse(accounts, query, Number(totalRows[0]?.total ?? 0)));
   } catch (error) {
     next(error);
   }
@@ -409,6 +508,15 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       ...Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value !== undefined)),
     };
     await ensureStaffRules(mergedForValidation);
+    await ensureStaffUserLinkAvailable(parsed.data.userId, staffId, existing.userId);
+    const wasFixedWeekdayStaff =
+      existing.status === "active" &&
+      existing.staffCategory === "NON_CLINICAL" &&
+      existing.scheduleMode === "FIXED_WEEKDAY";
+    const isFixedWeekdayStaff =
+      mergedForValidation.status === "active" &&
+      mergedForValidation.staffCategory === "NON_CLINICAL" &&
+      mergedForValidation.scheduleMode === "FIXED_WEEKDAY";
 
     const [updated] = await db
       .update(staff)
@@ -421,7 +529,33 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
     }
 
     const [withUnit] = await attachCurrentOrgUnits([updated]);
-    res.json({ data: sanitizeStaffRecord(withUnit ?? { ...updated, orgUnitId: null }, req.user?.roles ?? []) });
+    const warnings: string[] = [];
+    if (wasFixedWeekdayStaff && !isFixedWeekdayStaff) {
+      try {
+        await db.update(rosterEntry)
+          .set({ status: "CANCELLED", version: sql`${rosterEntry.version} + 1` })
+          .where(and(
+            eq(rosterEntry.staffId, staffId),
+            eq(rosterEntry.source, "AUTO_FIXED"),
+            eq(rosterEntry.status, "ACTIVE"),
+            gte(rosterEntry.plannedStart, new Date()),
+          ));
+      } catch (error) {
+        console.error("Staff record updated, but future fixed weekday schedules could not be cancelled.", error);
+        warnings.push("Staff record updated, but future automatic weekday shifts could not be cancelled.");
+      }
+    } else if (isFixedWeekdayStaff) {
+      try {
+        await materializeFixedScheduleForStaff(staffId);
+      } catch (error) {
+        console.error("Staff record updated, but the fixed weekday schedule could not be refreshed.", error);
+        warnings.push("Staff record updated, but the automatic weekday schedule could not be refreshed.");
+      }
+    }
+    res.json({
+      data: sanitizeStaffRecord(withUnit ?? { ...updated, orgUnitId: null }, req.user?.roles ?? []),
+      warnings,
+    });
   } catch (error) {
     next(error);
   }
@@ -497,7 +631,13 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
     await db.insert(workforceEvent).values({
       eventType: "StaffDeactivated",
       aggregateId: staffId,
-      payload: { staffId, reason, linkedUserWasActive, deactivatedBy: req.user?.id ?? null },
+      payload: {
+        staffId,
+        reason,
+        linkedUserId: existing.userId,
+        linkedUserWasActive,
+        deactivatedBy: req.user?.id ?? null,
+      },
     });
 
     res.json({ data: { ...updated, deactivationReason: reason } });
@@ -531,48 +671,92 @@ router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
       throw conflict("Only inactive staff can be reactivated.", "STAFF_NOT_INACTIVE");
     }
 
-    const [deactivationEvent] = await db
-      .select({ payload: workforceEvent.payload })
-      .from(workforceEvent)
-      .where(
-        and(
-          eq(workforceEvent.eventType, "StaffDeactivated"),
-          eq(workforceEvent.aggregateId, staffId),
-        ),
+    type ReactivationResult = {
+      staff_id: string;
+      linked_user_reactivated: boolean;
+      linked_user_was_active: boolean;
+      has_deactivation_event: boolean;
+      has_linked_user_status: boolean;
+      linked_user_id_matches: boolean;
+    };
+    const result = await db.execute(sql<ReactivationResult>`
+      WITH prior_deactivation AS MATERIALIZED (
+        SELECT payload
+        FROM workforce_event
+        WHERE event_type = 'StaffDeactivated'
+          AND aggregate_id = ${staffId}
+        ORDER BY occurred_at DESC
+        LIMIT 1
+      ),
+      updated_staff AS (
+        UPDATE staff
+        SET status = 'active',
+            termination_date = NULL,
+            updated_at = now()
+        WHERE id = ${staffId}
+          AND status = 'inactive'
+        RETURNING id, user_id, status
+      ),
+      updated_linked_user AS (
+        UPDATE "user" AS linked
+        SET status = 'active',
+            updated_at = now()
+        FROM updated_staff AS person
+        JOIN prior_deactivation AS event ON TRUE
+        WHERE linked.id = person.user_id
+          AND linked.id = event.payload->>'linkedUserId'
+          AND event.payload->>'linkedUserWasActive' = 'true'
+        RETURNING linked.id
+      ),
+      inserted_event AS (
+        INSERT INTO workforce_event (event_type, aggregate_id, payload)
+        SELECT
+          'StaffReactivated',
+          person.id,
+          jsonb_build_object(
+            'staffId', person.id,
+            'reason', ${reason},
+            'linkedUserReactivated', EXISTS (SELECT 1 FROM updated_linked_user),
+            'reactivatedBy', ${req.user?.id ?? null}
+          )
+        FROM updated_staff AS person
+        RETURNING aggregate_id
       )
-      .orderBy(desc(workforceEvent.occurredAt))
-      .limit(1);
-    const linkedUserWasActive = deactivationEvent?.payload.linkedUserWasActive === true;
-
-    const [updated] = await db
-      .update(staff)
-      .set({ status: "active", terminationDate: null, updatedAt: new Date() })
-      .where(and(eq(staff.id, staffId), eq(staff.status, "inactive")))
-      .returning();
-    if (!updated) {
+      SELECT
+        person.id AS staff_id,
+        EXISTS (SELECT 1 FROM updated_linked_user) AS linked_user_reactivated,
+        COALESCE((
+          SELECT event.payload->>'linkedUserWasActive' = 'true'
+          FROM prior_deactivation AS event
+        ), false) AS linked_user_was_active,
+        EXISTS (SELECT 1 FROM prior_deactivation) AS has_deactivation_event,
+        COALESCE((
+          SELECT event.payload ? 'linkedUserWasActive'
+          FROM prior_deactivation AS event
+        ), false) AS has_linked_user_status,
+        COALESCE((
+          SELECT event.payload->>'linkedUserId' = person.user_id
+          FROM prior_deactivation AS event
+        ), false) AS linked_user_id_matches
+      FROM updated_staff AS person
+      JOIN inserted_event ON inserted_event.aggregate_id = person.id
+    `);
+    const reactivated = result.rows[0];
+    if (!reactivated) {
       throw conflict("Staff status changed before reactivation could be completed.", "STAFF_STATUS_CHANGED");
     }
 
-    const linkedUserReactivated = Boolean(existing.userId && linkedUserWasActive);
-    if (linkedUserReactivated && existing.userId) {
-      await db
-        .update(user)
-        .set({ status: "active", updatedAt: new Date() })
-        .where(eq(user.id, existing.userId));
-    }
-
-    await db.insert(workforceEvent).values({
-      eventType: "StaffReactivated",
-      aggregateId: staffId,
-      payload: {
-        staffId,
-        reason,
-        linkedUserReactivated,
-        reactivatedBy: req.user?.id ?? null,
-      },
-    });
-
     const warnings: string[] = [];
+    if (
+      existing.userId &&
+      (
+        !reactivated.has_deactivation_event ||
+        !reactivated.has_linked_user_status ||
+        !reactivated.linked_user_id_matches
+      )
+    ) {
+      warnings.push("The linked login may need manual re-enabling because its prior status or staff linkage could not be verified.");
+    }
     try {
       await materializeFixedScheduleForStaff(staffId);
     } catch (error) {
@@ -580,7 +764,15 @@ router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
       warnings.push("Staff member reactivated, but the automatic schedule could not be refreshed.");
     }
 
-    res.json({ data: { ...updated, linkedUserReactivated }, warnings });
+    res.json({
+      data: {
+        id: reactivated.staff_id,
+        status: "active",
+        linkedUserReactivated: reactivated.linked_user_reactivated,
+        linkedUserWasActive: reactivated.linked_user_was_active,
+      },
+      warnings,
+    });
   } catch (error) {
     next(error);
   }

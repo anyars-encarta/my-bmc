@@ -47,13 +47,9 @@ const getDaysUntilExpiry = (
 
 type HostingCriticalInfoModalProps = {
   setupInfo?: SetupRecord | null;
-  onStatusChange?: (status: "checking" | "ready" | "unavailable") => void;
 };
 
-const HostingCriticalInfoModal = ({
-  setupInfo = null,
-  onStatusChange,
-}: HostingCriticalInfoModalProps) => {
+const HostingCriticalInfoModal = ({ setupInfo = null }: HostingCriticalInfoModalProps) => {
   const navigate = useNavigate();
   const [systemSettings, setSystemSettings] = useState<SetupRecord | null>(setupInfo);
   const [hasFetchedSettings, setHasFetchedSettings] = useState(false);
@@ -227,29 +223,21 @@ const HostingCriticalInfoModal = ({
 
   const isExpired = isHostingExpired;
   const shouldBlockProtectedContent = isExpired;
-  const accessStatus = !hasFetchedSettings || expiryCheckStatus === "checking"
-    ? "checking"
-    : !systemSettings || expiryCheckStatus === "unavailable"
-      ? "unavailable"
-      : isExpired
-        ? "checking"
-        : "ready";
-
-  useEffect(() => {
-    onStatusChange?.(accessStatus);
-    return () => onStatusChange?.("checking");
-  }, [accessStatus, onStatusChange]);
 
   return (
     <>
     {shouldBlockProtectedContent ? (
-      <div className="flex min-h-[50vh] items-center justify-center bg-background p-6">
+      <div className="fixed inset-0 z-100 flex items-center justify-center bg-background p-6">
         <div className="w-full max-w-md space-y-3 rounded-lg border bg-card p-6 text-center shadow-lg">
           <p className="font-semibold">
-            {expiryCheckStatus === "checking" ? "Checking hosting status" : "Hosting status unavailable"}
+            {expiryCheckStatus === "checking"
+              ? "Checking hosting status"
+              : expiryCheckStatus === "unavailable"
+                ? "Hosting status could not be revalidated"
+                : "Hosting has expired"}
           </p>
           <p className="text-sm text-muted-foreground">
-            Protected pages are unavailable until the facility hosting status can be confirmed.
+            Hosting expiry blocks access to protected pages until the facility renews its hosting.
           </p>
           <Button
             type="button"

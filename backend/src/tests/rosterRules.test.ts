@@ -71,6 +71,23 @@ test("non-clinical staff cannot be rostered on weekends or public holidays", () 
   assert.ok(violations.some((violation) => violation.code === "NON_CLINICAL_NON_WORKING_DAY"));
 });
 
+test("non-clinical staff cannot be rostered on a weekday public holiday", () => {
+  const violations = validateRoster(baseContext({
+    staff: [{
+      id: staffId,
+      employeeId: "EMP-001",
+      firstName: "Office",
+      lastName: "Staff",
+      staffCategory: "NON_CLINICAL",
+      scheduleMode: "ROSTERED",
+      jobRoleId: null,
+    }],
+    holidays: new Set(["2026-03-03"]),
+    entries: [entry("2026-03-03", "morning", "2026-03-03T07:00:00Z", "2026-03-03T14:00:00Z")],
+  }));
+  assert.ok(violations.some((violation) => violation.code === "NON_CLINICAL_NON_WORKING_DAY"));
+});
+
 test("minimum rest blocks a Night-to-Morning turn and accepts a reasoned HR override", () => {
   const entries = [
     entry("2026-03-02", "night", "2026-03-02T20:00:00Z", "2026-03-03T07:00:00Z"),
@@ -86,6 +103,29 @@ test("minimum rest blocks a Night-to-Morning turn and accepts a reasoned HR over
     entries: overridden,
     allowRestOverride: true,
   })).some((violation) => violation.code === "MINIMUM_REST"));
+});
+
+test("a rest override reason must be on the in-period shift that owns the gap", () => {
+  const violations = validateRoster(baseContext({
+    entries: [
+      { ...entry("2026-03-02", "night", "2026-03-02T20:00:00Z", "2026-03-03T07:00:00Z"), overrideReason: "Reason on the preceding shift." },
+      entry("2026-03-03", "morning", "2026-03-03T07:00:00Z", "2026-03-03T14:00:00Z"),
+    ],
+    allowRestOverride: true,
+  }));
+  assert.ok(violations.some((violation) => violation.code === "MINIMUM_REST"));
+});
+
+test("separate staffing shortages for different roles are retained", () => {
+  const violations = validateRoster(baseContext({
+    period: { orgUnitId: unitId, startDate: "2026-03-02", endDate: "2026-03-02" },
+    requirements: [
+      { shiftTypeId: "morning", jobRoleId: "role-nurse", jobRoleName: "Nurse", minStaff: 1 },
+      { shiftTypeId: "morning", jobRoleId: "role-doctor", jobRoleName: "Doctor", minStaff: 1 },
+    ],
+  })).filter((violation) => violation.code === "STAFFING_REQUIREMENT");
+  assert.equal(violations.length, 2);
+  assert.notEqual(violations[0]?.message, violations[1]?.message);
 });
 
 test("touching shift boundaries do not count as overlap but still enforce minimum rest", () => {
@@ -108,7 +148,9 @@ test("coverage is a draft warning and a publish-blocking error; 24-hour units re
   });
   const draftViolations = validateRoster(context);
   assert.ok(draftViolations.some((violation) => violation.code === "STAFFING_REQUIREMENT" && violation.level === "warning"));
-  assert.equal(draftViolations.filter((violation) => violation.code === "24H_SHIFT_COVERAGE").length, 2);
+  const draftCoverageViolations = draftViolations.filter((violation) => violation.code === "24H_SHIFT_COVERAGE");
+  assert.equal(draftCoverageViolations.length, 2);
+  assert.ok(draftCoverageViolations.every((violation) => violation.level === "warning"));
 
   const publishViolations = validateRoster({ ...context, publishing: true });
   assert.ok(publishViolations.some((violation) => violation.code === "STAFFING_REQUIREMENT" && violation.level === "error"));

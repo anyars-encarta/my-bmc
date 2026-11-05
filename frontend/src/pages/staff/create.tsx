@@ -28,6 +28,7 @@ import PageLoader from "@/components/PageLoader";
 import UploadWidget from "@/components/upload-widget";
 import { BACKEND_BASE_URL } from "@/constants";
 import { createAuthHeaders } from "@/providers/me";
+import { fetchStaffLoginAccounts, type StaffLoginAccount } from "@/lib/staff-login-users";
 import type { JobRoleRecord, OrgUnitRecord, ShiftTypeRecord, StaffCategory, ScheduleMode } from "@/types/domain";
 import type { UploadWidgetValue } from "@/types";
 
@@ -37,6 +38,7 @@ type StaffCreateValues = {
   imageUrl?: string;
   email: string;
   employeeId: string;
+  userId?: string;
   momoNumber: string;
   momoName?: string;
   department?: string;
@@ -61,6 +63,7 @@ export const StaffCreate = () => {
   const [orgUnits, setOrgUnits] = useState<OrgUnitRecord[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRoleRecord[]>([]);
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeRecord[]>([]);
+  const [loginAccounts, setLoginAccounts] = useState<StaffLoginAccount[]>([]);
 
   const form = useForm<BaseRecord, HttpError, StaffCreateValues>({
     refineCoreProps: {},
@@ -70,6 +73,7 @@ export const StaffCreate = () => {
       imageUrl: "",
       email: "",
       employeeId: "",
+      userId: "",
       momoNumber: "",
       momoName: "",
       department: "",
@@ -141,14 +145,27 @@ export const StaffCreate = () => {
       }
     };
 
+    const loadLoginAccounts = async () => {
+      try {
+        setLoginAccounts(await fetchStaffLoginAccounts());
+      } catch (error) {
+        notify?.({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to load eligible login accounts.",
+        });
+      }
+    };
+
     loadReferences();
+    loadLoginAccounts();
   }, [notify]);
 
   const filteredJobRoles = jobRoles.filter((role) => role.staffCategory === selectedCategory);
 
-  const onSubmit: SubmitHandler<StaffCreateValues> = (values) => {
-    onFinish({
+  const onSubmit: SubmitHandler<StaffCreateValues> = async (values) => {
+    await onFinish({
       ...values,
+      userId: values.userId || undefined,
       orgUnitId: values.orgUnitId || undefined,
       defaultShiftTypeId: values.defaultShiftTypeId || undefined,
       jobRoleId: values.jobRoleId || undefined,
@@ -189,6 +206,18 @@ export const StaffCreate = () => {
           />
           <TextField form={form} name="email" label="Email" type="email" />
           <TextField form={form} name="employeeId" label="Employee ID" />
+          <SelectField
+            form={form}
+            name="userId"
+            label="Linked Login Account (optional)"
+            required={false}
+            searchable
+            options={loginAccounts.map((account) => ({
+              value: account.id,
+              label: `${account.name} — ${account.email}`,
+              keywords: `${account.name} ${account.email}`,
+            }))}
+          />
           <TextField form={form} name="momoNumber" label="MoMo Number" />
           <TextField form={form} name="momoName" label="MoMo Name" />
           <TextField form={form} name="phone" label="Phone" />
@@ -296,7 +325,7 @@ type SelectFieldProps = {
   form: ReturnType<typeof useForm<BaseRecord, HttpError, StaffCreateValues>>;
   name: keyof StaffCreateValues;
   label: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; keywords?: string }>;
   required?: boolean;
   searchable?: boolean;
 };
