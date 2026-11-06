@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import auditLogRoutes from "./auditLog.js";
 import assignmentRoutes from "./assignments.js";
+import attendanceRoutes from "./attendance.js";
 import consentRoutes from "./consent.js";
 import facilityRoutes from "./facility.js";
 import jobRoleRoutes from "./jobRoles.js";
@@ -17,6 +18,7 @@ const router = Router();
 router.use("/me", meRoutes);
 router.use("/users", usersRoutes);
 router.use("/staff", staffRoutes);
+router.use("/", attendanceRoutes);
 router.use("/shift-types", shiftTypeRoutes);
 router.use("/", rosterRoutes);
 router.use("/job-roles", jobRoleRoutes);

@@ -631,6 +631,23 @@ interface DeviceAdapter {
 }
 ```
 
+In the Express/Drizzle implementation, `/api/v1/device/**` is mounted before user-session authentication and uses per-device key authentication and rate limiting. Device keys are shown only at registration/rotation and stored as scrypt hashes. Batch uploads persist immutable punch event data; staff resolution and processing fields are mutable for safe processing/retry. Punch processing is scheduled after the acceptance response, so a failed background attempt remains unprocessed for retry. The Neon HTTP driver is not used with transactions.
+
+Run the fingerprint-terminal simulator against a registered device with three active fingerprint credentials:
+
+```powershell
+$env:ATTENDANCE_API_URL = "http://localhost:3000/api/v1"
+$env:ATTENDANCE_DEVICE_CODE = "FP-WARD-A1"
+$env:ATTENDANCE_DEVICE_KEY = "<one-time device key>"
+$env:ATTENDANCE_SIMULATOR_DATE = "2026-10-12"
+$env:ATTENDANCE_SIMULATOR_MORNING_CREDENTIAL = "<morning badge PIN>"
+$env:ATTENDANCE_SIMULATOR_AFTERNOON_CREDENTIAL = "<afternoon badge PIN>"
+$env:ATTENDANCE_SIMULATOR_NIGHT_CREDENTIAL = "<night badge PIN>"
+npm run simulate:terminal
+```
+
+Re-running the same date replays identical event IDs, exercising batch idempotency. `GET /api/v1/device/ping?deviceTime=<ISO-8601>` returns facility server time and clock skew for terminal correction.
+
 Other endpoints:
 
 | Method | Path | Purpose | Role |

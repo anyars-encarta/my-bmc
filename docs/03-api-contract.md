@@ -175,7 +175,8 @@ Rostering writes use the Neon HTTP driver without `db.transaction()`. Bulk entry
 |---|---|---|---|
 | POST | `/device/punches` | DEVICE | batch, idempotent on `(device, deviceEventId)`; per-item result |
 | GET | `/device/ping` | DEVICE | heartbeat; returns server time for clock-skew correction |
-| GET/POST/PATCH | `/devices` · `/devices/:id/rotate-key` · `/disable` | HR SA | key shown once |
+| GET/POST/PATCH | `/devices` | HR SA | register/update devices; registration returns key once |
+| POST | `/devices/:id/rotate-key` · `/devices/:id/disable` | HR SA | rotation returns a one-time key; disable immediately revokes access |
 | POST/GET | `/staff/:id/credentials` · `/:cid/revoke` · `/staff/:id/fingerprint-enrolment` | HR | card issue returns printable QR/barcode |
 | GET | `/attendance?unitId&staffId&from&to` | HR UM(scoped) AC(read) | |
 | GET | `/me/attendance` | ST | |
@@ -184,6 +185,8 @@ Rostering writes use the Neon HTTP driver without `db.transaction()`. Bulk entry
 | POST | `/attendance/manual-punch` | UM | when a device is down; approval required |
 | GET | `/attendance/summary?month&unitId` | HR PO AC | feeds payroll |
 | POST | `/kiosk/punch` | KIOSK device | browser kiosk variant of device punch |
+
+Device punch batches accept up to 500 items and return an outcome per item. `(device_id, device_event_id)` is the idempotency key; credentials are checked before accepting new events, future timestamps over five minutes are rejected, and older offline punches are accepted with clock-skew exceptions. `GET /device/ping?deviceTime=<ISO-8601>` returns facility server time and the measured skew.
 
 ### Leave & overtime — Sprint 17
 

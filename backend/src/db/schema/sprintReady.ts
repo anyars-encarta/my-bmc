@@ -15,6 +15,7 @@ import {
   timestamp,
   uuid,
   varchar,
+  index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -410,7 +411,12 @@ export const staffCredential = pgTable("staff_credential", {
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   revokedReason: text("revoked_reason"),
-});
+  enrollmentNote: text("enrollment_note"),
+}, (table) => ({
+  activeCredential: uniqueIndex("staff_credential_active_uq")
+    .on(table.credentialType, table.credentialRef)
+    .where(sql`${table.status} = 'ACTIVE'`),
+}));
 
 export type StaffCredential = typeof staffCredential.$inferSelect;
 export type NewStaffCredential = typeof staffCredential.$inferInsert;
@@ -428,7 +434,11 @@ export const attendanceDevice = pgTable("attendance_device", {
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   lastClockSkewSeconds: integer("last_clock_skew_seconds"),
-});
+  rateLimitWindowStart: timestamp("rate_limit_window_start", { withTimezone: true }),
+  rateLimitCount: integer("rate_limit_count").default(0).notNull(),
+}, (table) => ({
+  codeUnique: uniqueIndex("attendance_device_code_key").on(table.code),
+}));
 
 export type AttendanceDevice = typeof attendanceDevice.$inferSelect;
 export type NewAttendanceDevice = typeof attendanceDevice.$inferInsert;
@@ -447,7 +457,14 @@ export const punchLog = pgTable("punch_log", {
   rawPayload: jsonb("raw_payload"),
   result: varchar("result", { length: 32 }).default('RECEIVED').notNull(),
   processed: boolean("processed").default(false).notNull(),
-});
+}, (table) => ({
+  deviceEventUnique: uniqueIndex("punch_log_device_id_device_event_id_key")
+    .on(table.deviceId, table.deviceEventId),
+  staffTime: index("punch_log_staff_time_idx").on(table.staffId, table.punchedAt),
+  unprocessed: index("punch_log_unprocessed_idx")
+    .on(table.receivedAt)
+    .where(sql`${table.processed} = false`),
+}));
 
 export type PunchLog = typeof punchLog.$inferSelect;
 export type NewPunchLog = typeof punchLog.$inferInsert;
@@ -469,7 +486,15 @@ export const attendanceRecord = pgTable("attendance_record", {
   earlyLeaveMinutes: integer("early_leave_minutes").default(0).notNull(),
   overtimeMinutes: integer("overtime_minutes").default(0).notNull(),
   version: integer("version").default(0).notNull(),
-});
+}, (table) => ({
+  oneOpenPerStaff: uniqueIndex("attendance_one_open_per_staff")
+    .on(table.staffId)
+    .where(sql`${table.status} = 'OPEN'`),
+  onePerRosterEntry: uniqueIndex("attendance_one_per_roster_entry")
+    .on(table.rosterEntryId)
+    .where(sql`${table.rosterEntryId} IS NOT NULL`),
+  attendanceDate: index("attendance_date_idx").on(table.attendanceDate, table.orgUnitId),
+}));
 
 export type AttendanceRecord = typeof attendanceRecord.$inferSelect;
 export type NewAttendanceRecord = typeof attendanceRecord.$inferInsert;

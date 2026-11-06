@@ -42,6 +42,7 @@ import { StaffingRequirementsPage } from "./pages/staffing-requirements/index";
 import { RostersPage } from "./pages/rosters";
 import { MySchedulePage } from "./pages/my-schedule";
 import { PublicHolidaysPage } from "./pages/public-holidays";
+import { DevicesPage } from "./pages/devices";
 import CreateUser from "./pages/users/create";
 import EditUser from "./pages/users/edit";
 import ListUsers from "./pages/users/list";
@@ -311,6 +312,7 @@ function App() {
                       <Route path="my-schedule" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MySchedulePage /></WorkforceRoleGate>} />
                       <Route path="public-holidays" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><PublicHolidaysPage /></WorkforceRoleGate>} />
                       <Route path="staffing-requirements" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffingRequirementsPage /></WorkforceRoleGate>} />
+                      <Route path="devices" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><DevicesPage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />
