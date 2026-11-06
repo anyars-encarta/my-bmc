@@ -5,12 +5,14 @@ import { z } from "zod";
 import { db } from "../../db/index.js";
 import {
   insertStaffSchema,
+  consent,
   jobRole,
   orgUnit,
   rosterEntry,
   shiftType,
   staff,
   staffAssignment,
+  staffCredential,
   staffLicense,
   updateStaffSchema,
   workforceEvent,
@@ -84,6 +86,26 @@ const staffCreateSchema = z.preprocess(
     }),
 );
 const staffUpdateInputSchema = z.preprocess(normalizeEmptyStaffInputs, updateStaffSchema);
+const staffSqlColumns: Record<string, string> = {
+  firstName: "first_name",
+  lastName: "last_name",
+  email: "email",
+  phone: "phone",
+  employeeId: "employee_id",
+  department: "department",
+  position: "position",
+  momoNumber: "momo_number",
+  momoName: "momo_name",
+  imageUrl: "image_url",
+  staffCategory: "staff_category",
+  scheduleMode: "schedule_mode",
+  defaultShiftTypeId: "default_shift_type_id",
+  jobRoleId: "job_role_id",
+  badgeNumber: "badge_number",
+  hireDate: "hire_date",
+  terminationDate: "termination_date",
+  userId: "user_id",
+};
 
 const parseRouteId = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
@@ -555,11 +577,90 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
       ));
     }
 
-    const [updated] = await db
-      .update(staff)
-      .set({ ...parsed.data, updatedAt: new Date() })
-      .where(eq(staff.id, staffId))
-      .returning();
+    let updated: typeof staff.$inferSelect | undefined;
+    if (
+      parsed.data.badgeNumber !== undefined &&
+      parsed.data.badgeNumber !== existing.badgeNumber
+    ) {
+      const currentConsent = sql`
+        COALESCE((
+          SELECT latest.status = 'GRANTED' AND latest.withdrawn_at IS NULL
+          FROM consent AS latest
+          WHERE latest.subject_type = 'STAFF'
+            AND latest.subject_id = ${staffId}
+            AND latest.consent_type = 'BIOMETRIC_ATTENDANCE'
+          ORDER BY latest.created_at DESC
+          LIMIT 1
+        ), false)
+      `;
+      const hasActiveFingerprint = sql`
+        EXISTS (
+          SELECT 1
+          FROM staff_credential AS active_fingerprint
+          WHERE active_fingerprint.staff_id = person.id
+            AND active_fingerprint.credential_type = 'FINGERPRINT'
+            AND active_fingerprint.status = 'ACTIVE'
+        )
+      `;
+      const assignments = Object.entries(parsed.data)
+        .filter(([, value]) => value !== undefined)
+        .map(([field, value]) => {
+          const column = staffSqlColumns[field];
+          if (!column) throw new Error(`Unsupported staff update field: ${field}`);
+          return sql`${sql.raw(`"${column}"`)} = ${value}`;
+        });
+      assignments.push(sql`updated_at = now()`);
+
+      const pinUpdate = await db.execute(sql<{ id: string }>`
+        WITH current_staff AS MATERIALIZED (
+          SELECT person.id,
+            ${hasActiveFingerprint} AS has_active_fingerprint,
+            ${currentConsent} AS biometric_consent_granted
+          FROM staff AS person
+          WHERE person.id = ${staffId}
+        ),
+        updated_staff AS (
+          UPDATE staff AS person
+          SET ${sql.join(assignments, sql`, `)}
+          FROM current_staff
+          WHERE person.id = current_staff.id
+            AND (
+              NOT current_staff.has_active_fingerprint
+              OR (
+                current_staff.biometric_consent_granted
+                AND CAST(${parsed.data.badgeNumber} AS text) IS NOT NULL
+              )
+            )
+          RETURNING person.id
+        ),
+        updated_fingerprint AS (
+          UPDATE staff_credential AS credential
+          SET credential_ref = ${parsed.data.badgeNumber},
+              issued_at = now()
+          FROM updated_staff
+          WHERE credential.staff_id = updated_staff.id
+            AND credential.credential_type = 'FINGERPRINT'
+            AND credential.status = 'ACTIVE'
+          RETURNING credential.id
+        )
+        SELECT updated_staff.id
+        FROM updated_staff
+        LEFT JOIN updated_fingerprint ON TRUE
+      `);
+      if (!pinUpdate.rows[0]) {
+        throw conflict(
+          "Changing the badge PIN for an enrolled fingerprint requires current biometric consent and a non-empty PIN.",
+          "FINGERPRINT_PIN_UPDATE_REQUIRES_CONSENT",
+        );
+      }
+      [updated] = await db.select().from(staff).where(eq(staff.id, staffId)).limit(1);
+    } else {
+      [updated] = await db
+        .update(staff)
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(eq(staff.id, staffId))
+        .returning();
+    }
 
     if (!updated) {
       throw notFound("Staff member not found.", "STAFF_NOT_FOUND");

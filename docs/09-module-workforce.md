@@ -469,8 +469,8 @@ CREATE TABLE attendance_exception (
   attendance_record_id uuid REFERENCES attendance_record(id),
   roster_entry_id uuid REFERENCES roster_entry(id),
   exception_date date NOT NULL,
-  exception_type varchar(24) NOT NULL CHECK (exception_type IN
-     ('LATE','EARLY_LEAVE','MISSING_CLOCK_OUT','ABSENT','UNROSTERED_PUNCH','DEVICE_CLOCK_SKEW','UNKNOWN_CREDENTIAL')),
+  exception_type varchar(40) NOT NULL CHECK (exception_type IN
+     ('LATE','EARLY_LEAVE','MISSING_CLOCK_OUT','ABSENT','UNROSTERED_PUNCH','DEVICE_CLOCK_SKEW','UNKNOWN_CREDENTIAL','INACTIVE_STAFF','BIOMETRIC_CONSENT_REQUIRED','REJECTED_FUTURE_TIME','PUNCH_RECONCILIATION_REQUIRED')),
   status varchar(10) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','EXCUSED','CONFIRMED','CORRECTED')),
   resolved_by text, resolved_at timestamptz, note text
 );
@@ -631,12 +631,30 @@ interface DeviceAdapter {
 }
 ```
 
+In the Express/Drizzle implementation, `/api/v1/device/**` is mounted before user-session authentication and uses an IP-based pre-authentication limit plus per-device key authentication and rate limiting. Its Arcjet policy retains Shield protection but omits bot detection so legitimate terminal clients can reach device-key authentication; other routes retain bot detection. Device keys are shown only at registration/rotation and stored as scrypt hashes. Batch uploads persist immutable punch event data; staff resolution and processing fields are mutable for safe processing/retry. Punch processing is scheduled after the acceptance response, and a startup/background recovery worker reschedules unfinished events with database-backed processing leases and idempotent attendance writes. A punch that predates an open attendance record is marked for reconciliation rather than discarded or applied as a clock-out. The Neon HTTP driver is not used with transactions.
+
+Run the fingerprint-terminal simulator against a registered device with three active fingerprint credentials:
+
+```powershell
+$env:ATTENDANCE_API_URL = "http://localhost:3000/api/v1"
+$env:ATTENDANCE_DEVICE_CODE = "FP-WARD-A1"
+$env:ATTENDANCE_DEVICE_KEY = "<one-time device key>"
+$env:ATTENDANCE_SIMULATOR_DATE = "2026-10-12"
+$env:ATTENDANCE_SIMULATOR_MORNING_CREDENTIAL = "<morning badge PIN>"
+$env:ATTENDANCE_SIMULATOR_AFTERNOON_CREDENTIAL = "<afternoon badge PIN>"
+$env:ATTENDANCE_SIMULATOR_NIGHT_CREDENTIAL = "<night badge PIN>"
+npm run simulate:terminal
+```
+
+Re-running the same date replays identical event IDs, exercising batch idempotency. If `ATTENDANCE_SIMULATOR_DATE` is unset, the simulator resolves the facility timezone through `GET /api/v1/device/ping?deviceTime=<ISO-8601>` and uses the facility-local date; it requires an explicit date if that timezone is unavailable. The ping endpoint returns facility server time, timezone availability, and clock skew for terminal correction.
+
 Other endpoints:
 
 | Method | Path | Purpose | Role |
 |--------|------|---------|------|
 | POST | `/api/v1/device/punches` | Device upload | DEVICE |
-| GET/POST/PATCH | `/api/v1/devices` | Register / rotate key / disable | HR_ADMIN |
+| GET/POST/PATCH | `/api/v1/devices` | Register / update device metadata | HR_ADMIN |
+| POST | `/api/v1/devices/{id}/rotate-key` · `/disable` · `/enable` | Rotate key or change device availability | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/credentials` | Issue card (generate token; QR/barcode image for ID printing) | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/credentials/{cid}/revoke` | Lost/stolen; re-issue bumps `card_version` | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/fingerprint-enrolment` | Records that the badge PIN is enrolled (template stays on terminals) | HR_ADMIN |

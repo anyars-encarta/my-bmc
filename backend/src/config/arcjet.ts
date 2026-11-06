@@ -6,8 +6,10 @@ if (!process.env.ARCJET_KEY && isProduction) {
   throw new Error("ARCJET_KEY is not set in the environment variables");
 }
 
-const aj = !process.env.ARCJET_KEY ? null : arcjet({
-  key: process.env.ARCJET_KEY!,
+const arcjetKey = process.env.ARCJET_KEY;
+
+const aj = !arcjetKey ? null : arcjet({
+  key: arcjetKey,
   rules: [
     shield({ mode: "LIVE" }),
     detectBot({
@@ -22,6 +24,11 @@ const aj = !process.env.ARCJET_KEY ? null : arcjet({
     //   max: 5,
     // }),
   ],
+});
+
+export const deviceAj = !arcjetKey ? null : arcjet({
+  key: arcjetKey,
+  rules: [shield({ mode: "LIVE" })],
 });
 
 export default aj;

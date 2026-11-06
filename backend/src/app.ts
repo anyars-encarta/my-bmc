@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
-import securityMiddleware from "./middleware/security.js";
+import securityMiddleware, { devicePreAuthenticationRateLimit } from "./middleware/security.js";
 import securityHeaders from "./middleware/securityHeaders.js";
 import requireAuth from "./middleware/requireAuth.js";
 import { auth } from "./lib/auth.js";
@@ -15,6 +15,7 @@ import momoRoutes from "./routes/momo.js";
 import userRoutes from "./routes/users.js";
 import v1Routes from "./routes/v1/index.js";
 import hostingRenewalPublicRoutes from "./routes/hostingRenewalPublic.js";
+import deviceRoutes from "./routes/v1/device.js";
 import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
 import { problemHandler } from "./middleware/problemHandler.js";
 
@@ -89,6 +90,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Middleware
 app.use(express.json({
+  limit: "1mb",
   verify: (req, _res, body) => {
     if ((req as express.Request).originalUrl.split("?")[0] === "/public/hosting-renewal/webhook") {
       (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(body);
@@ -99,6 +101,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
 app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
 
+app.use("/api/v1/device", devicePreAuthenticationRateLimit, deviceRoutes);
 app.use("/api", requireAuth);
 app.use("/api", securityMiddleware);
 

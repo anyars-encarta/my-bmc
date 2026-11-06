@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarDays,
   CalendarRange,
+  Fingerprint,
   LayoutDashboard,
   Layers3,
   Settings2,
@@ -62,6 +63,13 @@ export const appResources: AppResource[] = [
     allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"],
     label: "Rosters",
     icon: CalendarDays,
+  },
+  {
+    name: "devices",
+    list: "/devices",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"],
+    label: "Attendance Devices",
+    icon: Fingerprint,
   },
   {
     name: "my-schedule",

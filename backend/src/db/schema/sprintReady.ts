@@ -15,6 +15,7 @@ import {
   timestamp,
   uuid,
   varchar,
+  index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -410,10 +411,31 @@ export const staffCredential = pgTable("staff_credential", {
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   revokedReason: text("revoked_reason"),
-});
+  enrollmentNote: text("enrollment_note"),
+}, (table) => ({
+  activeCredential: uniqueIndex("staff_credential_active_uq")
+    .on(table.credentialType, table.credentialRef)
+    .where(sql`${table.status} = 'ACTIVE'`),
+}));
 
 export type StaffCredential = typeof staffCredential.$inferSelect;
 export type NewStaffCredential = typeof staffCredential.$inferInsert;
+
+export const credentialIssueLock = pgTable("credential_issue_lock", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  staffId: uuid("staff_id").notNull(),
+  credentialType: varchar("credential_type", { length: 12 }).notNull(),
+  lockToken: uuid("lock_token"),
+  lockedUntil: timestamp("locked_until", { withTimezone: true })
+    .notNull()
+    .default(sql`'epoch'::timestamptz`),
+}, (table) => ({
+  staffTypeUnique: uniqueIndex("credential_issue_lock_staff_type_uq")
+    .on(table.staffId, table.credentialType),
+}));
+
+export type CredentialIssueLock = typeof credentialIssueLock.$inferSelect;
+export type NewCredentialIssueLock = typeof credentialIssueLock.$inferInsert;
 
 export const attendanceDevice = pgTable("attendance_device", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -428,7 +450,11 @@ export const attendanceDevice = pgTable("attendance_device", {
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   lastClockSkewSeconds: integer("last_clock_skew_seconds"),
-});
+  rateLimitWindowStart: timestamp("rate_limit_window_start", { withTimezone: true }),
+  rateLimitCount: integer("rate_limit_count").default(0).notNull(),
+}, (table) => ({
+  codeUnique: uniqueIndex("attendance_device_code_key").on(table.code),
+}));
 
 export type AttendanceDevice = typeof attendanceDevice.$inferSelect;
 export type NewAttendanceDevice = typeof attendanceDevice.$inferInsert;
@@ -447,7 +473,15 @@ export const punchLog = pgTable("punch_log", {
   rawPayload: jsonb("raw_payload"),
   result: varchar("result", { length: 32 }).default('RECEIVED').notNull(),
   processed: boolean("processed").default(false).notNull(),
-});
+  processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
+}, (table) => ({
+  deviceEventUnique: uniqueIndex("punch_log_device_id_device_event_id_key")
+    .on(table.deviceId, table.deviceEventId),
+  staffTime: index("punch_log_staff_time_idx").on(table.staffId, table.punchedAt),
+  unprocessed: index("punch_log_unprocessed_idx")
+    .on(table.receivedAt)
+    .where(sql`${table.processed} = false`),
+}));
 
 export type PunchLog = typeof punchLog.$inferSelect;
 export type NewPunchLog = typeof punchLog.$inferInsert;
@@ -469,7 +503,20 @@ export const attendanceRecord = pgTable("attendance_record", {
   earlyLeaveMinutes: integer("early_leave_minutes").default(0).notNull(),
   overtimeMinutes: integer("overtime_minutes").default(0).notNull(),
   version: integer("version").default(0).notNull(),
-});
+}, (table) => ({
+  oneOpenPerStaff: uniqueIndex("attendance_one_open_per_staff")
+    .on(table.staffId)
+    .where(sql`${table.status} = 'OPEN'`),
+  onePerRosterEntry: uniqueIndex("attendance_one_per_roster_entry")
+    .on(table.rosterEntryId)
+    .where(sql`${table.rosterEntryId} IS NOT NULL`),
+  attendanceDate: index("attendance_date_idx").on(table.attendanceDate, table.orgUnitId),
+  uniqueClockInPunch: uniqueIndex("attendance_clock_in_punch_uq")
+    .on(table.clockInPunchId),
+  uniqueClockOutPunch: uniqueIndex("attendance_clock_out_punch_uq")
+    .on(table.clockOutPunchId)
+    .where(sql`${table.clockOutPunchId} IS NOT NULL`),
+}));
 
 export type AttendanceRecord = typeof attendanceRecord.$inferSelect;
 export type NewAttendanceRecord = typeof attendanceRecord.$inferInsert;
@@ -480,12 +527,29 @@ export const attendanceException = pgTable("attendance_exception", {
   attendanceRecordId: uuid("attendance_record_id"),
   rosterEntryId: uuid("roster_entry_id"),
   exceptionDate: date("exception_date").notNull(),
-  exceptionType: varchar("exception_type", { length: 24 }).notNull(),
+  exceptionType: varchar("exception_type", { length: 40 }).notNull(),
   status: varchar("status", { length: 10 }).default('OPEN').notNull(),
   resolvedBy: text("resolved_by"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   note: text("note"),
-});
+}, (table) => ({
+  exceptionTypeCheck: check(
+    "attendance_exception_exception_type_check",
+    sql`${table.exceptionType} IN (
+      'LATE',
+      'EARLY_LEAVE',
+      'MISSING_CLOCK_OUT',
+      'ABSENT',
+      'UNROSTERED_PUNCH',
+      'DEVICE_CLOCK_SKEW',
+      'UNKNOWN_CREDENTIAL',
+      'INACTIVE_STAFF',
+      'BIOMETRIC_CONSENT_REQUIRED',
+      'REJECTED_FUTURE_TIME',
+      'PUNCH_RECONCILIATION_REQUIRED'
+    )`,
+  ),
+}));
 
 export type AttendanceException = typeof attendanceException.$inferSelect;
 export type NewAttendanceException = typeof attendanceException.$inferInsert;
