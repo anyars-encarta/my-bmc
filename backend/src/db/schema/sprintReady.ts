@@ -527,12 +527,29 @@ export const attendanceException = pgTable("attendance_exception", {
   attendanceRecordId: uuid("attendance_record_id"),
   rosterEntryId: uuid("roster_entry_id"),
   exceptionDate: date("exception_date").notNull(),
-  exceptionType: varchar("exception_type", { length: 24 }).notNull(),
+  exceptionType: varchar("exception_type", { length: 40 }).notNull(),
   status: varchar("status", { length: 10 }).default('OPEN').notNull(),
   resolvedBy: text("resolved_by"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   note: text("note"),
-});
+}, (table) => ({
+  exceptionTypeCheck: check(
+    "attendance_exception_exception_type_check",
+    sql`${table.exceptionType} IN (
+      'LATE',
+      'EARLY_LEAVE',
+      'MISSING_CLOCK_OUT',
+      'ABSENT',
+      'UNROSTERED_PUNCH',
+      'DEVICE_CLOCK_SKEW',
+      'UNKNOWN_CREDENTIAL',
+      'INACTIVE_STAFF',
+      'BIOMETRIC_CONSENT_REQUIRED',
+      'REJECTED_FUTURE_TIME',
+      'PUNCH_RECONCILIATION_REQUIRED'
+    )`,
+  ),
+}));
 
 export type AttendanceException = typeof attendanceException.$inferSelect;
 export type NewAttendanceException = typeof attendanceException.$inferInsert;

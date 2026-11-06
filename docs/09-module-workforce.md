@@ -469,8 +469,8 @@ CREATE TABLE attendance_exception (
   attendance_record_id uuid REFERENCES attendance_record(id),
   roster_entry_id uuid REFERENCES roster_entry(id),
   exception_date date NOT NULL,
-  exception_type varchar(24) NOT NULL CHECK (exception_type IN
-     ('LATE','EARLY_LEAVE','MISSING_CLOCK_OUT','ABSENT','UNROSTERED_PUNCH','DEVICE_CLOCK_SKEW','UNKNOWN_CREDENTIAL')),
+  exception_type varchar(40) NOT NULL CHECK (exception_type IN
+     ('LATE','EARLY_LEAVE','MISSING_CLOCK_OUT','ABSENT','UNROSTERED_PUNCH','DEVICE_CLOCK_SKEW','UNKNOWN_CREDENTIAL','INACTIVE_STAFF','BIOMETRIC_CONSENT_REQUIRED','REJECTED_FUTURE_TIME','PUNCH_RECONCILIATION_REQUIRED')),
   status varchar(10) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','EXCUSED','CONFIRMED','CORRECTED')),
   resolved_by text, resolved_at timestamptz, note text
 );

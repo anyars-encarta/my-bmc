@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
-import securityMiddleware from "./middleware/security.js";
+import securityMiddleware, { devicePreAuthenticationRateLimit } from "./middleware/security.js";
 import securityHeaders from "./middleware/securityHeaders.js";
 import requireAuth from "./middleware/requireAuth.js";
 import { auth } from "./lib/auth.js";
@@ -101,7 +101,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
 app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
 
-app.use("/api/v1/device", securityMiddleware, deviceRoutes);
+app.use("/api/v1/device", devicePreAuthenticationRateLimit, deviceRoutes);
 app.use("/api", requireAuth);
 app.use("/api", securityMiddleware);
 

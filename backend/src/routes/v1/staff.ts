@@ -628,7 +628,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
               NOT current_staff.has_active_fingerprint
               OR (
                 current_staff.biometric_consent_granted
-                AND ${parsed.data.badgeNumber} IS NOT NULL
+                AND CAST(${parsed.data.badgeNumber} AS text) IS NOT NULL
               )
             )
           RETURNING person.id

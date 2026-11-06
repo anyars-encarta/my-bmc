@@ -2,41 +2,16 @@ import type { Request, Response, NextFunction } from "express";
 import aj from "../config/arcjet.js";
 import { ArcjetNodeRequest, slidingWindow } from "@arcjet/node";
 
-const securityMiddleware = async (
+const protectWithRateLimit = async (
   req: Request,
   res: Response,
   next: NextFunction,
+  limit: number,
+  message: string,
+  rateLimitCode?: string,
 ) => {
   if (process.env.NODE_ENV === "test") return next();
-
   try {
-    const role: RateLimitRole = req.user?.role ?? "guest";
-
-    let limit: number;
-    let message: string;
-
-    switch (role) {
-      case "SUPER_ADMIN":
-        limit = 1000;
-        message =
-          "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.";
-        break;
-      case "ACCOUNTS":
-      case "PAYROLL_OFFICER":
-      case "HR_MANAGER":
-      case "UNIT_MANAGER":
-        limit = 200;
-        message =
-          "User request limit exceeded (200 per minute). Please wait before making another request.";
-        break;
-      default:
-        limit = role === "guest" ? 20 : 120;
-        message = role === "guest"
-          ? "Guest request limit exceeded (20 per minute). Please sign up for higher limits or wait before making another request."
-          : "User request limit exceeded (120 per minute). Please wait before making another request.";
-        break;
-    }
-
     if (!aj) {
       // Arcjet key not configured — skip rate-limiting in non-production environments
       return next();
@@ -75,7 +50,11 @@ const securityMiddleware = async (
         });
       }
       if (decision.reason.isRateLimit()) {
-        return res.status(429).json({ error: "Too many requests", message });
+        return res.status(429).json({
+          error: "Too Many Requests",
+          message,
+          ...(rateLimitCode ? { code: rateLimitCode } : {}),
+        });
       }
 
       return res.status(403).json({
@@ -88,6 +67,58 @@ const securityMiddleware = async (
   } catch (e) {
     console.error("Arcjet Middleware error: ", e);
     next(e);
+  }
+};
+
+export const devicePreAuthenticationRateLimit = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => protectWithRateLimit(
+  req,
+  res,
+  next,
+  3000,
+  "Device pre-authentication request limit exceeded (3000 per minute).",
+  "DEVICE_PRE_AUTH_RATE_LIMITED",
+);
+
+const securityMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const role = req.user?.role ?? "guest";
+  switch (role) {
+    case "SUPER_ADMIN":
+      return protectWithRateLimit(
+        req,
+        res,
+        next,
+        1000,
+        "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.",
+      );
+    case "ACCOUNTS":
+    case "PAYROLL_OFFICER":
+    case "HR_MANAGER":
+    case "UNIT_MANAGER":
+      return protectWithRateLimit(
+        req,
+        res,
+        next,
+        200,
+        "User request limit exceeded (200 per minute). Please wait before making another request.",
+      );
+    default:
+      return protectWithRateLimit(
+        req,
+        res,
+        next,
+        role === "guest" ? 20 : 120,
+        role === "guest"
+          ? "Guest request limit exceeded (20 per minute). Please sign up for higher limits or wait before making another request."
+          : "User request limit exceeded (120 per minute). Please wait before making another request.",
+      );
   }
 };
 

@@ -113,6 +113,13 @@
       "when": 1793968981518,
       "tag": "0015_attendance_processing_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793974264782,
+      "tag": "0016_attendance_exception_types",
+      "breakpoints": true
     }
   ]
 }
