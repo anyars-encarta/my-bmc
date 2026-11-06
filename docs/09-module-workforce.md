@@ -653,7 +653,8 @@ Other endpoints:
 | Method | Path | Purpose | Role |
 |--------|------|---------|------|
 | POST | `/api/v1/device/punches` | Device upload | DEVICE |
-| GET/POST/PATCH | `/api/v1/devices` | Register / rotate key / disable | HR_ADMIN |
+| GET/POST/PATCH | `/api/v1/devices` | Register / update device metadata | HR_ADMIN |
+| POST | `/api/v1/devices/{id}/rotate-key` · `/disable` · `/enable` | Rotate key or change device availability | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/credentials` | Issue card (generate token; QR/barcode image for ID printing) | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/credentials/{cid}/revoke` | Lost/stolen; re-issue bumps `card_version` | HR_ADMIN |
 | POST | `/api/v1/staff/{id}/fingerprint-enrolment` | Records that the badge PIN is enrolled (template stays on terminals) | HR_ADMIN |

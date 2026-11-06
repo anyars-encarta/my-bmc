@@ -176,7 +176,7 @@ Rostering writes use the Neon HTTP driver without `db.transaction()`. Bulk entry
 | POST | `/device/punches` | DEVICE | batch, idempotent on `(device, deviceEventId)`; per-item result |
 | GET | `/device/ping` | DEVICE | heartbeat; returns server time for clock-skew correction |
 | GET/POST/PATCH | `/devices` | HR SA | register/update devices; registration returns key once |
-| POST | `/devices/:id/rotate-key` · `/devices/:id/disable` | HR SA | rotation returns a one-time key; disable immediately revokes access |
+| POST | `/devices/:id/rotate-key` · `/devices/:id/disable` · `/devices/:id/enable` | HR SA | rotation returns a one-time key; enable/disable immediately controls device access |
 | POST/GET | `/staff/:id/credentials` · `/:cid/revoke` · `/staff/:id/fingerprint-enrolment` | HR | card issue returns printable QR/barcode |
 | GET | `/attendance?unitId&staffId&from&to` | HR UM(scoped) AC(read) | |
 | GET | `/me/attendance` | ST | |

@@ -199,6 +199,32 @@ router.post(
   },
 );
 
+router.post(
+  "/devices/:id/enable",
+  requireAnyRole(HR_ROLES),
+  async (req, res, next) => {
+    try {
+      const id = requireUuid(req.params.id, "id");
+      const [enabled] = await db.update(attendanceDevice)
+        .set({
+          status: "ACTIVE",
+          lastSeenAt: null,
+        })
+        .where(eq(attendanceDevice.id, id))
+        .returning({
+          id: attendanceDevice.id,
+          code: attendanceDevice.code,
+          status: attendanceDevice.status,
+          lastSeenAt: attendanceDevice.lastSeenAt,
+        });
+      if (!enabled) throw notFound("Attendance device not found.", "DEVICE_NOT_FOUND");
+      res.json({ data: enabled });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 router.get(
   "/staff/:id/credentials",
   requireAnyRole(HR_ROLES),
