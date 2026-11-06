@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import aj from "../config/arcjet.js";
+import aj, { deviceAj } from "../config/arcjet.js";
 import { ArcjetNodeRequest, slidingWindow } from "@arcjet/node";
 
 const protectWithRateLimit = async (
@@ -9,15 +9,16 @@ const protectWithRateLimit = async (
   limit: number,
   message: string,
   rateLimitCode?: string,
+  arcjetClient: typeof aj = aj,
 ) => {
   if (process.env.NODE_ENV === "test") return next();
   try {
-    if (!aj) {
+    if (!arcjetClient) {
       // Arcjet key not configured — skip rate-limiting in non-production environments
       return next();
     }
 
-    const client = aj.withRule(
+    const client = arcjetClient.withRule(
       slidingWindow({
         mode: "LIVE",
         interval: "1m",
@@ -81,6 +82,7 @@ export const devicePreAuthenticationRateLimit = (
   3000,
   "Device pre-authentication request limit exceeded (3000 per minute).",
   "DEVICE_PRE_AUTH_RATE_LIMITED",
+  deviceAj,
 );
 
 const securityMiddleware = async (

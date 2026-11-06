@@ -1,10 +1,6 @@
 ALTER TABLE attendance_exception
-  DROP CONSTRAINT attendance_exception_exception_type_check;
---> statement-breakpoint
-ALTER TABLE attendance_exception
-  ALTER COLUMN exception_type TYPE varchar(40);
---> statement-breakpoint
-ALTER TABLE attendance_exception
+  DROP CONSTRAINT attendance_exception_exception_type_check,
+  ALTER COLUMN exception_type TYPE varchar(40),
   ADD CONSTRAINT attendance_exception_exception_type_check
   CHECK (exception_type IN (
     'LATE',
