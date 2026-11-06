@@ -631,7 +631,7 @@ interface DeviceAdapter {
 }
 ```
 
-In the Express/Drizzle implementation, `/api/v1/device/**` is mounted before user-session authentication and uses per-device key authentication and rate limiting. Device keys are shown only at registration/rotation and stored as scrypt hashes. Batch uploads persist immutable punch event data; staff resolution and processing fields are mutable for safe processing/retry. Punch processing is scheduled after the acceptance response, so a failed background attempt remains unprocessed for retry. The Neon HTTP driver is not used with transactions.
+In the Express/Drizzle implementation, `/api/v1/device/**` is mounted before user-session authentication and uses an IP-based pre-authentication limit plus per-device key authentication and rate limiting. Device keys are shown only at registration/rotation and stored as scrypt hashes. Batch uploads persist immutable punch event data; staff resolution and processing fields are mutable for safe processing/retry. Punch processing is scheduled after the acceptance response, and a startup/background recovery worker reschedules unfinished events with database-backed processing leases and idempotent attendance writes. A punch that predates an open attendance record is marked for reconciliation rather than discarded or applied as a clock-out. The Neon HTTP driver is not used with transactions.
 
 Run the fingerprint-terminal simulator against a registered device with three active fingerprint credentials:
 
@@ -646,7 +646,7 @@ $env:ATTENDANCE_SIMULATOR_NIGHT_CREDENTIAL = "<night badge PIN>"
 npm run simulate:terminal
 ```
 
-Re-running the same date replays identical event IDs, exercising batch idempotency. `GET /api/v1/device/ping?deviceTime=<ISO-8601>` returns facility server time and clock skew for terminal correction.
+Re-running the same date replays identical event IDs, exercising batch idempotency. If `ATTENDANCE_SIMULATOR_DATE` is unset, the simulator resolves the facility timezone through `GET /api/v1/device/ping?deviceTime=<ISO-8601>` and uses the facility-local date; it requires an explicit date if that timezone is unavailable. The ping endpoint returns facility server time, timezone availability, and clock skew for terminal correction.
 
 Other endpoints:
 

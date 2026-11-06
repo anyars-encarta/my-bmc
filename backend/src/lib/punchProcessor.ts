@@ -4,6 +4,7 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
   lte,
   ne,
   or,
@@ -59,6 +60,22 @@ const isUniqueViolation = (error: unknown) =>
     (error as { code?: string }).code === "23505");
 
 const localLocks = new Map<string, Promise<void>>();
+const MAX_CONCURRENT_PREFLIGHTS = 16;
+let activePreflights = 0;
+const preflightWaiters: Array<() => void> = [];
+
+export const withPreflightLimit = async <T>(operation: () => Promise<T>): Promise<T> => {
+  if (activePreflights >= MAX_CONCURRENT_PREFLIGHTS) {
+    await new Promise<void>((resolve) => preflightWaiters.push(resolve));
+  }
+  activePreflights += 1;
+  try {
+    return await operation();
+  } finally {
+    activePreflights -= 1;
+    preflightWaiters.shift()?.();
+  }
+};
 
 const withStaffLock = async <T>(staffId: string, operation: () => Promise<T>) => {
   const previous = localLocks.get(staffId) ?? Promise.resolve();
@@ -80,15 +97,15 @@ const findCredentialIdentity = async (
   credentialType: string,
   credentialRef: string,
   activeOnly: boolean,
+  asOf: Date,
 ): Promise<CredentialIdentity | undefined> => {
-  const now = new Date();
   const conditions = [
     eq(staffCredential.credentialType, credentialType),
     eq(staffCredential.credentialRef, credentialRef),
   ];
   if (activeOnly) {
     conditions.push(eq(staffCredential.status, "ACTIVE"));
-    conditions.push(or(isNull(staffCredential.expiresAt), gte(staffCredential.expiresAt, now))!);
+    conditions.push(or(isNull(staffCredential.expiresAt), gte(staffCredential.expiresAt, asOf))!);
   }
   const [identity] = await db
     .select({
@@ -115,8 +132,18 @@ export const preflightPunch = async ({
   punchedAt: Date;
   receivedAt: Date;
 }): Promise<{ outcome: PunchOutcome | null; staffId: string | null }> => {
-  const activeIdentity = await findCredentialIdentity(credentialType, credentialRef, true);
-  const identity = activeIdentity ?? await findCredentialIdentity(credentialType, credentialRef, false);
+  const activeIdentity = await findCredentialIdentity(
+    credentialType,
+    credentialRef,
+    true,
+    receivedAt,
+  );
+  const identity = activeIdentity ?? await findCredentialIdentity(
+    credentialType,
+    credentialRef,
+    false,
+    receivedAt,
+  );
   if (
     !activeIdentity ||
     !credentialIsUsable(activeIdentity.credentialStatus, activeIdentity.credentialExpiresAt, receivedAt)
@@ -177,7 +204,9 @@ const updatePunch = async (
   punchId: string,
   values: { staffId?: string | null; result: string; processed: boolean },
 ) => {
-  await db.update(punchLog).set(values).where(eq(punchLog.id, punchId));
+  await db.update(punchLog)
+    .set({ ...values, processingStartedAt: null })
+    .where(eq(punchLog.id, punchId));
 };
 
 const findOpenAttendance = async (staffId: string) => {
@@ -338,10 +367,26 @@ const processKnownPunch = async (
     return (currentPunch?.result as PunchOutcome | undefined) ?? "ACCEPTED";
   }
 
+  const [recordedAttendance] = await db.select({
+    clockInPunchId: attendanceRecord.clockInPunchId,
+    clockOutPunchId: attendanceRecord.clockOutPunchId,
+  }).from(attendanceRecord)
+    .where(or(
+      eq(attendanceRecord.clockInPunchId, punch.id),
+      eq(attendanceRecord.clockOutPunchId, punch.id),
+    ))
+    .limit(1);
+  if (recordedAttendance) {
+    const result = recordedAttendance.clockInPunchId === punch.id ? "CLOCK_IN" : "CLOCK_OUT";
+    await updatePunch(punch.id, { staffId, result, processed: true });
+    return "ACCEPTED";
+  }
+
   const previousPunches = await db.select({ punchedAt: punchLog.punchedAt })
     .from(punchLog)
     .where(and(
       eq(punchLog.staffId, staffId),
+      inArray(punchLog.result, ["CLOCK_IN", "CLOCK_OUT"]),
       gte(punchLog.punchedAt, new Date(punch.punchedAt.getTime() - 60_000)),
       lte(punchLog.punchedAt, punch.punchedAt),
       ne(punchLog.id, punch.id),
@@ -355,6 +400,22 @@ const processKnownPunch = async (
 
   const open = await findOpenAttendance(staffId);
   if (open) {
+    if (punch.punchedAt < open.record.clockInAt) {
+      await logException({
+        staffId,
+        exceptionDate: facilityDate(punch.punchedAt, timeZone),
+        exceptionType: "PUNCH_RECONCILIATION_REQUIRED",
+        note: `Accepted punch ${punch.id} predates open attendance ${open.record.id}; manual attendance reconciliation is required.`,
+      });
+      await updatePunch(punch.id, {
+        staffId,
+        result: "RECONCILIATION_REQUIRED",
+        processed: true,
+      });
+      await markClockSkew(punch, timeZone);
+      return "ACCEPTED";
+    }
+
     const deadline = attendanceClockOutDeadline(
       open.record.clockInAt,
       open.roster?.plannedEnd ?? null,
@@ -469,91 +530,60 @@ const processKnownPunch = async (
   }
 });
 
+const outcomeForStoredResult = (result: string): PunchOutcome =>
+  result === "DUPLICATE" ||
+    result === "UNKNOWN_CREDENTIAL" ||
+    result === "INACTIVE_STAFF" ||
+    result === "BIOMETRIC_CONSENT_REQUIRED" ||
+    result === "REJECTED_FUTURE_TIME"
+    ? result
+    : "ACCEPTED";
+
 export const processPunch = async (punchId: string): Promise<PunchOutcome> => {
-  const [punch] = await db.select().from(punchLog).where(eq(punchLog.id, punchId)).limit(1);
-  if (!punch) throw new Error("Punch log record not found.");
-  if (punch.processed) {
-    return punch.result === "DUPLICATE" ||
-      punch.result === "UNKNOWN_CREDENTIAL" ||
-      punch.result === "INACTIVE_STAFF" ||
-      punch.result === "BIOMETRIC_CONSENT_REQUIRED" ||
-      punch.result === "REJECTED_FUTURE_TIME"
-      ? punch.result
-      : "ACCEPTED";
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - 5 * 60_000);
+  const [punch] = await db.update(punchLog)
+    .set({ processingStartedAt: now })
+    .where(and(
+      eq(punchLog.id, punchId),
+      eq(punchLog.processed, false),
+      or(isNull(punchLog.processingStartedAt), lt(punchLog.processingStartedAt, staleBefore)),
+    ))
+    .returning();
+  if (!punch) {
+    const [existing] = await db.select().from(punchLog).where(eq(punchLog.id, punchId)).limit(1);
+    if (!existing) throw new Error("Punch log record not found.");
+    return existing.processed ? outcomeForStoredResult(existing.result) : "ACCEPTED";
   }
 
-  const identity = await findCredentialIdentity(
-    punch.credentialType,
-    punch.credentialRef,
-    true,
-  );
-  const timeZone = await resolveFacilityTimezone();
-  if (!identity || !credentialIsUsable(
-    identity.credentialStatus,
-    identity.credentialExpiresAt,
-    new Date(),
-  )) {
-    const historicalIdentity = identity ?? await findCredentialIdentity(
-      punch.credentialType,
-      punch.credentialRef,
-      false,
-    );
-    const staffId = historicalIdentity?.staffId ?? null;
-    await updatePunch(punch.id, { staffId, result: "UNKNOWN_CREDENTIAL", processed: true });
-    if (staffId) {
-      await logException({
-        staffId,
-        exceptionDate: facilityDate(punch.punchedAt, timeZone),
-        exceptionType: "UNKNOWN_CREDENTIAL",
-        note: `Rejected ${punch.credentialType} credential.`,
-      });
+  try {
+    const timeZone = await resolveFacilityTimezone();
+    if (punch.result !== "RECEIVED") {
+      await updatePunch(punch.id, { staffId: punch.staffId, result: punch.result, processed: true });
+      if (punch.staffId && punch.result !== "DUPLICATE") {
+        await logException({
+          staffId: punch.staffId,
+          exceptionDate: facilityDate(punch.punchedAt, timeZone),
+          exceptionType: punch.result,
+          note: `Preflight rejected ${punch.credentialType} credential.`,
+        });
+      }
+      return outcomeForStoredResult(punch.result);
     }
-    return "UNKNOWN_CREDENTIAL";
-  }
 
-  await db.update(punchLog).set({ staffId: identity.staffId })
-    .where(eq(punchLog.id, punch.id));
-  if (identity.status !== "active") {
-    await updatePunch(punch.id, {
-      staffId: identity.staffId,
-      result: "INACTIVE_STAFF",
-      processed: true,
-    });
-    return "INACTIVE_STAFF";
-  }
-
-  if (punch.credentialType === "FINGERPRINT") {
-    const [latestConsent] = await db.select({
-      status: consent.status,
-      withdrawnAt: consent.withdrawnAt,
-    }).from(consent)
-      .where(and(
-        eq(consent.subjectType, "STAFF"),
-        eq(consent.subjectId, identity.staffId),
-        eq(consent.consentType, "BIOMETRIC_ATTENDANCE"),
-      ))
-      .orderBy(sql`${consent.createdAt} DESC`)
-      .limit(1);
-    if (latestConsent?.status !== "GRANTED" || latestConsent.withdrawnAt) {
+    if (!punch.staffId) {
       await updatePunch(punch.id, {
-        staffId: identity.staffId,
-        result: "BIOMETRIC_CONSENT_REQUIRED",
+        result: "UNKNOWN_CREDENTIAL",
         processed: true,
       });
-      return "BIOMETRIC_CONSENT_REQUIRED";
+      return "UNKNOWN_CREDENTIAL";
     }
-  }
 
-  const receivedAt = punch.receivedAt ?? new Date();
-  if (punchIsTooFarInFuture(punch.punchedAt, receivedAt)) {
-    await updatePunch(punch.id, {
-      staffId: identity.staffId,
-      result: "REJECTED_FUTURE_TIME",
-      processed: true,
-    });
-    await markClockSkew({ ...punch, staffId: identity.staffId }, timeZone);
-    return "REJECTED_FUTURE_TIME";
+    return processKnownPunch(punch, punch.staffId, timeZone);
+  } catch (error) {
+    await db.update(punchLog)
+      .set({ processingStartedAt: null })
+      .where(and(eq(punchLog.id, punch.id), eq(punchLog.processed, false)));
+    throw error;
   }
-
-  return processKnownPunch({ ...punch, staffId: identity.staffId }, identity.staffId, timeZone);
 };

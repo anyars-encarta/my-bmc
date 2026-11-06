@@ -421,6 +421,22 @@ export const staffCredential = pgTable("staff_credential", {
 export type StaffCredential = typeof staffCredential.$inferSelect;
 export type NewStaffCredential = typeof staffCredential.$inferInsert;
 
+export const credentialIssueLock = pgTable("credential_issue_lock", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  staffId: uuid("staff_id").notNull(),
+  credentialType: varchar("credential_type", { length: 12 }).notNull(),
+  lockToken: uuid("lock_token"),
+  lockedUntil: timestamp("locked_until", { withTimezone: true })
+    .notNull()
+    .default(sql`'epoch'::timestamptz`),
+}, (table) => ({
+  staffTypeUnique: uniqueIndex("credential_issue_lock_staff_type_uq")
+    .on(table.staffId, table.credentialType),
+}));
+
+export type CredentialIssueLock = typeof credentialIssueLock.$inferSelect;
+export type NewCredentialIssueLock = typeof credentialIssueLock.$inferInsert;
+
 export const attendanceDevice = pgTable("attendance_device", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 30 }).notNull(),
@@ -457,6 +473,7 @@ export const punchLog = pgTable("punch_log", {
   rawPayload: jsonb("raw_payload"),
   result: varchar("result", { length: 32 }).default('RECEIVED').notNull(),
   processed: boolean("processed").default(false).notNull(),
+  processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
 }, (table) => ({
   deviceEventUnique: uniqueIndex("punch_log_device_id_device_event_id_key")
     .on(table.deviceId, table.deviceEventId),
@@ -494,6 +511,11 @@ export const attendanceRecord = pgTable("attendance_record", {
     .on(table.rosterEntryId)
     .where(sql`${table.rosterEntryId} IS NOT NULL`),
   attendanceDate: index("attendance_date_idx").on(table.attendanceDate, table.orgUnitId),
+  uniqueClockInPunch: uniqueIndex("attendance_clock_in_punch_uq")
+    .on(table.clockInPunchId),
+  uniqueClockOutPunch: uniqueIndex("attendance_clock_out_punch_uq")
+    .on(table.clockOutPunchId)
+    .where(sql`${table.clockOutPunchId} IS NOT NULL`),
 }));
 
 export type AttendanceRecord = typeof attendanceRecord.$inferSelect;

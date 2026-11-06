@@ -4,7 +4,6 @@ const apiBase = (process.env.ATTENDANCE_API_URL ?? "http://localhost:3000/api/v1
   .replace(/\/+$/, "");
 const deviceCode = process.env.ATTENDANCE_DEVICE_CODE;
 const deviceKey = process.env.ATTENDANCE_DEVICE_KEY;
-const date = process.env.ATTENDANCE_SIMULATOR_DATE ?? new Date().toISOString().slice(0, 10);
 const shiftCredentials = [
   { shift: "morning", env: "ATTENDANCE_SIMULATOR_MORNING_CREDENTIAL", in: "06:55:00Z", out: "14:03:00Z" },
   { shift: "afternoon", env: "ATTENDANCE_SIMULATOR_AFTERNOON_CREDENTIAL", in: "13:55:00Z", out: "20:03:00Z" },
@@ -17,6 +16,75 @@ const missing = [
   ...shiftCredentials.filter(({ env }) => !process.env[env]).map(({ env }) => env),
 ].filter(Boolean);
 
+const resolveDate = async () => {
+  const configuredDate = process.env.ATTENDANCE_SIMULATOR_DATE;
+  if (configuredDate) return configuredDate;
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${apiBase}/device/ping?deviceTime=${encodeURIComponent(new Date().toISOString())}`,
+      {
+        headers: {
+          "X-Device-Code": deviceCode ?? "",
+          "X-Device-Key": deviceKey ?? "",
+        },
+      },
+    );
+  } catch (error) {
+    throw new Error(
+      "The facility date could not be resolved. Set ATTENDANCE_SIMULATOR_DATE explicitly.",
+      { cause: error },
+    );
+  }
+  let ping: {
+    data?: { timezone?: string; timezoneResolved?: boolean };
+    message?: string;
+  };
+  try {
+    ping = await response.json() as {
+      data?: { timezone?: string; timezoneResolved?: boolean };
+      message?: string;
+    };
+  } catch (error) {
+    throw new Error(
+      "The facility timezone could not be resolved. Set ATTENDANCE_SIMULATOR_DATE explicitly.",
+      { cause: error },
+    );
+  }
+  const timezone = ping.data?.timezone;
+  if (!response.ok || !timezone || ping.data?.timezoneResolved !== true) {
+    throw new Error(
+      ping.message ??
+        "The facility timezone could not be resolved. Set ATTENDANCE_SIMULATOR_DATE explicitly.",
+    );
+  }
+
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((value) => value.type === type)?.value;
+    const year = part("year");
+    const month = part("month");
+    const day = part("day");
+    if (!year || !month || !day) throw new Error("Facility date parts are incomplete.");
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    throw new Error(
+      "The facility timezone is invalid. Set ATTENDANCE_SIMULATOR_DATE explicitly.",
+      { cause: error },
+    );
+  }
+};
+
+const date = missing.length === 0
+  ? await resolveDate()
+  : process.env.ATTENDANCE_SIMULATOR_DATE ?? "";
 const parsedDate = new Date(`${date}T00:00:00.000Z`);
 const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(date) &&
   !Number.isNaN(parsedDate.getTime()) &&

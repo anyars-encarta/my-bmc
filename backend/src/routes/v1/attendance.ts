@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
+import { and, desc, eq, lt, ne } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -7,10 +7,11 @@ import { db } from "../../db/index.js";
 import {
   attendanceDevice,
   consent,
+  credentialIssueLock,
   staff,
   staffCredential,
 } from "../../db/schema/index.js";
-import { conflict, notFound, validationError } from "../../lib/errors.js";
+import { ApiError, conflict, notFound, validationError } from "../../lib/errors.js";
 import { hashDeviceKey } from "../../lib/deviceAuthentication.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
@@ -48,6 +49,79 @@ const requireUuid = (value: string | string[] | undefined, field: string) => {
 const generateDeviceKey = () => randomBytes(32).toString("base64url");
 const generateCardToken = () => randomBytes(32).toString("base64url");
 
+const withCredentialIssueLock = async <T>(
+  staffId: string,
+  credentialType: string,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  const lockToken = randomUUID();
+  const lockDeadline = Date.now() + 15_000;
+  const lockedUntil = new Date(Date.now() + 5 * 60_000);
+  while (true) {
+    const [lock] = await db.insert(credentialIssueLock)
+      .values({ staffId, credentialType, lockToken, lockedUntil })
+      .onConflictDoUpdate({
+        target: [credentialIssueLock.staffId, credentialIssueLock.credentialType],
+        set: { lockToken, lockedUntil },
+        setWhere: lt(credentialIssueLock.lockedUntil, new Date()),
+      })
+      .returning({ id: credentialIssueLock.id });
+    if (lock) break;
+    if (Date.now() >= lockDeadline) {
+      throw new ApiError(
+        503,
+        "CREDENTIAL_ISSUANCE_BUSY",
+        "Another credential issuance is in progress. Retry shortly.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  let outcome: { value: T } | undefined;
+  let operationError: unknown;
+  let failed = false;
+  try {
+    outcome = { value: await operation() };
+  } catch (error) {
+    failed = true;
+    operationError = error;
+  }
+
+  try {
+    await db.update(credentialIssueLock)
+      .set({ lockToken: null, lockedUntil: new Date(0) })
+      .where(and(
+        eq(credentialIssueLock.staffId, staffId),
+        eq(credentialIssueLock.credentialType, credentialType),
+        eq(credentialIssueLock.lockToken, lockToken),
+      ));
+  } catch (releaseError) {
+    if (failed) {
+      throw new AggregateError(
+        [operationError, releaseError],
+        "Credential issuance failed and its serialization lock could not be released.",
+      );
+    }
+    throw releaseError;
+  }
+  if (failed) throw operationError;
+  if (!outcome) throw new Error("Credential issuance completed without a result.");
+  return outcome.value;
+};
+
+const postgresError = (error: unknown) => {
+  const visited = new Set<object>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    if ("code" in current && String((current as { code?: unknown }).code) === "23505") {
+      return current;
+    }
+    current = "cause" in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return undefined;
+};
+
 router.get("/devices", requireAnyRole(HR_ROLES), async (_req, res, next) => {
   try {
     const devices = await db.select({
@@ -79,17 +153,29 @@ router.post("/devices", requireAnyRole(HR_ROLES), async (req, res, next) => {
     }
 
     const apiKey = generateDeviceKey();
-    const [created] = await db.insert(attendanceDevice).values({
-      ...parsed.data,
-      apiKeyHash: await hashDeviceKey(apiKey),
-      status: "ACTIVE",
-    }).returning({
-      id: attendanceDevice.id,
-      code: attendanceDevice.code,
-      name: attendanceDevice.name,
-      deviceType: attendanceDevice.deviceType,
-      status: attendanceDevice.status,
-    });
+    let inserted;
+    try {
+      inserted = await db.insert(attendanceDevice).values({
+        ...parsed.data,
+        apiKeyHash: await hashDeviceKey(apiKey),
+        status: "ACTIVE",
+      }).returning({
+        id: attendanceDevice.id,
+        code: attendanceDevice.code,
+        name: attendanceDevice.name,
+        deviceType: attendanceDevice.deviceType,
+        status: attendanceDevice.status,
+      });
+    } catch (error) {
+      if (postgresError(error)) {
+        throw conflict(
+          "A device with this code already exists. Choose a unique device code.",
+          "DEVICE_CODE_DUPLICATE",
+        );
+      }
+      throw error;
+    }
+    const [created] = inserted;
     if (!created) throw new Error("The attendance device could not be registered.");
     res.setHeader("Cache-Control", "no-store");
     res.status(201).json({
@@ -271,64 +357,73 @@ router.post(
         throw conflict("Credentials cannot be issued to inactive staff.", "STAFF_INACTIVE");
       }
 
-      const existing = await db.select({ cardVersion: staffCredential.cardVersion })
-        .from(staffCredential)
-        .where(and(
-          eq(staffCredential.staffId, staffId),
-          eq(staffCredential.credentialType, parsed.data.credentialType),
-        ));
-      const cardVersion = Math.max(0, ...existing.map((item) => item.cardVersion)) + 1;
-      const credentialRef = generateCardToken();
-      const [created] = await db.insert(staffCredential).values({
+      const { created, credentialRef } = await withCredentialIssueLock(
         staffId,
-        credentialType: parsed.data.credentialType,
-        credentialRef,
-        cardVersion,
-        expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
-      }).returning({
-        id: staffCredential.id,
-        credentialType: staffCredential.credentialType,
-        cardVersion: staffCredential.cardVersion,
-        status: staffCredential.status,
-        issuedAt: staffCredential.issuedAt,
-        expiresAt: staffCredential.expiresAt,
-      });
-      if (!created) throw new Error("The staff card could not be issued.");
-      try {
-        await db.update(staffCredential)
-          .set({
-            status: "REVOKED",
-            revokedAt: new Date(),
-            revokedReason: "Superseded by a reissued card.",
-          })
-          .where(and(
-            eq(staffCredential.staffId, staffId),
-            eq(staffCredential.credentialType, parsed.data.credentialType),
-            eq(staffCredential.status, "ACTIVE"),
-            ne(staffCredential.id, created.id),
-          ));
-      } catch (error) {
-        try {
-          const [revoked] = await db.update(staffCredential)
-            .set({
-              status: "REVOKED",
-              revokedAt: new Date(),
-              revokedReason: "Card reissue could not revoke the previous credential.",
-            })
+        parsed.data.credentialType,
+        async () => {
+          const existing = await db.select({ cardVersion: staffCredential.cardVersion })
+            .from(staffCredential)
             .where(and(
-              eq(staffCredential.id, created.id),
-              eq(staffCredential.status, "ACTIVE"),
-            ))
-            .returning({ id: staffCredential.id });
-          if (!revoked) throw new Error("The new card could not be revoked after a failed reissue.");
-        } catch (compensationError) {
-          throw new AggregateError(
-            [error, compensationError],
-            "Card reissue failed and its new credential could not be safely revoked.",
-          );
-        }
-        throw error;
-      }
+              eq(staffCredential.staffId, staffId),
+              eq(staffCredential.credentialType, parsed.data.credentialType),
+            ));
+          const cardVersion = Math.max(0, ...existing.map((item) => item.cardVersion)) + 1;
+          const credentialRef = generateCardToken();
+          const [created] = await db.insert(staffCredential).values({
+            staffId,
+            credentialType: parsed.data.credentialType,
+            credentialRef,
+            cardVersion,
+            expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+          }).returning({
+            id: staffCredential.id,
+            credentialType: staffCredential.credentialType,
+            cardVersion: staffCredential.cardVersion,
+            status: staffCredential.status,
+            issuedAt: staffCredential.issuedAt,
+            expiresAt: staffCredential.expiresAt,
+          });
+          if (!created) throw new Error("The staff card could not be issued.");
+          try {
+            await db.update(staffCredential)
+              .set({
+                status: "REVOKED",
+                revokedAt: new Date(),
+                revokedReason: "Superseded by a reissued card.",
+              })
+              .where(and(
+                eq(staffCredential.staffId, staffId),
+                eq(staffCredential.credentialType, parsed.data.credentialType),
+                eq(staffCredential.status, "ACTIVE"),
+                ne(staffCredential.id, created.id),
+              ));
+          } catch (error) {
+            try {
+              const [revoked] = await db.update(staffCredential)
+                .set({
+                  status: "REVOKED",
+                  revokedAt: new Date(),
+                  revokedReason: "Card reissue could not revoke the previous credential.",
+                })
+                .where(and(
+                  eq(staffCredential.id, created.id),
+                  eq(staffCredential.status, "ACTIVE"),
+                ))
+                .returning({ id: staffCredential.id });
+              if (!revoked) {
+                throw new Error("The new card could not be revoked after a failed reissue.");
+              }
+            } catch (compensationError) {
+              throw new AggregateError(
+                [error, compensationError],
+                "Card reissue failed and its new credential could not be safely revoked.",
+              );
+            }
+            throw error;
+          }
+          return { created, credentialRef };
+        },
+      );
 
       res.setHeader("Cache-Control", "no-store");
       res.status(201).json({

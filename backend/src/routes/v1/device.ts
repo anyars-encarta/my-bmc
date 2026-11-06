@@ -1,18 +1,17 @@
+import { eq } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
-import { eq } from "drizzle-orm";
-
 import { db } from "../../db/index.js";
-import { attendanceDevice, punchLog } from "../../db/schema/index.js";
+import { attendanceDevice, facilitySetup, punchLog } from "../../db/schema/index.js";
 import { MAX_DEVICE_BATCH_SIZE } from "../../lib/attendance.js";
 import { requireDeviceAuthentication } from "../../lib/deviceAuthentication.js";
-import { preflightPunch, processPunch } from "../../lib/punchProcessor.js";
+import { preflightPunch, withPreflightLimit } from "../../lib/punchProcessor.js";
+import { schedulePunchProcessing } from "../../lib/punchProcessing.js";
 import { resolveFacilityTimezone } from "../../lib/facilityClock.js";
 import { badRequest } from "../../lib/errors.js";
 
 const router = Router();
-const processingQueues = new Map<string, Promise<void>>();
 
 const punchSchema = z.object({
   deviceEventId: z.string().trim().min(1).max(80),
@@ -22,26 +21,6 @@ const punchSchema = z.object({
   directionHint: z.enum(["IN", "OUT", "AUTO"]).optional().default("AUTO"),
   verifyMode: z.string().max(20).optional(),
 });
-
-const schedulePunchProcessing = (punchId: string, staffId: string | null, requestId?: string) => {
-  const queueKey = staffId ?? punchId;
-  const previous = processingQueues.get(queueKey) ?? Promise.resolve();
-  const current = previous.then(async () => {
-    try {
-      await processPunch(punchId);
-    } catch (error) {
-      console.error("Punch processing failed; the event remains available for retry.", {
-        punchId,
-        requestId,
-        error,
-      });
-    }
-  });
-  processingQueues.set(queueKey, current);
-  void current.finally(() => {
-    if (processingQueues.get(queueKey) === current) processingQueues.delete(queueKey);
-  });
-};
 
 router.use(requireDeviceAuthentication);
 
@@ -64,10 +43,14 @@ router.get("/ping", async (req, res, next) => {
         .where(eq(attendanceDevice.id, device.id));
     }
 
+    const [facility] = await db.select({ timezone: facilitySetup.timezone })
+      .from(facilitySetup)
+      .limit(1);
     res.json({
       data: {
         serverTime: new Date().toISOString(),
-        timezone: await resolveFacilityTimezone(),
+        timezone: facility?.timezone ?? await resolveFacilityTimezone(),
+        timezoneResolved: Boolean(facility?.timezone),
         clockSkewSeconds,
       },
     });
@@ -109,12 +92,12 @@ router.post("/punches", async (req, res, next) => {
       const item = parsed.data;
       const receivedAt = new Date();
       const punchedAt = new Date(item.punchedAt);
-      const preflight = await preflightPunch({
+      const preflight = await withPreflightLimit(() => preflightPunch({
         credentialType: item.credentialType,
         credentialRef: item.credentialRef,
         punchedAt,
         receivedAt,
-      });
+      }));
       return {
         candidate,
         item,

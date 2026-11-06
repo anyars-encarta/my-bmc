@@ -1,7 +1,7 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { NextFunction, Request, Response } from "express";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import { attendanceDevice } from "../db/schema/index.js";
@@ -50,6 +50,10 @@ export const requireDeviceAuthentication = async (
       throw unauthorized("Device credentials are invalid or disabled.", "DEVICE_AUTH_INVALID");
     }
 
+    if (!(await verifyDeviceKey(key, device.apiKeyHash))) {
+      throw unauthorized("Device credentials are invalid or disabled.", "DEVICE_AUTH_INVALID");
+    }
+
     const now = Date.now();
     const windowStart = new Date(Math.floor(now / RATE_WINDOW_MS) * RATE_WINDOW_MS);
     const [rateState] = await db.update(attendanceDevice)
@@ -64,8 +68,13 @@ export const requireDeviceAuthentication = async (
             OR ${attendanceDevice.rateLimitWindowStart} < ${windowStart}
           THEN ${windowStart} ELSE ${attendanceDevice.rateLimitWindowStart}
         END`,
+        lastSeenAt: new Date(now),
       })
-      .where(eq(attendanceDevice.id, device.id))
+      .where(and(
+        eq(attendanceDevice.id, device.id),
+        eq(attendanceDevice.status, "ACTIVE"),
+        eq(attendanceDevice.apiKeyHash, device.apiKeyHash),
+      ))
       .returning({
         requestCount: attendanceDevice.rateLimitCount,
         windowStart: attendanceDevice.rateLimitWindowStart,
@@ -88,13 +97,6 @@ export const requireDeviceAuthentication = async (
       return;
     }
 
-    if (!(await verifyDeviceKey(key, device.apiKeyHash))) {
-      throw unauthorized("Device credentials are invalid or disabled.", "DEVICE_AUTH_INVALID");
-    }
-
-    await db.update(attendanceDevice)
-      .set({ lastSeenAt: new Date() })
-      .where(eq(attendanceDevice.id, device.id));
     req.device = device;
     next();
   } catch (error) {

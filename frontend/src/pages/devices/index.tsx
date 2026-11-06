@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -80,6 +81,10 @@ export const DevicesPage = () => {
   });
   const [enabling, setEnabling] = useState(false);
   const [disabling, setDisabling] = useState(false);
+  const [rotatingDeviceIds, setRotatingDeviceIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const rotatingDeviceIdsRef = useRef(new Set<string>());
 
   const request = useCallback(async <T,>(path: string, init?: RequestInit) => {
     const response = await fetch(`${apiBase}/v1/${path}`, {
@@ -96,28 +101,42 @@ export const DevicesPage = () => {
     return payload;
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
-      const [deviceResult, unitResult] = await Promise.all([
+      const [deviceResult, unitResult] = await Promise.allSettled([
         request<AttendanceDevice[]>("devices"),
         request<OrgUnitRecord[]>("org-units/tree"),
       ]);
-      setDevices(deviceResult.data ?? []);
-      setUnits(unitResult.data ?? []);
+      if (unitResult.status === "fulfilled") {
+        setUnits(unitResult.value.data ?? []);
+      } else {
+        toast.error(
+          unitResult.reason instanceof Error
+            ? unitResult.reason.message
+            : "Unable to load locations.",
+        );
+      }
+      if (deviceResult.status === "rejected") throw deviceResult.reason;
+      setDevices(deviceResult.value.data ?? []);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [request]);
 
   useEffect(() => {
-    load().catch((error: unknown) => {
+    const reportLoadError = (error: unknown) => {
       toast.error(
         error instanceof Error
           ? error.message
           : "Unable to load attendance devices.",
       );
-    });
+    };
+    void load(true).catch(reportLoadError);
+    const refreshTimer = window.setInterval(() => {
+      void load().catch(reportLoadError);
+    }, 60_000);
+    return () => window.clearInterval(refreshTimer);
   }, [load]);
 
   const unitOptions = useMemo(
@@ -191,6 +210,9 @@ export const DevicesPage = () => {
   };
 
   const rotateKey = async (device: AttendanceDevice) => {
+    if (rotatingDeviceIdsRef.current.has(device.id)) return;
+    rotatingDeviceIdsRef.current.add(device.id);
+    setRotatingDeviceIds(new Set(rotatingDeviceIdsRef.current));
     try {
       const result = await request<{ apiKey: string }>(
         `devices/${device.id}/rotate-key`,
@@ -208,6 +230,9 @@ export const DevicesPage = () => {
           ? error.message
           : "Unable to rotate the device key.",
       );
+    } finally {
+      rotatingDeviceIdsRef.current.delete(device.id);
+      setRotatingDeviceIds(new Set(rotatingDeviceIdsRef.current));
     }
   };
 
@@ -475,7 +500,10 @@ export const DevicesPage = () => {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={device.status !== "ACTIVE"}
+                            disabled={
+                              device.status !== "ACTIVE" ||
+                              rotatingDeviceIds.has(device.id)
+                            }
                             onClick={() => rotateKey(device)}
                             className="cursor-pointer"
                           >
