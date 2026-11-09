@@ -3,7 +3,7 @@ import { ensureAuditPartitions } from "./lib/platform.js";
 import { runLicenceExpiryJob } from "./jobs/licenceExpiryJob.js";
 import { materializeFixedScheduleWindow } from "./jobs/fixedScheduleMaterializer.js";
 import { seedGhanaPublicHolidays } from "./jobs/ghanaHolidaySeed.js";
-import { recoverPendingPunches } from "./lib/punchProcessing.js";
+import { startAttendanceJobs } from "./jobs/attendanceJobs.js";
 
 const PORT = 8000;
 
@@ -25,13 +25,7 @@ const start = async () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });
 
-  const recoverPunches = () => {
-    recoverPendingPunches().catch((error) => {
-      console.error("Failed to recover unprocessed attendance punches", error);
-    });
-  };
-  recoverPunches();
-  setInterval(recoverPunches, 30_000);
+  startAttendanceJobs();
 
   setInterval(async () => {
     try {

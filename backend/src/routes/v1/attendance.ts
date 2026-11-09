@@ -295,6 +295,7 @@ router.post(
         .set({
           status: "ACTIVE",
           lastSeenAt: null,
+          healthAlertedAt: null,
         })
         .where(eq(attendanceDevice.id, id))
         .returning({

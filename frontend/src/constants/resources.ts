@@ -72,6 +72,27 @@ export const appResources: AppResource[] = [
     icon: Fingerprint,
   },
   {
+    name: "attendance",
+    list: "/attendance",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "ACCOUNTS", "UNIT_MANAGER"],
+    label: "Attendance Operations",
+    icon: ClipboardCheck,
+  },
+  {
+    name: "attendance-pilot",
+    list: "/attendance-pilot",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"],
+    label: "Attendance Pilot",
+    icon: Fingerprint,
+  },
+  {
+    name: "my-attendance",
+    list: "/my-attendance",
+    allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER", "STAFF"],
+    label: "My Attendance",
+    icon: CalendarRange,
+  },
+  {
     name: "my-schedule",
     list: "/my-schedule",
     allowedRoles: ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER", "STAFF"],

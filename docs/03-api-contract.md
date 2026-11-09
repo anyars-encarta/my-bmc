@@ -179,14 +179,19 @@ Rostering writes use the Neon HTTP driver without `db.transaction()`. Bulk entry
 | POST | `/devices/:id/rotate-key` · `/devices/:id/disable` · `/devices/:id/enable` | HR SA | rotation returns a one-time key; enable/disable immediately controls device access |
 | POST/GET | `/staff/:id/credentials` · `/:cid/revoke` · `/staff/:id/fingerprint-enrolment` | HR | card issue returns printable QR/barcode |
 | GET | `/attendance?unitId&staffId&from&to` | HR UM(scoped) AC(read) | |
-| GET | `/me/attendance` | ST | |
-| GET | `/attendance/exceptions?status=OPEN` · POST `/:id/resolve` | UM(scoped) HR | |
-| POST | `/attendance/:id/corrections` · `/corrections/:cid/approve` | UM → HR | two-step, reasoned |
-| POST | `/attendance/manual-punch` | UM | when a device is down; approval required |
+| GET | `/me/attendance?from&to` · `/attendance/me/corrections` | ST | own attendance and correction request history |
+| GET | `/attendance/exceptions?status&unitId&from&to` · POST `/attendance/exceptions/:exceptionId/resolve` | UM(scoped) HR | `action=EXCUSE` or `CONFIRM`, with reason |
+| GET | `/attendance/corrections?status` · POST `/attendance/:attendanceId/corrections` | UM(scoped) ST(own) | reasoned correction request |
+| POST | `/attendance/corrections/:correctionId/decision` | HR | `decision=APPROVE` or `REJECT`, with reason; requester cannot approve own request |
+| GET | `/attendance/manual-punch-requests?status` · POST `/attendance/manual-punch` | UM(scoped) | device outage requests; approval required |
+| POST | `/attendance/manual-punch-requests/:requestId/decision` | HR | `decision=APPROVE` or `REJECT`, with reason |
 | GET | `/attendance/summary?month&unitId` | HR PO AC | feeds payroll |
-| POST | `/kiosk/punch` | KIOSK device | browser kiosk variant of device punch |
+| GET | `/devices/health` | HR | online state and persisted health-alert state |
+| GET/PUT | `/attendance/pilot` | HR | Release 1 ward/office device pair and training/window-tuning sign-offs |
 
-Device punch batches accept up to 500 items and return an outcome per item. `(device_id, device_event_id)` is the idempotency key; credentials are checked before accepting new events, future timestamps over five minutes are rejected, and older offline punches are accepted with clock-skew exceptions. `GET /device/ping?deviceTime=<ISO-8601>` returns facility server time and the measured skew.
+Device punch batches accept up to 500 items and return an outcome per item. `(device_id, device_event_id)` is the idempotency key; credentials are checked before accepting new events, future timestamps over five minutes are rejected, and older offline punches are accepted with clock-skew exceptions. Accepted kiosk results include the matched employee name, Employee ID, and photo when available; rejected credentials do not expose employee details. The kiosk uses this same device-authenticated endpoint and persists offline punches in IndexedDB for idempotent retry. `GET /device/ping?deviceTime=<ISO-8601>` returns facility server time and the measured skew.
+
+Sprint 6 jobs retry punch processing and interrupted approvals, auto-close overdue open records, detect absences only for rostered staff, and raise/clear device-health alerts. Corrections and manual-punch approvals use persisted `PENDING → APPLYING → APPROVED/REJECTED` states with idempotent recovery; they do not use database transactions because the Neon HTTP driver does not support them.
 
 ### Leave & overtime — Sprint 17
 

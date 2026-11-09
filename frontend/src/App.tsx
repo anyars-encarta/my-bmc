@@ -43,6 +43,9 @@ import { RostersPage } from "./pages/rosters";
 import { MySchedulePage } from "./pages/my-schedule";
 import { PublicHolidaysPage } from "./pages/public-holidays";
 import { DevicesPage } from "./pages/devices";
+import { AttendanceOperationsPage, MyAttendancePage } from "./pages/attendance";
+import { AttendanceKioskPage } from "./pages/attendance/kiosk";
+import { AttendancePilotPage } from "./pages/attendance/pilot";
 import CreateUser from "./pages/users/create";
 import EditUser from "./pages/users/edit";
 import ListUsers from "./pages/users/list";
@@ -267,6 +270,7 @@ function App() {
                       </Suspense>
                     }
                   />
+                  <Route path="/kiosk" element={<AttendanceKioskPage />} />
                   <Route
                     element={
                       <Authenticated key="guest-routes" fallback={<Outlet />}>
@@ -313,6 +317,9 @@ function App() {
                       <Route path="public-holidays" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><PublicHolidaysPage /></WorkforceRoleGate>} />
                       <Route path="staffing-requirements" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffingRequirementsPage /></WorkforceRoleGate>} />
                       <Route path="devices" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><DevicesPage /></WorkforceRoleGate>} />
+                      <Route path="attendance" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "ACCOUNTS", "UNIT_MANAGER"]}><AttendanceOperationsPage /></WorkforceRoleGate>} />
+                      <Route path="attendance-pilot" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><AttendancePilotPage /></WorkforceRoleGate>} />
+                      <Route path="my-attendance" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MyAttendancePage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />

@@ -28,6 +28,7 @@ import type {
 import { licensingBodyOptions } from "@/constants/options";
 import PageLoader from "@/components/PageLoader";
 import { StaffAssignments } from "./assignments";
+import { StaffAttendanceCredentials } from "./attendance-credentials";
 import { StaffDeactivation } from "./deactivate";
 import { canReadStaffAssignments, canWriteStaffAssignments } from "@/lib/workforce-access";
 
@@ -47,8 +48,12 @@ export const StaffShow = () => {
   const { result: record } = useShow<StaffRecord>({});
   const { open: notify } = useNotification();
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
+  const identityRoles = identity?.roles ?? (identity?.role ? [identity.role] : []);
   const canReadAssignments = canReadStaffAssignments(identity);
   const canWriteAssignments = canWriteStaffAssignments(identity);
+  const canWriteAttendanceCredentials = identityRoles.some((role) =>
+    ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"].includes(role),
+  );
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
   const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});
   const [jobRoleLabels, setJobRoleLabels] = useState<Record<string, string>>({});
@@ -240,7 +245,6 @@ export const StaffShow = () => {
                 : "Not assigned"
             }
           />
-          <DataItem label="Badge Number" value={record?.badgeNumber ?? undefined} />
           <DataItem label="MoMo Number" value={record?.momoNumber} />
           <DataItem label="MoMo Name" value={record?.momoName} />
           <div className="space-y-1">
@@ -249,6 +253,14 @@ export const StaffShow = () => {
           </div>
         </CardContent>
       </Card>
+
+      {canWriteAttendanceCredentials ? (
+        <StaffAttendanceCredentials
+          staffId={staffId}
+          name={`${record?.firstName ?? ""} ${record?.lastName ?? ""}`.trim()}
+          employeeId={record?.employeeId ?? ""}
+        />
+      ) : null}
 
       {canReadAssignments ? <StaffAssignments staffId={staffId} /> : null}
       {canWriteAssignments ? (

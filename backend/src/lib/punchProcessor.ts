@@ -234,7 +234,7 @@ const getApprovedOvertimeMinutes = async (attendanceRecordId: string) => {
   return requests.reduce((total, request) => total + request.minutes, 0);
 };
 
-const findClockInShift = async (staffId: string, punchedAt: Date) => {
+export const findClockInShift = async (staffId: string, punchedAt: Date) => {
   const candidates = await db
     .select({
       entry: rosterEntry,
@@ -280,7 +280,7 @@ const findClockInShift = async (staffId: string, punchedAt: Date) => {
   return nearest ? byId.get(nearest.id) : undefined;
 };
 
-const getEffectiveUnitId = async (staffId: string, onDate: string) => {
+export const getEffectiveUnitId = async (staffId: string, onDate: string) => {
   const assignments = await db
     .select({
       id: staffAssignment.orgUnitId,

@@ -1,9 +1,9 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { attendanceDevice, facilitySetup, punchLog } from "../../db/schema/index.js";
+import { attendanceDevice, facilitySetup, punchLog, staff } from "../../db/schema/index.js";
 import { MAX_DEVICE_BATCH_SIZE } from "../../lib/attendance.js";
 import { requireDeviceAuthentication } from "../../lib/deviceAuthentication.js";
 import { preflightPunch, withPreflightLimit } from "../../lib/punchProcessor.js";
@@ -148,20 +148,44 @@ router.post("/punches", async (req, res, next) => {
         });
     const newEvents = new Map(inserted.map((entry) => [entry.deviceEventId, entry]));
 
+    const acceptedStaffIds = [...new Set(prepared.flatMap((entry) =>
+      entry.result === "ACCEPTED" && entry.preflight?.staffId
+        ? [entry.preflight.staffId]
+        : [],
+    ))];
+    const employees = acceptedStaffIds.length === 0
+      ? []
+      : await db.select({
+        id: staff.id,
+        employeeId: staff.employeeId,
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        imageUrl: staff.imageUrl,
+      }).from(staff).where(inArray(staff.id, acceptedStaffIds));
+    const employeeById = new Map(employees.map((employee) => [employee.id, {
+      employeeId: employee.employeeId,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      imageUrl: employee.imageUrl,
+    }]));
+
     const respondedEventIds = new Set<string>();
     const jobs: Array<{ id: string; staffId: string | null }> = [];
     const results = prepared.map((entry) => {
       if (!entry.item || !entry.preflight) {
         return { deviceEventId: entry.deviceEventId, result: entry.result };
       }
+      const employee = entry.result === "ACCEPTED" && entry.preflight.staffId
+        ? employeeById.get(entry.preflight.staffId)
+        : undefined;
       if (respondedEventIds.has(entry.item.deviceEventId)) {
-        return { deviceEventId: entry.deviceEventId, result: "DUPLICATE" };
+        return { deviceEventId: entry.deviceEventId, result: "DUPLICATE", employee };
       }
       respondedEventIds.add(entry.item.deviceEventId);
       const saved = newEvents.get(entry.item.deviceEventId);
-      if (!saved) return { deviceEventId: entry.deviceEventId, result: "DUPLICATE" };
+      if (!saved) return { deviceEventId: entry.deviceEventId, result: "DUPLICATE", employee };
       jobs.push({ id: saved.id, staffId: saved.staffId });
-      return { deviceEventId: entry.deviceEventId, result: entry.result };
+      return { deviceEventId: entry.deviceEventId, result: entry.result, employee };
     });
 
     res.status(200).json({ data: { results } });

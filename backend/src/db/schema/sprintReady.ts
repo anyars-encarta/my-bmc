@@ -448,7 +448,9 @@ export const attendanceDevice = pgTable("attendance_device", {
   orgUnitId: uuid("org_unit_id"),
   apiKeyHash: varchar("api_key_hash", { length: 100 }).notNull(),
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  healthAlertedAt: timestamp("health_alerted_at", { withTimezone: true }),
   lastClockSkewSeconds: integer("last_clock_skew_seconds"),
   rateLimitWindowStart: timestamp("rate_limit_window_start", { withTimezone: true }),
   rateLimitCount: integer("rate_limit_count").default(0).notNull(),
@@ -494,10 +496,13 @@ export const attendanceRecord = pgTable("attendance_record", {
   orgUnitId: uuid("org_unit_id"),
   shiftTypeId: uuid("shift_type_id"),
   clockInAt: timestamp("clock_in_at", { withTimezone: true }).notNull(),
-  clockInPunchId: uuid("clock_in_punch_id").notNull(),
+  clockInPunchId: uuid("clock_in_punch_id"),
+  manualClockInRequestId: uuid("manual_clock_in_request_id"),
   clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
   clockOutPunchId: uuid("clock_out_punch_id"),
+  manualClockOutRequestId: uuid("manual_clock_out_request_id"),
   status: varchar("status", { length: 12 }).default('OPEN').notNull(),
+  source: varchar("source", { length: 10 }).default('DEVICE').notNull(),
   workedMinutes: integer("worked_minutes"),
   lateMinutes: integer("late_minutes").default(0).notNull(),
   earlyLeaveMinutes: integer("early_leave_minutes").default(0).notNull(),
@@ -516,6 +521,12 @@ export const attendanceRecord = pgTable("attendance_record", {
   uniqueClockOutPunch: uniqueIndex("attendance_clock_out_punch_uq")
     .on(table.clockOutPunchId)
     .where(sql`${table.clockOutPunchId} IS NOT NULL`),
+  uniqueManualClockIn: uniqueIndex("attendance_manual_clock_in_uq")
+    .on(table.manualClockInRequestId)
+    .where(sql`${table.manualClockInRequestId} IS NOT NULL`),
+  uniqueManualClockOut: uniqueIndex("attendance_manual_clock_out_uq")
+    .on(table.manualClockOutRequestId)
+    .where(sql`${table.manualClockOutRequestId} IS NOT NULL`),
 }));
 
 export type AttendanceRecord = typeof attendanceRecord.$inferSelect;
@@ -532,6 +543,7 @@ export const attendanceException = pgTable("attendance_exception", {
   resolvedBy: text("resolved_by"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   note: text("note"),
+  jobKey: varchar("job_key", { length: 120 }),
 }, (table) => ({
   exceptionTypeCheck: check(
     "attendance_exception_exception_type_check",
@@ -563,12 +575,49 @@ export const attendanceCorrection = pgTable("attendance_correction", {
   newClockOut: timestamp("new_clock_out", { withTimezone: true }),
   reason: text("reason").notNull(),
   requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow().notNull(),
+  status: varchar("status", { length: 10 }).default('PENDING').notNull(),
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  decisionReason: text("decision_reason"),
 });
 
 export type AttendanceCorrection = typeof attendanceCorrection.$inferSelect;
 export type NewAttendanceCorrection = typeof attendanceCorrection.$inferInsert;
+
+export const manualPunchRequest = pgTable("manual_punch_request", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  staffId: uuid("staff_id").notNull(),
+  punchedAt: timestamp("punched_at", { withTimezone: true }).notNull(),
+  direction: varchar("direction", { length: 3 }).notNull(),
+  reason: text("reason").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow().notNull(),
+  status: varchar("status", { length: 10 }).default('PENDING').notNull(),
+  decidedBy: text("decided_by"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionReason: text("decision_reason"),
+});
+
+export type ManualPunchRequest = typeof manualPunchRequest.$inferSelect;
+export type NewManualPunchRequest = typeof manualPunchRequest.$inferInsert;
+
+export const attendancePilotSetup = pgTable("attendance_pilot_setup", {
+  scope: varchar("scope", { length: 20 }).primaryKey().default("RELEASE1"),
+  wardUnitId: uuid("ward_unit_id").notNull(),
+  officeUnitId: uuid("office_unit_id").notNull(),
+  fingerprintDeviceId: uuid("fingerprint_device_id").notNull(),
+  qrDeviceId: uuid("qr_device_id").notNull(),
+  trainingSignedBy: text("training_signed_by"),
+  trainingSignedAt: timestamp("training_signed_at", { withTimezone: true }),
+  tuningConfirmedAt: timestamp("tuning_confirmed_at", { withTimezone: true }),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type AttendancePilotSetup = typeof attendancePilotSetup.$inferSelect;
+export type NewAttendancePilotSetup = typeof attendancePilotSetup.$inferInsert;
 
 export const patient = pgTable("patient", {
   id: uuid("id").primaryKey().defaultRandom(),

@@ -120,6 +120,13 @@
       "when": 1793974264782,
       "tag": "0016_attendance_exception_types",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793979000000,
+      "tag": "0017_sprint6_attendance_operations",
+      "breakpoints": true
     }
   ]
 }

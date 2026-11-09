@@ -43,6 +43,15 @@ type AttendanceDevice = {
   lastSeenAt: string | null;
   lastClockSkewSeconds: number | null;
 };
+type DeviceHealth = {
+  deviceId: string;
+  code: string;
+  name: string;
+  online: boolean;
+  alert: boolean;
+  healthAlertedAt: string | null;
+  orgUnitName: string | null;
+};
 type ApiEnvelope<T> = {
   data?: T;
   message?: string;
@@ -66,6 +75,7 @@ const isOnline = (seenAt: string | null) =>
 
 export const DevicesPage = () => {
   const [devices, setDevices] = useState<AttendanceDevice[]>([]);
+  const [deviceHealth, setDeviceHealth] = useState<DeviceHealth[]>([]);
   const [units, setUnits] = useState<OrgUnitRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -104,9 +114,10 @@ export const DevicesPage = () => {
   const load = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const [deviceResult, unitResult] = await Promise.allSettled([
+      const [deviceResult, unitResult, healthResult] = await Promise.allSettled([
         request<AttendanceDevice[]>("devices"),
         request<OrgUnitRecord[]>("org-units/tree"),
+        request<DeviceHealth[]>("devices/health"),
       ]);
       if (unitResult.status === "fulfilled") {
         setUnits(unitResult.value.data ?? []);
@@ -115,6 +126,15 @@ export const DevicesPage = () => {
           unitResult.reason instanceof Error
             ? unitResult.reason.message
             : "Unable to load locations.",
+        );
+      }
+      if (healthResult.status === "fulfilled") {
+        setDeviceHealth(healthResult.value.data ?? []);
+      } else {
+        toast.error(
+          healthResult.reason instanceof Error
+            ? healthResult.reason.message
+            : "Unable to load device health alerts.",
         );
       }
       if (deviceResult.status === "rejected") throw deviceResult.reason;
@@ -160,6 +180,8 @@ export const DevicesPage = () => {
       device.lastClockSkewSeconds !== null &&
       Math.abs(device.lastClockSkewSeconds) > 300,
   ).length;
+  const healthById = new Map(deviceHealth.map((device) => [device.deviceId, device]));
+  const offlineAlertCount = deviceHealth.filter((device) => device.alert).length;
 
   const register = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -289,7 +311,7 @@ export const DevicesPage = () => {
         </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Active devices</CardTitle>
@@ -314,6 +336,14 @@ export const DevicesPage = () => {
           </CardHeader>
           <CardContent className="text-2xl font-semibold">
             {skewCount}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Offline health alerts</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {offlineAlertCount}
           </CardContent>
         </Card>
       </div>
@@ -455,6 +485,10 @@ export const DevicesPage = () => {
                 <tbody>
                   {devices.map((device) => (
                     <tr key={device.id} className="border-b last:border-0">
+                      {(() => {
+                        const health = healthById.get(device.id);
+                        return (
+                          <>
                       <td className="p-3">
                         <div className="font-medium">{device.name}</div>
                         <div className="text-xs text-muted-foreground">
@@ -471,17 +505,22 @@ export const DevicesPage = () => {
                         <Badge
                           variant={
                             device.status === "ACTIVE" &&
-                            isOnline(device.lastSeenAt)
+                            health?.online
                               ? "default"
                               : "outline"
                           }
                         >
                           {device.status === "DISABLED"
                             ? "Disabled"
-                            : isOnline(device.lastSeenAt)
+                            : health?.online
                             ? "Online"
                             : "Offline"}
                         </Badge>
+                        {health?.alert ? (
+                          <Badge variant="destructive" className="ml-2">
+                            Alert
+                          </Badge>
+                        ) : null}
                       </td>
                       <td className="p-3">
                         {device.lastSeenAt
@@ -533,6 +572,9 @@ export const DevicesPage = () => {
                           </Button>
                         </div>
                       </td>
+                          </>
+                        );
+                      })()}
                     </tr>
                   ))}
                 </tbody>
