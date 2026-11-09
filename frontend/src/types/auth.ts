@@ -1,4 +1,28 @@
-export type AppRole = "accounts" | "admin";
+export type AppRole = "super_admin"
+  | "hospital_admin"
+  | "hr_manager"
+  | "payroll_officer"
+  | "unit_manager"
+  | "roster_officer"
+  | "registrar"
+  | "records_officer"
+  | "cashier"
+  | "accounts"
+  | "billing_officer"
+  | "doctor"
+  | "nurse"
+  | "midwife"
+  | "pharmacist"
+  | "pharmacy_tech"
+  | "lab_scientist"
+  | "radiographer"
+  | "radiologist"
+  | "store_keeper"
+  | "procurement_officer"
+  | "report_viewer"
+  | "auditor"
+  | "dpo"
+  | "staff";
 
 export type AuthUser = {
   id: string;

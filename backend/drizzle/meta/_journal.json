@@ -134,6 +134,13 @@
       "when": 1794220000000,
       "tag": "0018_attendance_approval_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794242945743,
+      "tag": "0019_kind_surge",
+      "breakpoints": true
     }
   ]
 }

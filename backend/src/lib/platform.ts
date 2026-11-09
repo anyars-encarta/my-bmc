@@ -6,30 +6,31 @@ import { db } from "../db/index.js";
 import { appUserRole, auditLog, user, userUnitScope } from "../db/schema/index.js";
 
 export const APP_ROLES = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "PAYROLL_OFFICER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
-  "REGISTRAR",
-  "RECORDS_OFFICER",
-  "CASHIER",
-  "ACCOUNTS",
-  "BILLING_OFFICER",
-  "DOCTOR",
-  "NURSE",
-  "PHARMACIST",
-  "PHARMACY_TECH",
-  "LAB_SCIENTIST",
-  "RADIOGRAPHER",
-  "RADIOLOGIST",
-  "STORE_KEEPER",
-  "PROCUREMENT_OFFICER",
-  "REPORT_VIEWER",
-  "AUDITOR",
-  "DPO",
-  "STAFF",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
+  "unit_manager",
+  "roster_officer",
+  "registrar",
+  "records_officer",
+  "cashier",
+  "accounts",
+  "billing_officer",
+  "doctor",
+  "nurse",
+  "midwife",
+  "pharmacist",
+  "pharmacy_tech",
+  "lab_scientist",
+  "radiographer",
+  "radiologist",
+  "store_keeper",
+  "procurement_officer",
+  "report_viewer",
+  "auditor",
+  "dpo",
+  "staff",
 ] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
@@ -37,8 +38,8 @@ export type AppRole = (typeof APP_ROLES)[number];
 const ROLE_SET = new Set<AppRole>(APP_ROLES);
 
 const ROLE_PERMISSION_MAP: Record<AppRole, string[]> = {
-  SUPER_ADMIN: ["*"],
-  HOSPITAL_ADMIN: [
+  super_admin: ["*"],
+  hospital_admin: [
     "facility.read",
     "facility.write",
     "users.read",
@@ -47,33 +48,34 @@ const ROLE_PERMISSION_MAP: Record<AppRole, string[]> = {
     "staff.read",
     "audit.read",
   ],
-  HR_MANAGER: ["staff.read", "staff.write", "roster.read", "roster.write"],
-  PAYROLL_OFFICER: ["payroll.read", "payroll.write", "staff.read"],
-  UNIT_MANAGER: ["staff.read", "roster.read", "roster.publish"],
-  ROSTER_OFFICER: ["roster.read", "roster.write", "staff.read"],
-  REGISTRAR: ["patient.read", "patient.write", "consent.read", "consent.write"],
-  RECORDS_OFFICER: ["patient.read", "consent.read"],
-  CASHIER: ["billing.read", "billing.write"],
-  ACCOUNTS: ["payments.read", "payments.write", "users.read"],
-  BILLING_OFFICER: ["billing.read", "billing.write"],
-  DOCTOR: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
-  NURSE: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
-  PHARMACIST: ["pharmacy.read", "pharmacy.write", "patient.read"],
-  PHARMACY_TECH: ["pharmacy.read", "pharmacy.write"],
-  LAB_SCIENTIST: ["laboratory.read", "laboratory.write", "patient.read"],
-  RADIOGRAPHER: ["radiology.read", "radiology.write", "patient.read"],
-  RADIOLOGIST: ["radiology.read", "radiology.report.write", "patient.read"],
-  STORE_KEEPER: ["inventory.read", "inventory.write"],
-  PROCUREMENT_OFFICER: ["inventory.read", "procurement.write"],
-  REPORT_VIEWER: ["reporting.read"],
-  AUDITOR: ["audit.read", "reporting.read"],
-  DPO: ["audit.read", "privacy.read", "consent.read"],
-  STAFF: ["self.read", "schedule.read"],
+  hr_manager: ["staff.read", "staff.write", "roster.read", "roster.write"],
+  payroll_officer: ["payroll.read", "payroll.write", "staff.read"],
+  unit_manager: ["staff.read", "roster.read", "roster.publish"],
+  roster_officer: ["roster.read", "roster.write", "staff.read"],
+  registrar: ["patient.read", "patient.write", "consent.read", "consent.write"],
+  records_officer: ["patient.read", "consent.read"],
+  cashier: ["billing.read", "billing.write"],
+  accounts: ["payments.read", "payments.write", "users.read"],
+  billing_officer: ["billing.read", "billing.write"],
+  doctor: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  nurse: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  midwife: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  pharmacist: ["pharmacy.read", "pharmacy.write", "patient.read"],
+  pharmacy_tech: ["pharmacy.read", "pharmacy.write"],
+  lab_scientist: ["laboratory.read", "laboratory.write", "patient.read"],
+  radiographer: ["radiology.read", "radiology.write", "patient.read"],
+  radiologist: ["radiology.read", "radiology.report.write", "patient.read"],
+  store_keeper: ["inventory.read", "inventory.write"],
+  procurement_officer: ["inventory.read", "procurement.write"],
+  report_viewer: ["reporting.read"],
+  auditor: ["audit.read", "reporting.read"],
+  dpo: ["audit.read", "privacy.read", "consent.read"],
+  staff: ["self.read", "schedule.read"],
 };
 
 const LEGACY_TO_APP_ROLE: Record<"admin" | "accounts", AppRole> = {
-  admin: "SUPER_ADMIN",
-  accounts: "ACCOUNTS",
+  admin: "super_admin",
+  accounts: "accounts",
 };
 
 /** Maps an HTTP method to the audit action used for successful writes. */
@@ -108,7 +110,7 @@ export const isAppRole = (value: unknown): value is AppRole => {
 
 /** Resolves the sorted union of permissions granted by a user's assigned roles. */
 export const resolveRolePermissions = (roles: AppRole[]) => {
-  if (roles.includes("SUPER_ADMIN")) {
+  if (roles.includes("super_admin")) {
     return ["*"];
   }
 
@@ -139,7 +141,7 @@ export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accou
 
 /** Determines whether a user's roles satisfy an allowed-role list. */
 export const userHasRole = (userRoles: AppRole[], allowed: readonly string[]) => {
-  if (userRoles.includes("SUPER_ADMIN")) {
+  if (userRoles.includes("super_admin")) {
     return true;
   }
 

@@ -41,11 +41,38 @@ type SignUpFormProps = {
 export const SignUpForm = ({
   embedded = false,
   title = "Sign up",
-  description = "Welcome to BMC Finance Desk.",
+  description = "Welcome to Encarta Hospital Management System.",
 }: SignUpFormProps) => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"admin" | "accounts">("accounts");
+  const [role, setRole] = useState<
+    | "accounts"
+    | "admin"
+    | "super_admin"
+    | "hospital_admin"
+    | "hr_manager"
+    | "payroll_officer"
+    | "unit_manager"
+    | "roster_officer"
+    | "registrar"
+    | "records_officer"
+    | "cashier"
+    | "billing_officer"
+    | "doctor"
+    | "nurse"
+    | "midwife"
+    | "pharmacist"
+    | "pharmacy_tech"
+    | "lab_scientist"
+    | "radiographer"
+    | "radiologist"
+    | "store_keeper"
+    | "procurement_officer"
+    | "report_viewer"
+    | "auditor"
+    | "dpo"
+    | "staff"
+  >("staff");
   const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(
     null,
   );
@@ -181,7 +208,35 @@ export const SignUpForm = ({
                   <Select
                     value={role}
                     onValueChange={(value) =>
-                      setRole(value as "admin" | "accounts")
+                      setRole(
+                        value as
+                          | "accounts"
+                          | "admin"
+                          | "super_admin"
+                          | "hospital_admin"
+                          | "hr_manager"
+                          | "payroll_officer"
+                          | "unit_manager"
+                          | "roster_officer"
+                          | "registrar"
+                          | "records_officer"
+                          | "cashier"
+                          | "billing_officer"
+                          | "doctor"
+                          | "nurse"
+                          | "midwife"
+                          | "pharmacist"
+                          | "pharmacy_tech"
+                          | "lab_scientist"
+                          | "radiographer"
+                          | "radiologist"
+                          | "store_keeper"
+                          | "procurement_officer"
+                          | "report_viewer"
+                          | "auditor"
+                          | "dpo"
+                          | "staff",
+                      )
                     }
                   >
                     <SelectTrigger id="role">
@@ -190,6 +245,48 @@ export const SignUpForm = ({
                     <SelectContent>
                       <SelectItem value="accounts">Accounts</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="auditor">Auditor</SelectItem>
+                      <SelectItem value="billing_officer">
+                        Billing Officer
+                      </SelectItem>
+                      <SelectItem value="cashier">Cashier</SelectItem>
+                      <SelectItem value="doctor">Doctor</SelectItem>
+                      <SelectItem value="dpo">DPO</SelectItem>
+                      <SelectItem value="hospital_admin">
+                        Hospital Admin
+                      </SelectItem>
+                      <SelectItem value="hr_manager">HR Manager</SelectItem>
+                      <SelectItem value="lab_scientist">
+                        Lab Scientist
+                      </SelectItem>
+                      <SelectItem value="midwife">Midwife</SelectItem>
+                      <SelectItem value="nurse">Nurse</SelectItem>
+                      <SelectItem value="payroll_officer">
+                        Payroll Officer
+                      </SelectItem>
+                      <SelectItem value="pharmacy_tech">
+                        Pharmacy Tech
+                      </SelectItem>
+                      <SelectItem value="pharmacist">Pharmacist</SelectItem>
+                      <SelectItem value="procurement_officer">
+                        Procurement Officer
+                      </SelectItem>
+                      <SelectItem value="radiologist">Radiologist</SelectItem>
+                      <SelectItem value="records_officer">
+                        Records Officer
+                      </SelectItem>
+                      <SelectItem value="radiographer">Radiographer</SelectItem>
+                      <SelectItem value="registrar">Registrar</SelectItem>
+                      <SelectItem value="report_viewer">
+                        Report Viewer
+                      </SelectItem>
+                      <SelectItem value="roster_officer">
+                        Roster Officer
+                      </SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="store_keeper">Store Keeper</SelectItem>
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="unit_manager">Unit Manager</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

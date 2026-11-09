@@ -491,8 +491,64 @@ const ListUsers = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All roles</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="accounts">Accounts</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="auditor">Auditor</SelectItem>
+                  <SelectItem value="billing_officer">
+                    Billing Officer
+                  </SelectItem>
+                  <SelectItem value="cashier">Cashier</SelectItem>
+                  <SelectItem value="doctor">Doctor</SelectItem>
+                  <SelectItem value="dpo">DPO</SelectItem>
+                  <SelectItem value="hospital_admin">
+                    Hospital Admin
+                  </SelectItem>
+                  <SelectItem value="hr_manager">
+                    HR Manager
+                  </SelectItem>
+                  <SelectItem value="lab_scientist">
+                    Lab Scientist
+                  </SelectItem>
+                  <SelectItem value="midwife">Midwife</SelectItem>
+                  <SelectItem value="nurse">Nurse</SelectItem>
+                  <SelectItem value="payroll_officer">
+                    Payroll Officer
+                  </SelectItem>
+                  <SelectItem value="pharmacy_tech">
+                    Pharmacy Tech
+                  </SelectItem>
+                  <SelectItem value="pharmacist">
+                    Pharmacist
+                  </SelectItem>
+                  <SelectItem value="procurement_officer">
+                    Procurement Officer
+                  </SelectItem>
+                  <SelectItem value="radiologist">
+                    Radiologist
+                  </SelectItem>
+                  <SelectItem value="records_officer">
+                    Records Officer
+                  </SelectItem>
+                  <SelectItem value="radiographer">
+                    Radiographer
+                  </SelectItem>
+                  <SelectItem value="registrar">Registrar</SelectItem>
+                  <SelectItem value="report_viewer">
+                    Report Viewer
+                  </SelectItem>
+                  <SelectItem value="roster_officer">
+                    Roster Officer
+                  </SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
+                  <SelectItem value="store_keeper">
+                    Store Keeper
+                  </SelectItem>
+                  <SelectItem value="super_admin">
+                    Super Admin
+                  </SelectItem>
+                  <SelectItem value="unit_manager">
+                    Unit Manager
+                  </SelectItem>
                 </SelectContent>
               </Select>
 

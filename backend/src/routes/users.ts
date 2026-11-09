@@ -14,10 +14,61 @@ const parsePositiveInt = (value: unknown) => {
 
 const isValidRole = (
   value: unknown,
-): value is "admin" | "accounts" => {
+): value is
+  | "accounts"
+  | "admin"
+  | "super_admin"
+  | "hospital_admin"
+  | "hr_manager"
+  | "payroll_officer"
+  | "unit_manager"
+  | "roster_officer"
+  | "registrar"
+  | "records_officer"
+  | "cashier"
+  | "billing_officer"
+  | "doctor"
+  | "nurse"
+  | "midwife"
+  | "pharmacist"
+  | "pharmacy_tech"
+  | "lab_scientist"
+  | "radiographer"
+  | "radiologist"
+  | "store_keeper"
+  | "procurement_officer"
+  | "report_viewer"
+  | "auditor"
+  | "dpo"
+  | "staff" => {
   return (
+    value === "accounts" ||
     value === "admin" ||
-    value === "accounts"
+    value === "super_admin" ||
+    value === "hospital_admin" ||
+    value === "hr_manager" ||
+    value === "payroll_officer" ||
+    value === "unit_manager" ||
+    value === "roster_officer" ||
+    value === "registrar" ||
+    value === "records_officer" ||
+    value === "cashier" ||
+    value === "accounts" ||
+    value === "billing_officer" ||
+    value === "doctor" ||
+    value === "nurse" ||
+    value === "midwife" ||
+    value === "pharmacist" ||
+    value === "pharmacy_tech" ||
+    value === "lab_scientist" ||
+    value === "radiographer" ||
+    value === "radiologist" ||
+    value === "store_keeper" ||
+    value === "procurement_officer" ||
+    value === "report_viewer" ||
+    value === "auditor" ||
+    value === "dpo" ||
+    value === "staff"
   );
 };
 
@@ -151,8 +202,8 @@ router.put("/:id", async (req, res) => {
     const isSelf = req.user?.id === id;
     const isAdmin =
       req.user?.legacyRole === "admin" ||
-      req.user?.roles?.includes("SUPER_ADMIN") ||
-      req.user?.roles?.includes("HOSPITAL_ADMIN");
+      req.user?.roles?.includes("super_admin") ||
+      req.user?.roles?.includes("hospital_admin");
 
     // Only admins can update other users
     if (!isSelf && !isAdmin) {
@@ -214,7 +265,7 @@ router.put("/:id", async (req, res) => {
     if (!isSelf && !role) {
       return res.status(400).json({
         success: false,
-        error: "role must be one of: admin, accounts.",
+        error: "role must be one of: accounts, admin, super_admin, hospital_admin, hr_manager, payroll_officer, unit_manager, roster_officer, registrar, records_officer, cashier, billing_officer, doctor, nurse, midwife, pharmacist, pharmacy_tech, lab_scientist, radiographer, radiologist, store_keeper, procurement_officer, report_viewer, auditor, dpo, staff.",
       });
     }
 
@@ -324,8 +375,9 @@ router.delete("/:id", async (req, res) => {
     // Only admins can delete users
     const canDelete =
       req.user?.legacyRole === "admin" ||
-      req.user?.roles?.includes("SUPER_ADMIN") ||
-      req.user?.roles?.includes("HOSPITAL_ADMIN");
+      req.user?.roles?.includes("admin") ||
+      req.user?.roles?.includes("super_admin") ||
+      req.user?.roles?.includes("hospital_admin");
     if (!canDelete) {
       return res.status(403).json({
         success: false,

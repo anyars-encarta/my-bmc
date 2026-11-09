@@ -45,7 +45,35 @@ const authBaseUrl =
     ?.trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
-const RoleEnum = z.enum(["accounts", "admin"]);
+const RoleEnum = z.enum([
+  "accounts",
+  "admin",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
+  "unit_manager",
+  "roster_officer",
+  "registrar",
+  "records_officer",
+  "cashier",
+  "accounts",
+  "billing_officer",
+  "doctor",
+  "nurse",
+  "midwife",
+  "pharmacist",
+  "pharmacy_tech",
+  "lab_scientist",
+  "radiographer",
+  "radiologist",
+  "store_keeper",
+  "procurement_officer",
+  "report_viewer",
+  "auditor",
+  "dpo",
+  "staff",
+]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
