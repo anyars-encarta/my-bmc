@@ -224,7 +224,7 @@ const findOpenAttendance = async (staffId: string) => {
   return open;
 };
 
-const getApprovedOvertimeMinutes = async (attendanceRecordId: string) => {
+export const getApprovedOvertimeMinutes = async (attendanceRecordId: string) => {
   const requests = await db.select({ minutes: overtimeRequest.minutes })
     .from(overtimeRequest)
     .where(and(

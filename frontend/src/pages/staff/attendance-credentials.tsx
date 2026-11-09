@@ -256,7 +256,7 @@ export const StaffAttendanceCredentials = ({
         <strong>FOUND THIS CARD?</strong>
         <p>Please return it to:</p>
         ${returnAddress}
-        ${contactDetails ? `<p class="contact">${escapeHtml(contactDetails)}</p>` : ""}
+        ${contactDetails ? `<p class="contact">${contactDetails}</p>` : ""}
       </div>
       <div class="card-version">Attendance credential · v${issuedCard.cardVersion}</div>
     </main>`;

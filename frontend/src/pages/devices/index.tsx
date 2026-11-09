@@ -505,14 +505,14 @@ export const DevicesPage = () => {
                         <Badge
                           variant={
                             device.status === "ACTIVE" &&
-                            health?.online
+                            isOnline(device.lastSeenAt)
                               ? "default"
                               : "outline"
                           }
                         >
                           {device.status === "DISABLED"
                             ? "Disabled"
-                            : health?.online
+                            : isOnline(device.lastSeenAt)
                             ? "Online"
                             : "Offline"}
                         </Badge>

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { Router, type Request } from "express";
 import { z } from "zod";
 
@@ -251,6 +251,73 @@ const selectAttendanceRows = async (where: ReturnType<typeof attendanceWhere>) =
     .limit(MAX_ROWS);
 
 router.get(
+  "/attendance/references",
+  requireAnyRole(ATTENDANCE_READ_ROLES),
+  async (req, res, next) => {
+    try {
+      const actor = requestActor(req);
+      const allowedUnitIds = await getUnitScope(actor.userId, actor.roles);
+      const referenceDate = new Date().toISOString().slice(0, 10);
+      let staffIds: string[] | null = null;
+      if (allowedUnitIds !== null) {
+        if (allowedUnitIds.length === 0) {
+          staffIds = [];
+        } else {
+          const assignments = await db.select({
+            staffId: staffAssignment.staffId,
+          }).from(staffAssignment)
+            .where(and(
+              inArray(staffAssignment.orgUnitId, allowedUnitIds),
+              lte(staffAssignment.effectiveFrom, referenceDate),
+              or(
+                isNull(staffAssignment.effectiveTo),
+                gte(staffAssignment.effectiveTo, referenceDate),
+              ),
+            ));
+          staffIds = [...new Set(assignments.map((assignment) => assignment.staffId))];
+        }
+      }
+
+      const employeePredicates = [eq(staff.status, "active")];
+      if (staffIds !== null) {
+        employeePredicates.push(staffIds.length > 0
+          ? inArray(staff.id, staffIds)
+          : sql`false`);
+      }
+      const [employees, units] = await Promise.all([
+        db.select({
+          id: staff.id,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          employeeId: staff.employeeId,
+          email: staff.email,
+        }).from(staff).where(and(...employeePredicates)),
+        db.select({
+          id: orgUnit.id,
+          parentId: orgUnit.parentId,
+          code: orgUnit.code,
+          name: orgUnit.name,
+          unitType: orgUnit.unitType,
+          isClinical: orgUnit.isClinical,
+          operates24h: orgUnit.operates24h,
+          active: orgUnit.active,
+        }).from(orgUnit).where(and(
+          eq(orgUnit.active, true),
+          ...(allowedUnitIds === null
+            ? []
+            : allowedUnitIds.length > 0
+              ? [inArray(orgUnit.id, allowedUnitIds)]
+              : [sql`false`]),
+        )),
+      ]);
+      res.json({ data: { staff: employees, units } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
   "/attendance",
   requireAnyRole(ATTENDANCE_READ_ROLES),
   async (req, res, next) => {
@@ -335,6 +402,20 @@ router.get(
           ? or(
             inArray(attendanceRecord.orgUnitId, allowedUnitIds),
             inArray(rosterEntry.orgUnitId, allowedUnitIds),
+            and(
+              isNull(attendanceRecord.id),
+              isNull(rosterEntry.id),
+              exists(db.select({ id: staffAssignment.id }).from(staffAssignment)
+                .where(and(
+                  eq(staffAssignment.staffId, attendanceException.staffId),
+                  lte(staffAssignment.effectiveFrom, attendanceException.exceptionDate),
+                  or(
+                    isNull(staffAssignment.effectiveTo),
+                    gte(staffAssignment.effectiveTo, attendanceException.exceptionDate),
+                  ),
+                  inArray(staffAssignment.orgUnitId, allowedUnitIds),
+                ))),
+            ),
           )!
           : sql`false`);
       }
@@ -342,6 +423,20 @@ router.get(
         predicates.push(or(
           eq(attendanceRecord.orgUnitId, unitId),
           eq(rosterEntry.orgUnitId, unitId),
+          and(
+            isNull(attendanceRecord.id),
+            isNull(rosterEntry.id),
+            exists(db.select({ id: staffAssignment.id }).from(staffAssignment)
+              .where(and(
+                eq(staffAssignment.staffId, attendanceException.staffId),
+                lte(staffAssignment.effectiveFrom, attendanceException.exceptionDate),
+                or(
+                  isNull(staffAssignment.effectiveTo),
+                  gte(staffAssignment.effectiveTo, attendanceException.exceptionDate),
+                ),
+                eq(staffAssignment.orgUnitId, unitId),
+              ))),
+          ),
         )!);
       }
       const exceptions = await db.select({
@@ -358,9 +453,9 @@ router.get(
         .innerJoin(staff, eq(staff.id, attendanceException.staffId))
         .leftJoin(attendanceRecord, eq(attendanceRecord.id, attendanceException.attendanceRecordId))
         .leftJoin(rosterEntry, eq(rosterEntry.id, attendanceException.rosterEntryId))
-        .leftJoin(orgUnit, or(
-          eq(orgUnit.id, attendanceRecord.orgUnitId),
-          eq(orgUnit.id, rosterEntry.orgUnitId),
+        .leftJoin(orgUnit, eq(
+          orgUnit.id,
+          sql`COALESCE(${attendanceRecord.orgUnitId}, ${rosterEntry.orgUnitId})`,
         ))
         .where(and(...predicates))
         .orderBy(desc(attendanceException.exceptionDate), desc(attendanceException.id))
@@ -393,6 +488,8 @@ router.post(
         exception: attendanceException,
         recordUnitId: attendanceRecord.orgUnitId,
         rosterUnitId: rosterEntry.orgUnitId,
+        attendanceRecordLinkId: attendanceException.attendanceRecordId,
+        rosterEntryLinkId: attendanceException.rosterEntryId,
       }).from(attendanceException)
         .leftJoin(attendanceRecord, eq(attendanceRecord.id, attendanceException.attendanceRecordId))
         .leftJoin(rosterEntry, eq(rosterEntry.id, attendanceException.rosterEntryId))
@@ -405,7 +502,24 @@ router.post(
           (unitId) => unitId && allowedUnitIds.includes(unitId),
         )
       ) {
-        throw notFound("Attendance exception not found.", "ATTENDANCE_EXCEPTION_NOT_FOUND");
+        const isUnlinked = !exception.attendanceRecordLinkId && !exception.rosterEntryLinkId;
+        const assignments = isUnlinked && allowedUnitIds.length > 0
+          ? await db.select({ id: staffAssignment.id })
+            .from(staffAssignment)
+            .where(and(
+              eq(staffAssignment.staffId, exception.exception.staffId),
+              lte(staffAssignment.effectiveFrom, exception.exception.exceptionDate),
+              or(
+                isNull(staffAssignment.effectiveTo),
+                gte(staffAssignment.effectiveTo, exception.exception.exceptionDate),
+              ),
+              inArray(staffAssignment.orgUnitId, allowedUnitIds),
+            ))
+            .limit(1)
+          : [];
+        if (assignments.length === 0) {
+          throw notFound("Attendance exception not found.", "ATTENDANCE_EXCEPTION_NOT_FOUND");
+        }
       }
       if (exception.exception.status !== "OPEN") {
         throw conflict("Only open attendance exceptions can be resolved.", "ATTENDANCE_EXCEPTION_ALREADY_RESOLVED");
@@ -599,6 +713,8 @@ router.post(
           status: nextStatus,
           approvedBy: actor.userId,
           approvedAt: new Date(),
+          applyClaimToken: null,
+          applyClaimedAt: null,
           decisionReason: body.data.reason,
         })
         .where(and(
@@ -610,7 +726,9 @@ router.post(
       const outcome = nextStatus === "APPLYING"
         ? await applyAttendanceCorrection(correctionId)
         : { id: correctionId, status: nextStatus };
-      if (!outcome) throw new Error("The correction approval could not be completed.");
+      if (!outcome) {
+        throw conflict("This correction is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
+      }
       await addAuditEntry(req, {
         action: "UPDATE",
         entityType: "attendance_correction",
@@ -641,7 +759,16 @@ router.get(
       if (status) predicates.push(eq(manualPunchRequest.status, status));
       if (allowedUnitIds !== null) {
         predicates.push(allowedUnitIds.length > 0
-          ? inArray(staffAssignment.orgUnitId, allowedUnitIds)
+          ? exists(db.select({ id: staffAssignment.id }).from(staffAssignment)
+            .where(and(
+              eq(staffAssignment.staffId, manualPunchRequest.staffId),
+              lte(staffAssignment.effectiveFrom, sql`CAST(${manualPunchRequest.punchedAt} AS date)`),
+              or(
+                isNull(staffAssignment.effectiveTo),
+                gte(staffAssignment.effectiveTo, sql`CAST(${manualPunchRequest.punchedAt} AS date)`),
+              ),
+              inArray(staffAssignment.orgUnitId, allowedUnitIds),
+            )))
           : sql`false`);
       }
       const requests = await db.select({
@@ -656,14 +783,6 @@ router.get(
         decisionReason: manualPunchRequest.decisionReason,
       }).from(manualPunchRequest)
         .innerJoin(staff, eq(staff.id, manualPunchRequest.staffId))
-        .leftJoin(staffAssignment, and(
-          eq(staffAssignment.staffId, staff.id),
-          lte(staffAssignment.effectiveFrom, sql`CAST(${manualPunchRequest.punchedAt} AS date)`),
-          or(
-            isNull(staffAssignment.effectiveTo),
-            gte(staffAssignment.effectiveTo, sql`CAST(${manualPunchRequest.punchedAt} AS date)`),
-          ),
-        ))
         .where(and(...predicates))
         .orderBy(desc(manualPunchRequest.requestedAt))
         .limit(MAX_ROWS);
@@ -693,6 +812,9 @@ router.post(
       const actor = requestActor(req);
       const allowedUnitIds = await getUnitScope(actor.userId, actor.roles);
       const punchedAt = new Date(body.data.punchedAt);
+      if (punchedAt > new Date()) {
+        throw validationError("A manual punch cannot be scheduled in the future.", "ATTENDANCE_FUTURE_PUNCH");
+      }
       await assertStaffScope(
         body.data.staffId,
         punchedAt.toISOString().slice(0, 10),
@@ -759,6 +881,8 @@ router.post(
           status: nextStatus,
           decidedBy: actor.userId,
           decidedAt: new Date(),
+          applyClaimToken: null,
+          applyClaimedAt: null,
           decisionReason: body.data.reason,
         })
         .where(and(
@@ -770,7 +894,9 @@ router.post(
       const outcome = nextStatus === "APPLYING"
         ? await applyManualPunch(requestId)
         : { id: requestId, status: nextStatus };
-      if (!outcome) throw new Error("The manual punch decision could not be completed.");
+      if (!outcome) {
+        throw conflict("This manual punch is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
+      }
       await addAuditEntry(req, {
         action: "UPDATE",
         entityType: "manual_punch_request",
@@ -835,8 +961,7 @@ router.get(
           gte(rosterEntry.rosterDate, from),
           lte(rosterEntry.rosterDate, to),
           ...(base ? [base] : []),
-        ))
-        .limit(MAX_ROWS);
+        ));
       const attendanceRows = await db.select({
         ...staffSummary,
         attendanceDate: attendanceRecord.attendanceDate,
@@ -851,8 +976,7 @@ router.get(
           gte(attendanceRecord.attendanceDate, from),
           lte(attendanceRecord.attendanceDate, to),
           ...(recordsBase ? [recordsBase] : []),
-        ))
-        .limit(MAX_ROWS);
+        ));
       const absencePredicates = [
         eq(attendanceException.exceptionType, "ABSENT"),
         gte(attendanceException.exceptionDate, from),
@@ -873,8 +997,7 @@ router.get(
         .innerJoin(staff, eq(staff.id, attendanceException.staffId))
         .leftJoin(attendanceRecord, eq(attendanceRecord.id, attendanceException.attendanceRecordId))
         .leftJoin(rosterEntry, eq(rosterEntry.id, attendanceException.rosterEntryId))
-        .where(and(...absencePredicates))
-        .limit(MAX_ROWS);
+        .where(and(...absencePredicates));
       const holidayRows = await db.select({ date: publicHoliday.holidayDate })
         .from(publicHoliday)
         .where(and(
@@ -1072,11 +1195,13 @@ router.put(
       const [ward] = await db.select({
         id: orgUnit.id,
         name: orgUnit.name,
+        code: orgUnit.code,
         unitType: orgUnit.unitType,
       }).from(orgUnit).where(eq(orgUnit.id, body.data.wardUnitId)).limit(1);
       const [office] = await db.select({
         id: orgUnit.id,
         name: orgUnit.name,
+        code: orgUnit.code,
         isClinical: orgUnit.isClinical,
       }).from(orgUnit).where(eq(orgUnit.id, body.data.officeUnitId)).limit(1);
       const [fingerprint] = await db.select({
@@ -1120,6 +1245,7 @@ router.put(
 
       const now = new Date();
       const [existing] = await db.select({
+        trainingSignedBy: attendancePilotSetup.trainingSignedBy,
         trainingSignedAt: attendancePilotSetup.trainingSignedAt,
         tuningConfirmedAt: attendancePilotSetup.tuningConfirmedAt,
       }).from(attendancePilotSetup)
@@ -1131,7 +1257,9 @@ router.put(
         officeUnitId: office.id,
         fingerprintDeviceId: fingerprint.id,
         qrDeviceId: qr.id,
-        trainingSignedBy: body.data.trainingCompleted ? actor.userId : null,
+        trainingSignedBy: body.data.trainingCompleted
+          ? existing?.trainingSignedBy ?? actor.userId
+          : null,
         trainingSignedAt: body.data.trainingCompleted
           ? existing?.trainingSignedAt ?? now
           : null,
@@ -1147,7 +1275,9 @@ router.put(
           officeUnitId: office.id,
           fingerprintDeviceId: fingerprint.id,
           qrDeviceId: qr.id,
-          trainingSignedBy: body.data.trainingCompleted ? actor.userId : null,
+          trainingSignedBy: body.data.trainingCompleted
+            ? existing?.trainingSignedBy ?? actor.userId
+            : null,
           trainingSignedAt: body.data.trainingCompleted
             ? existing?.trainingSignedAt ?? now
             : null,
@@ -1179,8 +1309,8 @@ router.put(
           officeUnitId: office.id,
           fingerprintDeviceId: fingerprint.id,
           qrDeviceId: qr.id,
-          ward: { name: ward.name },
-          office: { name: office.name },
+          ward: { name: ward.name, code: ward.code },
+          office: { name: office.name, code: office.code },
           fingerprintDevice: { name: fingerprint.name, code: fingerprint.code },
           qrDevice: { name: qr.name, code: qr.code },
           trainingSignedAt: body.data.trainingCompleted

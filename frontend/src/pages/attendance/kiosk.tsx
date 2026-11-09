@@ -21,7 +21,7 @@ type Punch = {
   credentialRef: string;
   punchedAt: string;
 };
-type StoredPunch = Punch & { createdAt: number };
+type StoredPunch = Punch & { createdAt: number; deviceCode: string };
 type EmployeeFeedback = {
   firstName: string;
   lastName: string;
@@ -33,6 +33,7 @@ type ResultEnvelope = {
   data?: { results?: Array<{
     deviceEventId: string;
     result: string;
+    originalResult?: string;
     employee?: EmployeeFeedback;
   }> };
   message?: string;
@@ -73,8 +74,13 @@ const withQueueStore = async <T,>(
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(STORE_NAME, mode);
       const request = operation(transaction.objectStore(STORE_NAME));
-      request.onsuccess = () => resolve(request.result);
+      let result: T;
+      request.onsuccess = () => {
+        result = request.result;
+      };
       request.onerror = () => reject(request.error ?? new Error("Offline punch queue operation failed."));
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = () => reject(transaction.error ?? new Error("Offline punch queue transaction failed."));
       transaction.onabort = () => reject(transaction.error ?? new Error("Offline punch queue transaction was aborted."));
     });
   } finally {
@@ -83,8 +89,8 @@ const withQueueStore = async <T,>(
 };
 
 const readQueue = () => withQueueStore<StoredPunch[]>("readonly", (store) => store.getAll());
-const savePunch = (punch: Punch) => withQueueStore<IDBValidKey>("readwrite", (store) =>
-  store.put({ ...punch, createdAt: Date.now() }),
+const savePunch = (punch: Punch, deviceCode: string) => withQueueStore<IDBValidKey>("readwrite", (store) =>
+  store.put({ ...punch, deviceCode, createdAt: Date.now() }),
 );
 const removePunch = (eventId: string) => withQueueStore<undefined>("readwrite", (store) =>
   store.delete(eventId),
@@ -97,6 +103,7 @@ export const AttendanceKioskPage = () => {
   const [token, setToken] = useState("");
   const [queueCount, setQueueCount] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [feedback, setFeedback] = useState({
@@ -143,46 +150,67 @@ export const AttendanceKioskPage = () => {
   const uploadQueue = useCallback(async () => {
     if (!deviceCode.trim() || !deviceKey.trim() || !navigator.onLine || syncing) return new Map<string, {
       result: string;
+      originalResult?: string;
       employee?: EmployeeFeedback;
     }>();
     setSyncing(true);
     const confirmedResults = new Map<string, {
       result: string;
+      originalResult?: string;
       employee?: EmployeeFeedback;
     }>();
     try {
-      const queued = await readQueue();
+      const queued = (await readQueue()).sort((left, right) =>
+        left.punchedAt.localeCompare(right.punchedAt) ||
+        left.deviceEventId.localeCompare(right.deviceEventId),
+      );
+      if (queued.some((punch) => punch.deviceCode !== deviceCode.trim())) {
+        throw new Error("Queued punches belong to a different or unconfigured kiosk device. They were kept and not uploaded.");
+      }
       for (let offset = 0; offset < queued.length; offset += 500) {
         const batch = queued.slice(offset, offset + 500);
-        const response = await fetch(`${apiBase}/v1/device/punches`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Device-Code": deviceCode.trim(),
-            "X-Device-Key": deviceKey.trim(),
-          },
-          body: JSON.stringify({
-            punches: batch.map(({ deviceEventId, credentialType: type, credentialRef, punchedAt }) => ({
-              deviceEventId,
-              credentialType: type,
-              credentialRef,
-              punchedAt,
-              directionHint: "AUTO",
-            })),
-          }),
-        });
-        const result = await response.json() as ResultEnvelope;
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        let response: Response;
+        let result: ResultEnvelope;
+        try {
+          response = await fetch(`${apiBase}/v1/device/punches`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Device-Code": deviceCode.trim(),
+              "X-Device-Key": deviceKey.trim(),
+            },
+            body: JSON.stringify({
+              punches: batch.map(({ deviceEventId, credentialType: type, credentialRef, punchedAt }) => ({
+                deviceEventId,
+                credentialType: type,
+                credentialRef,
+                punchedAt,
+                directionHint: "AUTO",
+              })),
+            }),
+            signal: controller.signal,
+          });
+          result = await response.json() as ResultEnvelope;
+        } finally {
+          window.clearTimeout(timeout);
+        }
         if (!response.ok) {
           throw new Error(result.message || result.error || "The attendance server rejected the sync request.");
         }
         const acceptedResults = result.data?.results ?? [];
-        const confirmedIds = new Set(acceptedResults.map((item) => item.deviceEventId));
+        const confirmedIds = new Set<string>();
         for (const item of acceptedResults) {
           confirmedResults.set(item.deviceEventId, {
             result: item.result,
+            originalResult: item.originalResult,
             employee: item.employee,
           });
-          await removePunch(item.deviceEventId);
+          if (item.result !== "DUPLICATE" || item.originalResult) {
+            confirmedIds.add(item.deviceEventId);
+            await removePunch(item.deviceEventId);
+          }
           if (!["ACCEPTED", "DUPLICATE"].includes(item.result)) {
             showFeedback("Punch not accepted", item.result.replaceAll("_", " "), "warning");
           }
@@ -214,8 +242,10 @@ export const AttendanceKioskPage = () => {
       credentialRef,
       punchedAt: new Date().toISOString(),
     };
+    let queued = false;
     try {
-      await savePunch(punch);
+      await savePunch(punch, deviceCode.trim());
+      queued = true;
       setToken("");
       await refreshQueueCount();
       if (!navigator.onLine) {
@@ -228,22 +258,37 @@ export const AttendanceKioskPage = () => {
       }
       const results = await uploadQueue();
       const outcome = results.get(punch.deviceEventId);
-      if (outcome?.result === "ACCEPTED" || outcome?.result === "DUPLICATE") {
-        const employee = outcome.employee;
+      const confirmedDuplicateResult = outcome?.result === "DUPLICATE"
+        ? outcome.originalResult
+        : undefined;
+      if (
+        outcome?.result === "ACCEPTED" ||
+        ["RECEIVED", "CLOCK_IN", "CLOCK_OUT"].includes(confirmedDuplicateResult ?? "")
+      ) {
+        const employee = outcome?.employee;
         const detail = employee
           ? `${employee.firstName} ${employee.lastName} · Employee ID ${employee.employeeId}`
-          : "Attendance was accepted for server-side processing.";
+          : confirmedDuplicateResult
+            ? `The original punch was ${confirmedDuplicateResult.replaceAll("_", " ").toLowerCase()}.`
+            : "Attendance was accepted for server-side processing.";
         showFeedback("Punch received", detail, "success", employee);
       } else if (outcome) {
-        showFeedback("Punch not accepted", outcome.result.replaceAll("_", " "), "warning");
+        const result = outcome.result === "DUPLICATE"
+          ? outcome.originalResult ?? "duplicate not confirmed"
+          : outcome.result;
+        showFeedback("Punch not accepted", result.replaceAll("_", " "), "warning");
       } else if (navigator.onLine) {
         showFeedback("Punch saved for retry", "The kiosk could not confirm this punch. It remains queued.", "warning");
       }
     } catch (error) {
       showFeedback(
-        "Punch saved for retry",
-        error instanceof Error ? error.message : "The punch remains in the offline queue.",
-        "warning",
+        queued ? "Punch saved for retry" : "Punch could not be queued",
+        error instanceof Error
+          ? error.message
+          : queued
+            ? "The punch remains in the offline queue."
+            : "Unable to save the punch on this kiosk.",
+        queued ? "warning" : "error",
       );
     } finally {
       inputRef.current?.focus();
@@ -273,20 +318,20 @@ export const AttendanceKioskPage = () => {
       toast.error("This browser does not support built-in QR scanning. Use the scanner input or a supported browser.");
       return;
     }
+    let acquiredStream: MediaStream | null = null;
     try {
       detectorRef.current = new BarcodeDetectorConstructor({ formats: ["qr_code"] });
-      streamRef.current = await navigator.mediaDevices.getUserMedia({
+      acquiredStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = streamRef.current;
-        await videoRef.current.play();
-        setCameraActive(true);
-      }
+      streamRef.current = acquiredStream;
+      setCameraStarting(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Camera access was denied or unavailable.");
+      acquiredStream?.getTracks().forEach((track) => track.stop());
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      detectorRef.current = null;
     }
   };
 
@@ -295,7 +340,35 @@ export const AttendanceKioskPage = () => {
     streamRef.current = null;
     detectorRef.current = null;
     setCameraActive(false);
+    setCameraStarting(false);
   }, []);
+
+  useEffect(() => {
+    if (!cameraStarting) return;
+    const stream = streamRef.current;
+    const video = videoRef.current;
+    if (!stream || !video) {
+      toast.error("The camera preview could not be started.");
+      stopCamera();
+      return;
+    }
+
+    let active = true;
+    video.srcObject = stream;
+    void video.play().then(() => {
+      if (active && streamRef.current === stream) {
+        setCameraActive(true);
+        setCameraStarting(false);
+      }
+    }).catch((error: unknown) => {
+      if (!active || streamRef.current !== stream) return;
+      toast.error(error instanceof Error ? error.message : "The camera preview could not be started.");
+      stopCamera();
+    });
+    return () => {
+      active = false;
+    };
+  }, [cameraStarting, stopCamera]);
 
   useEffect(() => {
     void refreshQueueCount();
@@ -312,10 +385,13 @@ export const AttendanceKioskPage = () => {
       window.removeEventListener("online", markOnline);
       window.removeEventListener("offline", markOffline);
       window.clearInterval(syncTimer);
-      if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
-      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, [refreshQueueCount, uploadQueue]);
+
+  useEffect(() => () => {
+    if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   useEffect(() => {
     if (!cameraActive || !videoRef.current || !detectorRef.current) return;
@@ -409,14 +485,14 @@ export const AttendanceKioskPage = () => {
             </form>
           </div>
           <div className="flex flex-wrap gap-2">
-            {cameraActive
+            {cameraActive || cameraStarting
               ? <Button variant="outline" onClick={stopCamera}>Stop camera</Button>
               : <Button variant="outline" onClick={() => void startCamera()}>Scan QR with camera</Button>}
             <Button variant="outline" onClick={() => void uploadQueue()} disabled={syncing || !online}>
               {syncing ? "Syncing..." : "Sync queued punches"}
             </Button>
           </div>
-          {cameraActive ? <video ref={videoRef} className="max-h-80 w-full rounded-lg bg-black object-cover" muted playsInline aria-label="Camera QR scanner" /> : null}
+          {cameraActive || cameraStarting ? <video ref={videoRef} className="max-h-80 w-full rounded-lg bg-black object-cover" muted playsInline aria-label="Camera QR scanner" /> : null}
         </CardContent>
       </Card>
 

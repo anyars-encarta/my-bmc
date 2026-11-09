@@ -76,6 +76,7 @@ const LEGACY_TO_APP_ROLE: Record<"admin" | "accounts", AppRole> = {
   accounts: "ACCOUNTS",
 };
 
+/** Maps an HTTP method to the audit action used for successful writes. */
 const mapMethodToAction = (method: string) => {
   if (method === "POST") return "CREATE";
   if (method === "PATCH" || method === "PUT") return "UPDATE";
@@ -83,6 +84,7 @@ const mapMethodToAction = (method: string) => {
   return null;
 };
 
+/** Extracts the API entity and its first path identifier for audit records. */
 const parseEntity = (path: string) => {
   const clean = path.split("?")[0] ?? "";
   const segments = clean.replace(/^\/api(\/v1)?\/?/, "").split("/").filter(Boolean);
@@ -92,16 +94,19 @@ const parseEntity = (path: string) => {
   return { entityType, entityId };
 };
 
+/** Normalizes IPv4-mapped IPv6 addresses before they are stored in the audit log. */
 const parseClientIp = (ip?: string | null) => {
   if (!ip) return null;
   if (ip.startsWith("::ffff:")) return ip.slice(7);
   return ip;
 };
 
+/** Checks whether an untrusted role value is part of the application role set. */
 export const isAppRole = (value: unknown): value is AppRole => {
   return typeof value === "string" && ROLE_SET.has(value as AppRole);
 };
 
+/** Resolves the sorted union of permissions granted by a user's assigned roles. */
 export const resolveRolePermissions = (roles: AppRole[]) => {
   if (roles.includes("SUPER_ADMIN")) {
     return ["*"];
@@ -117,6 +122,7 @@ export const resolveRolePermissions = (roles: AppRole[]) => {
   return Array.from(values).sort();
 };
 
+/** Loads assigned application roles, falling back to the supported legacy role. */
 export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accounts") => {
   const rows = await db
     .select({ role: appUserRole.role })
@@ -131,6 +137,7 @@ export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accou
   return [LEGACY_TO_APP_ROLE[legacyRole]];
 };
 
+/** Determines whether a user's roles satisfy an allowed-role list. */
 export const userHasRole = (userRoles: AppRole[], allowed: readonly string[]) => {
   if (userRoles.includes("SUPER_ADMIN")) {
     return true;
@@ -139,6 +146,7 @@ export const userHasRole = (userRoles: AppRole[], allowed: readonly string[]) =>
   return allowed.some((role) => userRoles.includes(role as AppRole));
 };
 
+/** Creates middleware that rejects requests without an allowed application role. */
 export const requireAnyRole = (allowed: readonly string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const roles = (req.user?.roles ?? []).filter((role): role is AppRole => isAppRole(role));
@@ -159,6 +167,7 @@ export const requireAnyRole = (allowed: readonly string[]) => {
   };
 };
 
+/** Creates the monthly audit-log partition for a YYYY-MM period. */
 export const ensureAuditPartition = async (period: string) => {
   const [yearPart, monthPart] = period.split("-");
   const parsedYear = Number.parseInt(yearPart ?? "", 10);
@@ -177,6 +186,7 @@ export const ensureAuditPartition = async (period: string) => {
   `));
 };
 
+/** Ensures that audit-log partitions exist for the current and next month. */
 export const ensureAuditPartitions = async () => {
   const now = new Date();
   const current = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -188,14 +198,17 @@ export const ensureAuditPartitions = async () => {
   await ensureAuditPartition(next);
 };
 
+/** Generates a unique request identifier. */
 export const createRequestId = () => randomUUID();
 
+/** Attaches a request identifier to the request and response headers. */
 export const attachRequestId = (req: Request, res: Response, next: NextFunction) => {
   req.requestId = req.header("x-request-id")?.trim() || createRequestId();
   res.setHeader("X-Request-Id", req.requestId);
   next();
 };
 
+/** Writes a generic audit record after a successful mutating response. */
 export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const action = mapMethodToAction(req.method);
   if (!action) {
@@ -233,6 +246,7 @@ export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunc
   next();
 };
 
+/** Loads the current user's profile, assigned roles, permissions, and unit scopes. */
 export const loadMePayload = async (userId: string, fallbackRole: "admin" | "accounts") => {
   const [currentUser] = await db
     .select({
@@ -272,6 +286,7 @@ export const loadMePayload = async (userId: string, fallbackRole: "admin" | "acc
   };
 };
 
+/** Checks whether a user has a specific assigned application role. */
 export const roleExistsForUser = async (userId: string, role: AppRole) => {
   const [row] = await db
     .select({ role: appUserRole.role })

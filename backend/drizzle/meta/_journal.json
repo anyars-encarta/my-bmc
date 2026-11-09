@@ -127,6 +127,13 @@
       "when": 1793979000000,
       "tag": "0017_sprint6_attendance_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794220000000,
+      "tag": "0018_attendance_approval_claims",
+      "breakpoints": true
     }
   ]
 }

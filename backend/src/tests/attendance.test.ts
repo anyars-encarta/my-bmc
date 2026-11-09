@@ -182,6 +182,7 @@ test(
     const address = server.address();
     assert.ok(address && typeof address !== "string");
 
+    const punchedAt = new Date().toISOString();
     const upload = async () => fetch(`http://127.0.0.1:${address.port}/punches`, {
       method: "POST",
       headers: {
@@ -194,7 +195,7 @@ test(
           deviceEventId: eventId,
           credentialType: "CARD_QR",
           credentialRef: `unknown-${suffix}`,
-          punchedAt: new Date().toISOString(),
+          punchedAt,
         }],
       }),
     });
@@ -227,6 +228,130 @@ test(
       await db.update(attendanceDevice)
         .set({ status: "DISABLED" })
         .where(eq(attendanceDevice.id, device.id));
+    }
+  },
+);
+
+test(
+  "accepted punch responses include employee details on initial ingestion and replay",
+  { skip: !testDatabaseUrl },
+  async () => {
+    process.env.DATABASE_URL = testDatabaseUrl;
+    const [{ db }, schema, { hashDeviceKey }, { default: deviceRoutes }] = await Promise.all([
+      import("../db/index.js"),
+      import("../db/schema/index.js"),
+      import("../lib/deviceAuthentication.js"),
+      import("../routes/v1/device.js"),
+    ]);
+    const suffix = randomUUID().replace(/-/g, "");
+    const deviceCode = `TST${suffix.slice(0, 20)}`;
+    const deviceKey = randomUUID();
+    const eventId = `employee-replay-${suffix}`;
+    const credentialRef = `accepted-${suffix}`;
+    const imageUrl = "https://example.test/attendance-photo.png";
+    const punchedAt = new Date().toISOString();
+    const [person] = await db.insert(schema.staff).values({
+      firstName: "Accepted",
+      lastName: "Replay",
+      email: `${suffix}@example.test`,
+      employeeId: `TST-${suffix.slice(0, 20)}`,
+      momoNumber: "0000000000",
+      imageUrl,
+      status: "active",
+    }).returning({ id: schema.staff.id });
+    assert.ok(person);
+    await db.insert(schema.staffCredential).values({
+      staffId: person.id,
+      credentialType: "CARD_QR",
+      credentialRef,
+      status: "ACTIVE",
+    });
+    const [device] = await db.insert(schema.attendanceDevice).values({
+      code: deviceCode,
+      name: "Accepted attendance replay integration test",
+      deviceType: "KIOSK",
+      apiKeyHash: await hashDeviceKey(deviceKey),
+      status: "ACTIVE",
+    }).returning({ id: schema.attendanceDevice.id });
+    assert.ok(device);
+
+    const app = express();
+    app.use(express.json());
+    app.use(deviceRoutes);
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+
+    const upload = async (eventTime = punchedAt) => fetch(`http://127.0.0.1:${address.port}/punches`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Device-Code": deviceCode,
+        "X-Device-Key": deviceKey,
+      },
+      body: JSON.stringify({
+        punches: [{
+          deviceEventId: eventId,
+          credentialType: "CARD_QR",
+          credentialRef,
+          punchedAt: eventTime,
+        }],
+      }),
+    });
+
+    const assertEmployee = (employee: {
+      employeeId: string;
+      firstName: string;
+      lastName: string;
+      imageUrl: string | null;
+    } | undefined) => {
+      assert.deepEqual(employee, {
+        employeeId: `TST-${suffix.slice(0, 20)}`,
+        firstName: "Accepted",
+        lastName: "Replay",
+        imageUrl,
+      });
+    };
+
+    try {
+      const firstResponse = await upload();
+      const first = await firstResponse.json() as {
+        data: { results: Array<{ result: string; employee?: Parameters<typeof assertEmployee>[0] }> };
+      };
+      const replayResponse = await upload();
+      const replay = await replayResponse.json() as {
+        data: { results: Array<{
+          result: string;
+          originalResult?: string;
+          employee?: Parameters<typeof assertEmployee>[0];
+        }> };
+      };
+      const conflictingResponse = await upload(
+        new Date(Date.parse(punchedAt) + 60_000).toISOString(),
+      );
+      const conflicting = await conflictingResponse.json() as {
+        data: { results: Array<{ result: string }> };
+      };
+      assert.equal(firstResponse.status, 200);
+      assert.equal(first.data.results[0]?.result, "ACCEPTED");
+      assertEmployee(first.data.results[0]?.employee);
+      assert.equal(replayResponse.status, 200);
+      assert.equal(replay.data.results[0]?.result, "DUPLICATE");
+      assert.ok(replay.data.results[0]?.originalResult);
+      assertEmployee(replay.data.results[0]?.employee);
+      assert.equal(conflictingResponse.status, 200);
+      assert.equal(conflicting.data.results[0]?.result, "EVENT_ID_CONFLICT");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+      await db.update(schema.attendanceDevice)
+        .set({ status: "DISABLED" })
+        .where(eq(schema.attendanceDevice.id, device.id));
     }
   },
 );

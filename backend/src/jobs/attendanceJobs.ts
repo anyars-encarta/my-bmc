@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import {
   attendanceDevice,
   attendanceException,
+  attendancePilotSetup,
   attendanceRecord,
   leaveRequest,
   rosterEntry,
@@ -96,19 +97,38 @@ export const runAutoCloseJob = async (now = new Date()) => {
 };
 
 export const runAbsenceDetectionJob = async (now = new Date()) => {
-  const startDate = new Date(now.getTime() - 60 * 24 * 60 * 60_000)
+  const [pilot] = await db.select({
+    trainingSignedAt: attendancePilotSetup.trainingSignedAt,
+    tuningConfirmedAt: attendancePilotSetup.tuningConfirmedAt,
+  }).from(attendancePilotSetup)
+    .where(eq(attendancePilotSetup.scope, "RELEASE1"))
+    .limit(1);
+  if (!pilot?.trainingSignedAt || !pilot.tuningConfirmedAt) return 0;
+
+  const rollingStart = now.getTime() - 60 * 24 * 60 * 60_000;
+  const goLiveAt = Math.max(
+    pilot.trainingSignedAt.getTime(),
+    pilot.tuningConfirmedAt.getTime(),
+  );
+  const startDate = new Date(Math.max(rollingStart, goLiveAt))
     .toISOString().slice(0, 10);
   const entries = await db.select({
     entry: rosterEntry,
-    lateOutMinutes: shiftType.lateOutMinutes,
   }).from(rosterEntry)
     .innerJoin(shiftType, eq(shiftType.id, rosterEntry.shiftTypeId))
+    .leftJoin(leaveRequest, and(
+      eq(leaveRequest.staffId, rosterEntry.staffId),
+      eq(leaveRequest.status, "APPROVED"),
+      lte(leaveRequest.startDate, rosterEntry.rosterDate),
+      gte(leaveRequest.endDate, rosterEntry.rosterDate),
+    ))
     .leftJoin(attendanceRecord, eq(attendanceRecord.rosterEntryId, rosterEntry.id))
     .where(and(
       eq(rosterEntry.status, "ACTIVE"),
       gte(rosterEntry.rosterDate, startDate),
       isNull(attendanceRecord.id),
-      lte(rosterEntry.plannedEnd, now),
+      isNull(leaveRequest.id),
+      sql`${rosterEntry.plannedEnd} + (${shiftType.lateOutMinutes} * interval '1 minute') <= ${now}`,
       sql`NOT EXISTS (
         SELECT 1
         FROM attendance_exception
@@ -118,30 +138,8 @@ export const runAbsenceDetectionJob = async (now = new Date()) => {
     .limit(2000);
   if (entries.length === 0) return 0;
 
-  const staffIds = [...new Set(entries.map(({ entry }) => entry.staffId))];
-  const leaveRows = await db.select({
-    staffId: leaveRequest.staffId,
-    startDate: leaveRequest.startDate,
-    endDate: leaveRequest.endDate,
-  }).from(leaveRequest)
-    .where(and(
-      inArray(leaveRequest.staffId, staffIds),
-      eq(leaveRequest.status, "APPROVED"),
-    ));
-  const approvedLeave = new Set(
-    leaveRows.flatMap((leave) => {
-      const dates: string[] = [];
-      for (let date = leave.startDate; date <= leave.endDate; date = nextDate(date)) {
-        dates.push(`${leave.staffId}:${date}`);
-      }
-      return dates;
-    }),
-  );
-
   let detectedCount = 0;
-  for (const { entry, lateOutMinutes } of entries) {
-    const deadline = new Date(entry.plannedEnd.getTime() + lateOutMinutes * 60_000);
-    if (deadline > now || approvedLeave.has(`${entry.staffId}:${entry.rosterDate}`)) continue;
+  for (const { entry } of entries) {
     const [created] = await db.insert(attendanceException).values({
       staffId: entry.staffId,
       exceptionDate: entry.rosterDate,
@@ -153,12 +151,6 @@ export const runAbsenceDetectionJob = async (now = new Date()) => {
     if (created) detectedCount += 1;
   }
   return detectedCount;
-};
-
-const nextDate = (date: string) => {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1))
-    .toISOString().slice(0, 10);
 };
 
 export const runDeviceHealthJob = async (now = new Date()) => {

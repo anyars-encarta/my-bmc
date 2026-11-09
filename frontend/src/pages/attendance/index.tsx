@@ -135,6 +135,7 @@ export const AttendanceOperationsPage = () => {
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
   const roles = identity?.roles ?? (identity?.role ? [identity.role] : []);
   const canApprove = isHr(roles);
+  const canManageAttendance = canApprove || roles.includes("UNIT_MANAGER");
   const [tab, setTab] = useState("log");
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [exceptions, setExceptions] = useState<AttendanceException[]>([]);
@@ -173,20 +174,11 @@ export const AttendanceOperationsPage = () => {
   }, []);
 
   const loadStaffAndUnits = useCallback(async () => {
-    const staffRows: StaffRecord[] = [];
-    for (let page = 1; page <= 20; page += 1) {
-      const result = await request<StaffRecord[]>(
-        `staff?page=${page}&limit=200&status=active`,
-      );
-      staffRows.push(...(result.data ?? []));
-      const pageInfo = (result as Envelope<StaffRecord[]> & {
-        pagination?: { hasMore?: boolean };
-      }).pagination;
-      if (!pageInfo?.hasMore) break;
-    }
-    const unitResult = await request<OrgUnitRecord[]>("org-units/tree");
-    setStaffOptions(staffRows);
-    setUnits(unitResult.data ?? []);
+    const result = await request<{ staff: StaffRecord[]; units: OrgUnitRecord[] }>(
+      "attendance/references",
+    );
+    setStaffOptions(result.data?.staff ?? []);
+    setUnits(result.data?.units ?? []);
   }, [request]);
 
   const loadRecords = useCallback(async () => {
@@ -434,7 +426,7 @@ export const AttendanceOperationsPage = () => {
                       <TableCell>{record.lateMinutes ? formatMinutes(record.lateMinutes) : "—"}</TableCell>
                       <TableCell>{record.overtimeMinutes ? formatMinutes(record.overtimeMinutes) : "—"}</TableCell>
                       <TableCell>
-                        {record.clockOutAt && ["CLOSED", "AUTO_CLOSED"].includes(record.status)
+                        {canManageAttendance && record.clockOutAt && ["CLOSED", "AUTO_CLOSED"].includes(record.status)
                           ? <Button variant="outline" size="sm" onClick={() => openCorrection(record)}>Request correction</Button>
                           : null}
                       </TableCell>
@@ -454,7 +446,8 @@ export const AttendanceOperationsPage = () => {
                 : <Table>
                   <TableHeader><TableRow>
                     <TableHead>Employee</TableHead><TableHead>Employee ID</TableHead><TableHead>Date</TableHead>
-                    <TableHead>Exception</TableHead><TableHead>Unit</TableHead><TableHead>Details</TableHead><TableHead>Resolve</TableHead>
+                    <TableHead>Exception</TableHead><TableHead>Unit</TableHead><TableHead>Details</TableHead>
+                    {canManageAttendance ? <TableHead>Resolve</TableHead> : null}
                   </TableRow></TableHeader>
                   <TableBody>{exceptions.map((exception) => (
                     <TableRow key={exception.exceptionId}>
@@ -462,10 +455,12 @@ export const AttendanceOperationsPage = () => {
                       <TableCell>{exception.attendanceDate}</TableCell>
                       <TableCell><Badge variant="secondary">{exception.exceptionType}</Badge></TableCell>
                       <TableCell>{exception.unitName ?? "—"}</TableCell><TableCell>{exception.note ?? "—"}</TableCell>
-                      <TableCell className="space-x-2">
-                        <Button size="sm" onClick={() => void resolveException(exception, "CONFIRM")}>Confirm</Button>
-                        <Button size="sm" variant="outline" onClick={() => void resolveException(exception, "EXCUSE")}>Excuse</Button>
-                      </TableCell>
+                      {canManageAttendance ? (
+                        <TableCell className="space-x-2">
+                          <Button size="sm" onClick={() => void resolveException(exception, "CONFIRM")}>Confirm</Button>
+                          <Button size="sm" variant="outline" onClick={() => void resolveException(exception, "EXCUSE")}>Excuse</Button>
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}</TableBody>
                 </Table>}
@@ -519,6 +514,7 @@ export const AttendanceOperationsPage = () => {
           <Card>
             <CardHeader><CardTitle>Request a manual punch</CardTitle></CardHeader>
             <CardContent>
+              {canManageAttendance ? (
               <form className="grid gap-3 md:grid-cols-2" onSubmit={(event) => void submitManualPunch(event)}>
                 <div className="space-y-1.5">
                   <Label>Employee</Label>
@@ -548,6 +544,7 @@ export const AttendanceOperationsPage = () => {
                 </div>
                 <div><Button type="submit" disabled={busy}>{busy ? "Submitting..." : "Submit for approval"}</Button></div>
               </form>
+              ) : <p className="text-sm text-muted-foreground">Only HR and unit managers can submit manual punches.</p>}
             </CardContent>
           </Card>
           <Card>

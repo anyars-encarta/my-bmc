@@ -178,12 +178,16 @@ Rostering writes use the Neon HTTP driver without `db.transaction()`. Bulk entry
 | GET/POST/PATCH | `/devices` | HR SA | register/update devices; registration returns key once |
 | POST | `/devices/:id/rotate-key` · `/devices/:id/disable` · `/devices/:id/enable` | HR SA | rotation returns a one-time key; enable/disable immediately controls device access |
 | POST/GET | `/staff/:id/credentials` · `/:cid/revoke` · `/staff/:id/fingerprint-enrolment` | HR | card issue returns printable QR/barcode |
-| GET | `/attendance?unitId&staffId&from&to` | HR UM(scoped) AC(read) | |
+| GET | `/attendance?unitId&staffId&from&to` | HR PO AC UM(scoped) | |
+| GET | `/attendance/references` | HR PO AC UM(scoped) | searchable employee and unit options, scoped to attendance access |
 | GET | `/me/attendance?from&to` · `/attendance/me/corrections` | ST | own attendance and correction request history |
-| GET | `/attendance/exceptions?status&unitId&from&to` · POST `/attendance/exceptions/:exceptionId/resolve` | UM(scoped) HR | `action=EXCUSE` or `CONFIRM`, with reason |
-| GET | `/attendance/corrections?status` · POST `/attendance/:attendanceId/corrections` | UM(scoped) ST(own) | reasoned correction request |
+| GET | `/attendance/exceptions?status&unitId&from&to` | HR PO AC UM(scoped) | |
+| POST | `/attendance/exceptions/:exceptionId/resolve` | HR UM(scoped) | `action=EXCUSE` or `CONFIRM`, with reason |
+| GET | `/attendance/corrections?status` | HR PO AC UM(scoped) | correction review queue |
+| POST | `/attendance/:attendanceId/corrections` | UM(scoped) ST(own) | reasoned correction request |
 | POST | `/attendance/corrections/:correctionId/decision` | HR | `decision=APPROVE` or `REJECT`, with reason; requester cannot approve own request |
-| GET | `/attendance/manual-punch-requests?status` · POST `/attendance/manual-punch` | UM(scoped) | device outage requests; approval required |
+| GET | `/attendance/manual-punch-requests?status` | HR PO AC UM(scoped) | |
+| POST | `/attendance/manual-punch` | HR UM(scoped) | device outage requests; approval required |
 | POST | `/attendance/manual-punch-requests/:requestId/decision` | HR | `decision=APPROVE` or `REJECT`, with reason |
 | GET | `/attendance/summary?month&unitId` | HR PO AC | feeds payroll |
 | GET | `/devices/health` | HR | online state and persisted health-alert state |

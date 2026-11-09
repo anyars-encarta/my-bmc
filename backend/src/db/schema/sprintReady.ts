@@ -545,6 +545,9 @@ export const attendanceException = pgTable("attendance_exception", {
   note: text("note"),
   jobKey: varchar("job_key", { length: 120 }),
 }, (table) => ({
+  uniqueJobKey: uniqueIndex("attendance_exception_job_key_uq")
+    .on(table.jobKey)
+    .where(sql`${table.jobKey} IS NOT NULL`),
   exceptionTypeCheck: check(
     "attendance_exception_exception_type_check",
     sql`${table.exceptionType} IN (
@@ -580,8 +583,13 @@ export const attendanceCorrection = pgTable("attendance_correction", {
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   appliedAt: timestamp("applied_at", { withTimezone: true }),
+  applyClaimToken: uuid("apply_claim_token"),
+  applyClaimedAt: timestamp("apply_claimed_at", { withTimezone: true }),
   decisionReason: text("decision_reason"),
-});
+}, (table) => ({
+  applyingClaimIndex: index("attendance_correction_applying_claim_idx")
+    .on(table.status, table.applyClaimedAt),
+}));
 
 export type AttendanceCorrection = typeof attendanceCorrection.$inferSelect;
 export type NewAttendanceCorrection = typeof attendanceCorrection.$inferInsert;
@@ -597,8 +605,13 @@ export const manualPunchRequest = pgTable("manual_punch_request", {
   status: varchar("status", { length: 10 }).default('PENDING').notNull(),
   decidedBy: text("decided_by"),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
+  applyClaimToken: uuid("apply_claim_token"),
+  applyClaimedAt: timestamp("apply_claimed_at", { withTimezone: true }),
   decisionReason: text("decision_reason"),
-});
+}, (table) => ({
+  applyingClaimIndex: index("manual_punch_request_applying_claim_idx")
+    .on(table.status, table.applyClaimedAt),
+}));
 
 export type ManualPunchRequest = typeof manualPunchRequest.$inferSelect;
 export type NewManualPunchRequest = typeof manualPunchRequest.$inferInsert;

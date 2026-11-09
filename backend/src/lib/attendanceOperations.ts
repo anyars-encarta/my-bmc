@@ -1,4 +1,5 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, exists, isNull, lte, or } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import {
@@ -13,38 +14,138 @@ import {
 } from "../db/schema/index.js";
 import { calculateAttendanceMetrics, facilityDate } from "./attendance.js";
 import { resolveFacilityTimezone } from "./facilityClock.js";
-import { findClockInShift, getEffectiveUnitId } from "./punchProcessor.js";
+import {
+  findClockInShift,
+  getApprovedOvertimeMinutes,
+  getEffectiveUnitId,
+} from "./punchProcessor.js";
 
-const rejectManualPunch = async (id: string, reason: string) => {
+const APPLY_CLAIM_LEASE_MS = 5 * 60_000;
+
+const rejectManualPunch = async (id: string, reason: string, claimToken: string) => {
   const [updated] = await db.update(manualPunchRequest)
     .set({ status: "REJECTED", decisionReason: reason })
     .where(and(
       eq(manualPunchRequest.id, id),
       eq(manualPunchRequest.status, "APPLYING"),
+      eq(manualPunchRequest.applyClaimToken, claimToken),
     ))
     .returning({ id: manualPunchRequest.id, status: manualPunchRequest.status });
-  return updated ?? { id, status: "REJECTED" };
+  return updated;
 };
 
-const completeManualPunch = async (id: string) => {
+const completeManualPunch = async (id: string, claimToken: string) => {
   const [updated] = await db.update(manualPunchRequest)
     .set({ status: "APPROVED" })
     .where(and(
       eq(manualPunchRequest.id, id),
       eq(manualPunchRequest.status, "APPLYING"),
+      eq(manualPunchRequest.applyClaimToken, claimToken),
     ))
     .returning({ id: manualPunchRequest.id, status: manualPunchRequest.status });
-  return updated ?? { id, status: "APPROVED" };
+  return updated;
+};
+
+const rejectAttendanceCorrection = async (
+  id: string,
+  claimToken: string,
+  reason: string,
+) => {
+  const [updated] = await db.update(attendanceCorrection)
+    .set({ status: "REJECTED", decisionReason: reason })
+    .where(and(
+      eq(attendanceCorrection.id, id),
+      eq(attendanceCorrection.status, "APPLYING"),
+      eq(attendanceCorrection.applyClaimToken, claimToken),
+    ))
+    .returning({ id: attendanceCorrection.id, status: attendanceCorrection.status });
+  return updated;
+};
+
+const completeAttendanceCorrection = async (id: string, claimToken: string) => {
+  const [updated] = await db.update(attendanceCorrection)
+    .set({ status: "APPROVED", appliedAt: new Date() })
+    .where(and(
+      eq(attendanceCorrection.id, id),
+      eq(attendanceCorrection.status, "APPLYING"),
+      eq(attendanceCorrection.applyClaimToken, claimToken),
+    ))
+    .returning({ id: attendanceCorrection.id, status: attendanceCorrection.status });
+  return updated;
+};
+
+const ensureManualClockInExceptions = async (
+  request: typeof manualPunchRequest.$inferSelect,
+  record: {
+    id: string;
+    staffId: string;
+    attendanceDate: string;
+    clockInAt: Date;
+    rosterEntryId: string | null;
+  },
+  roster: typeof rosterEntry.$inferSelect | null,
+  shift: typeof shiftType.$inferSelect | null,
+) => {
+  if (!record.rosterEntryId) {
+    const jobKey = `UNROSTERED_MANUAL:${request.id}`;
+    await db.insert(attendanceException).values({
+      staffId: record.staffId,
+      exceptionDate: record.attendanceDate,
+      exceptionType: "UNROSTERED_PUNCH",
+      attendanceRecordId: record.id,
+      note: `Approved manual clock-in: ${request.reason}`,
+      jobKey,
+    }).onConflictDoNothing();
+    await db.update(attendanceException)
+      .set({ attendanceRecordId: record.id })
+      .where(and(
+        eq(attendanceException.jobKey, jobKey),
+        isNull(attendanceException.attendanceRecordId),
+      ));
+    return;
+  }
+  if (!roster || !shift) {
+    throw new Error("The roster or shift linked to the manual clock-in is unavailable.");
+  }
+  const metrics = calculateAttendanceMetrics({
+    clockInAt: record.clockInAt,
+    clockOutAt: record.clockInAt,
+    plannedStart: roster.plannedStart,
+    plannedEnd: roster.plannedEnd,
+    graceLateMinutes: shift.graceLateMinutes,
+    breakMinutes: shift.breakMinutes,
+  });
+  if (metrics.lateMinutes > 0) {
+    await db.insert(attendanceException).values({
+      staffId: record.staffId,
+      exceptionDate: record.attendanceDate,
+      exceptionType: "LATE",
+      attendanceRecordId: record.id,
+      rosterEntryId: record.rosterEntryId,
+      note: `Approved manual clock-in: ${request.reason}`,
+      jobKey: `LATE_MANUAL:${request.id}`,
+    }).onConflictDoNothing();
+  }
 };
 
 export const applyManualPunch = async (id: string) => {
-  const [request] = await db.select().from(manualPunchRequest)
+  const claimToken = randomUUID();
+  const claimCutoff = new Date(Date.now() - APPLY_CLAIM_LEASE_MS);
+  const [request] = await db.update(manualPunchRequest)
+    .set({ applyClaimToken: claimToken, applyClaimedAt: new Date() })
     .where(and(
       eq(manualPunchRequest.id, id),
       eq(manualPunchRequest.status, "APPLYING"),
+      or(
+        isNull(manualPunchRequest.applyClaimedAt),
+        lte(manualPunchRequest.applyClaimedAt, claimCutoff),
+      ),
     ))
-    .limit(1);
+    .returning();
   if (!request) return undefined;
+  if (request.punchedAt > new Date()) {
+    return rejectManualPunch(id, "A manual punch cannot be applied in the future.", claimToken);
+  }
 
   const existing = await db.select({ id: attendanceRecord.id })
     .from(attendanceRecord)
@@ -53,14 +154,35 @@ export const applyManualPunch = async (id: string) => {
       eq(attendanceRecord.manualClockOutRequestId, id),
     ))
     .limit(1);
-  if (existing[0]) return completeManualPunch(id);
+  if (existing[0]) {
+    if (request.direction === "IN") {
+      const [linked] = await db.select({
+        record: attendanceRecord,
+        roster: rosterEntry,
+        shift: shiftType,
+      }).from(attendanceRecord)
+        .leftJoin(rosterEntry, eq(rosterEntry.id, attendanceRecord.rosterEntryId))
+        .leftJoin(shiftType, eq(shiftType.id, attendanceRecord.shiftTypeId))
+        .where(eq(attendanceRecord.manualClockInRequestId, id))
+        .limit(1);
+      if (linked) {
+        await ensureManualClockInExceptions(
+          request,
+          linked.record,
+          linked.roster,
+          linked.shift,
+        );
+      }
+    }
+    return completeManualPunch(id, claimToken);
+  }
 
   const [person] = await db.select({
     id: staff.id,
     status: staff.status,
   }).from(staff).where(eq(staff.id, request.staffId)).limit(1);
   if (!person || person.status !== "active") {
-    return rejectManualPunch(id, "The selected employee is no longer active.");
+    return rejectManualPunch(id, "The selected employee is no longer active.", claimToken);
   }
 
   if (request.direction === "IN") {
@@ -72,7 +194,7 @@ export const applyManualPunch = async (id: string) => {
       ))
       .limit(1);
     if (openRecord) {
-      return rejectManualPunch(id, "This employee already has an open attendance record.");
+      return rejectManualPunch(id, "This employee already has an open attendance record.", claimToken);
     }
 
     const matched = await findClockInShift(request.staffId, request.punchedAt);
@@ -92,7 +214,7 @@ export const applyManualPunch = async (id: string) => {
       })
       : null;
 
-    await db.insert(attendanceRecord).values({
+    const [created] = await db.insert(attendanceRecord).values({
       staffId: request.staffId,
       rosterEntryId: matched?.entry.id ?? null,
       attendanceDate,
@@ -105,18 +227,21 @@ export const applyManualPunch = async (id: string) => {
       source: "MANUAL",
       workedMinutes: 0,
       lateMinutes: metrics?.lateMinutes ?? 0,
-    });
-
-    if (!matched) {
-      await db.insert(attendanceException).values({
+    }).returning({ id: attendanceRecord.id });
+    if (!created) throw new Error("The manual attendance record could not be created.");
+    await ensureManualClockInExceptions(
+      request,
+      {
+        id: created.id,
         staffId: request.staffId,
-        exceptionDate: attendanceDate,
-        exceptionType: "UNROSTERED_PUNCH",
-        note: `Approved manual clock-in: ${request.reason}`,
-        jobKey: `UNROSTERED_MANUAL:${id}`,
-      }).onConflictDoNothing();
-    }
-    return completeManualPunch(id);
+        attendanceDate,
+        clockInAt: request.punchedAt,
+        rosterEntryId: matched?.entry.id ?? null,
+      },
+      matched?.entry ?? null,
+      matched?.shift ?? null,
+    );
+    return completeManualPunch(id, claimToken);
   }
 
   const [open] = await db.select({
@@ -131,12 +256,13 @@ export const applyManualPunch = async (id: string) => {
       eq(attendanceRecord.status, "OPEN"),
     ))
     .limit(1);
-  if (!open) return rejectManualPunch(id, "There is no open attendance record to clock out.");
+  if (!open) return rejectManualPunch(id, "There is no open attendance record to clock out.", claimToken);
   if (request.punchedAt <= open.record.clockInAt) {
-    return rejectManualPunch(id, "The manual clock-out must be later than the clock-in.");
+    return rejectManualPunch(id, "The manual clock-out must be later than the clock-in.", claimToken);
   }
 
   const plannedEnd = open.roster?.plannedEnd ?? open.record.clockInAt;
+  const approvedOvertimeMinutes = await getApprovedOvertimeMinutes(open.record.id);
   const metrics = calculateAttendanceMetrics({
     clockInAt: open.record.clockInAt,
     clockOutAt: request.punchedAt,
@@ -144,6 +270,7 @@ export const applyManualPunch = async (id: string) => {
     plannedEnd,
     graceLateMinutes: open.shift?.graceLateMinutes ?? 0,
     breakMinutes: open.shift?.breakMinutes ?? 0,
+    approvedOvertimeMinutes,
   });
   const [closed] = await db.update(attendanceRecord)
     .set({
@@ -163,7 +290,7 @@ export const applyManualPunch = async (id: string) => {
       eq(attendanceRecord.version, open.record.version),
     ))
     .returning({ id: attendanceRecord.id });
-  if (!closed) return rejectManualPunch(id, "The attendance record changed before this request was applied.");
+  if (!closed) return rejectManualPunch(id, "The attendance record changed before this request was applied.", claimToken);
 
   if (metrics.earlyLeaveMinutes > 0) {
     await db.insert(attendanceException).values({
@@ -176,16 +303,23 @@ export const applyManualPunch = async (id: string) => {
       jobKey: `EARLY_LEAVE_MANUAL:${id}`,
     }).onConflictDoNothing();
   }
-  return completeManualPunch(id);
+  return completeManualPunch(id, claimToken);
 };
 
 export const applyAttendanceCorrection = async (id: string) => {
-  const [correction] = await db.select().from(attendanceCorrection)
+  const claimToken = randomUUID();
+  const claimCutoff = new Date(Date.now() - APPLY_CLAIM_LEASE_MS);
+  const [correction] = await db.update(attendanceCorrection)
+    .set({ applyClaimToken: claimToken, applyClaimedAt: new Date() })
     .where(and(
       eq(attendanceCorrection.id, id),
       eq(attendanceCorrection.status, "APPLYING"),
+      or(
+        isNull(attendanceCorrection.applyClaimedAt),
+        lte(attendanceCorrection.applyClaimedAt, claimCutoff),
+      ),
     ))
-    .limit(1);
+    .returning();
   if (!correction) return undefined;
 
   const [current] = await db.select({
@@ -198,30 +332,18 @@ export const applyAttendanceCorrection = async (id: string) => {
     .where(eq(attendanceRecord.id, correction.attendanceRecordId))
     .limit(1);
   if (!current || !correction.newClockIn || !correction.newClockOut) {
-    await db.update(attendanceCorrection)
-      .set({
-        status: "REJECTED",
-        decisionReason: "The attendance record or requested clock times are no longer available.",
-      })
-      .where(and(
-        eq(attendanceCorrection.id, id),
-        eq(attendanceCorrection.status, "APPLYING"),
-      ));
-    return { id, status: "REJECTED" };
+    return rejectAttendanceCorrection(
+      id,
+      claimToken,
+      "The attendance record or requested clock times are no longer available.",
+    );
   }
 
   if (
     current.record.clockInAt.getTime() === correction.newClockIn.getTime() &&
     current.record.clockOutAt?.getTime() === correction.newClockOut.getTime()
   ) {
-    const [completed] = await db.update(attendanceCorrection)
-      .set({ status: "APPROVED", appliedAt: new Date() })
-      .where(and(
-        eq(attendanceCorrection.id, id),
-        eq(attendanceCorrection.status, "APPLYING"),
-      ))
-      .returning({ id: attendanceCorrection.id, status: attendanceCorrection.status });
-    return completed ?? { id, status: "APPROVED" };
+    return completeAttendanceCorrection(id, claimToken);
   }
 
   if (
@@ -229,18 +351,14 @@ export const applyAttendanceCorrection = async (id: string) => {
     current.record.clockInAt.getTime() !== correction.oldClockIn?.getTime() ||
     current.record.clockOutAt?.getTime() !== correction.oldClockOut?.getTime()
   ) {
-    await db.update(attendanceCorrection)
-      .set({
-        status: "REJECTED",
-        decisionReason: "The attendance record changed after this correction was requested.",
-      })
-      .where(and(
-        eq(attendanceCorrection.id, id),
-        eq(attendanceCorrection.status, "APPLYING"),
-      ));
-    return { id, status: "REJECTED" };
+    return rejectAttendanceCorrection(
+      id,
+      claimToken,
+      "The attendance record changed after this correction was requested.",
+    );
   }
 
+  const approvedOvertimeMinutes = await getApprovedOvertimeMinutes(current.record.id);
   const metrics = calculateAttendanceMetrics({
     clockInAt: correction.newClockIn,
     clockOutAt: correction.newClockOut,
@@ -248,6 +366,7 @@ export const applyAttendanceCorrection = async (id: string) => {
     plannedEnd: current.roster?.plannedEnd ?? correction.newClockOut,
     graceLateMinutes: current.shift?.graceLateMinutes ?? 0,
     breakMinutes: current.shift?.breakMinutes ?? 0,
+    approvedOvertimeMinutes,
   });
   const [updated] = await db.update(attendanceRecord)
     .set({
@@ -264,39 +383,65 @@ export const applyAttendanceCorrection = async (id: string) => {
       eq(attendanceRecord.id, correction.attendanceRecordId),
       eq(attendanceRecord.version, current.record.version),
       or(eq(attendanceRecord.status, "CLOSED"), eq(attendanceRecord.status, "AUTO_CLOSED")),
+      exists(db.select({ id: attendanceCorrection.id }).from(attendanceCorrection)
+        .where(and(
+          eq(attendanceCorrection.id, id),
+          eq(attendanceCorrection.status, "APPLYING"),
+          eq(attendanceCorrection.applyClaimToken, claimToken),
+        ))),
     ))
     .returning({ id: attendanceRecord.id });
   if (!updated) {
-    await db.update(attendanceCorrection)
-      .set({
-        status: "REJECTED",
-        decisionReason: "The attendance record changed while the correction was being approved.",
-      })
-      .where(and(
-        eq(attendanceCorrection.id, id),
-        eq(attendanceCorrection.status, "APPLYING"),
-      ));
-    return { id, status: "REJECTED" };
+    return rejectAttendanceCorrection(
+      id,
+      claimToken,
+      "The attendance record changed while the correction was being approved.",
+    );
   }
 
-  const [completed] = await db.update(attendanceCorrection)
-    .set({ status: "APPROVED", appliedAt: new Date() })
-    .where(and(
-      eq(attendanceCorrection.id, id),
-      eq(attendanceCorrection.status, "APPLYING"),
-    ))
-    .returning({ id: attendanceCorrection.id, status: attendanceCorrection.status });
-  return completed ?? { id, status: "APPROVED" };
+  return completeAttendanceCorrection(id, claimToken);
 };
 
 export const recoverAttendanceApprovals = async () => {
+  const claimCutoff = new Date(Date.now() - APPLY_CLAIM_LEASE_MS);
   const [manual, corrections] = await Promise.all([
     db.select({ id: manualPunchRequest.id }).from(manualPunchRequest)
-      .where(eq(manualPunchRequest.status, "APPLYING")).limit(100),
+      .where(and(
+        eq(manualPunchRequest.status, "APPLYING"),
+        or(
+          isNull(manualPunchRequest.applyClaimedAt),
+          lte(manualPunchRequest.applyClaimedAt, claimCutoff),
+        ),
+      )).limit(100),
     db.select({ id: attendanceCorrection.id }).from(attendanceCorrection)
-      .where(eq(attendanceCorrection.status, "APPLYING")).limit(100),
+      .where(and(
+        eq(attendanceCorrection.status, "APPLYING"),
+        or(
+          isNull(attendanceCorrection.applyClaimedAt),
+          lte(attendanceCorrection.applyClaimedAt, claimCutoff),
+        ),
+      )).limit(100),
   ]);
-  for (const request of manual) await applyManualPunch(request.id);
-  for (const correction of corrections) await applyAttendanceCorrection(correction.id);
-  return manual.length + corrections.length;
+  let recovered = 0;
+  for (const request of manual) {
+    try {
+      if (await applyManualPunch(request.id)) recovered += 1;
+    } catch (error) {
+      console.error("Failed to recover manual attendance approval.", {
+        requestId: request.id,
+        error,
+      });
+    }
+  }
+  for (const correction of corrections) {
+    try {
+      if (await applyAttendanceCorrection(correction.id)) recovered += 1;
+    } catch (error) {
+      console.error("Failed to recover attendance correction approval.", {
+        correctionId: correction.id,
+        error,
+      });
+    }
+  }
+  return recovered;
 };
