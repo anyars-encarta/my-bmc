@@ -259,6 +259,8 @@ export const StaffShow = () => {
           staffId={staffId}
           name={`${record?.firstName ?? ""} ${record?.lastName ?? ""}`.trim()}
           employeeId={record?.employeeId ?? ""}
+          position={record?.position}
+          imageUrl={record?.imageUrl}
         />
       ) : null}
 
