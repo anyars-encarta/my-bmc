@@ -214,7 +214,8 @@ const EditUser = () => {
                           {APP_ROLE_OPTIONS
                             .filter((option) =>
                               option.value !== "super_admin" ||
-                              loggedInUser?.roles?.includes("super_admin"),
+                              loggedInUser?.roles?.includes("super_admin") ||
+                              loggedInUser?.role === "super_admin",
                             )
                             .map((option) => (
                               <label

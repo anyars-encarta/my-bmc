@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -49,6 +50,7 @@ const authBaseUrl =
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
 const RoleEnum = z.enum([...APP_ROLES, "admin"]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
+const adminSignupContext = new AsyncLocalStorage<boolean>();
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
 if (!trustedOrigins.length) throw new Error("FRONTEND_URL is not set in the .env file");
@@ -171,10 +173,18 @@ export const auth = betterAuth({
     user: {
       create: {
         after: async (createdUser) => {
-          await db.insert(appUserRole).values({
-            userId: createdUser.id,
-            role: "staff",
-          }).onConflictDoNothing();
+          if (adminSignupContext.getStore()) return;
+          try {
+            await db.insert(appUserRole).values({
+              userId: createdUser.id,
+              role: "staff",
+            }).onConflictDoNothing();
+          } catch (error) {
+            console.error("Failed to assign the default staff role after user creation.", {
+              userId: createdUser.id,
+              error,
+            });
+          }
         },
       },
     },
@@ -208,3 +218,13 @@ export const auth = betterAuth({
     },
   },
 });
+
+export const signUpAdminUser = async (body: {
+  name: string;
+  email: string;
+  password: string;
+  image?: string;
+  imageCldPubId?: string;
+}) => {
+  return adminSignupContext.run(true, () => auth.api.signUpEmail({ body }));
+};

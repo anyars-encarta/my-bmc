@@ -92,6 +92,20 @@ const readQueue = () => withQueueStore<StoredPunch[]>("readonly", (store) => sto
 const savePunch = (punch: Punch, deviceCode: string) => withQueueStore<IDBValidKey>("readwrite", (store) =>
   store.put({ ...punch, deviceCode, createdAt: Date.now() }),
 );
+const adoptUnconfiguredPunches = async (deviceCode: string) => {
+  const queued = await withQueueStore<StoredPunch[]>("readwrite", (store) => {
+    const request = store.getAll();
+    request.onsuccess = () => {
+      for (const punch of request.result as StoredPunch[]) {
+        if (!punch.deviceCode?.trim()) {
+          store.put({ ...punch, deviceCode });
+        }
+      }
+    };
+    return request;
+  });
+  return queued.filter((punch) => !punch.deviceCode?.trim()).length;
+};
 const removePunch = (eventId: string) => withQueueStore<undefined>("readwrite", (store) =>
   store.delete(eventId),
 );
@@ -160,12 +174,20 @@ export const AttendanceKioskPage = () => {
       employee?: EmployeeFeedback;
     }>();
     try {
-      const queued = (await readQueue()).sort((left, right) =>
+      const allQueued = await readQueue();
+      const queued = allQueued
+        .filter((punch) => punch.deviceCode?.trim() === deviceCode.trim())
+        .sort((left, right) =>
         left.punchedAt.localeCompare(right.punchedAt) ||
         left.deviceEventId.localeCompare(right.deviceEventId),
       );
-      if (queued.some((punch) => punch.deviceCode !== deviceCode.trim())) {
-        throw new Error("Queued punches belong to a different or unconfigured kiosk device. They were kept and not uploaded.");
+      const unmatchedCount = allQueued.length - queued.length;
+      if (unmatchedCount > 0) {
+        toast.error(`${unmatchedCount} queued punch(es) belong to another or unconfigured device. They were kept; matching punches will still sync.`);
+      }
+      if (queued.length === 0) {
+        await refreshQueueCount();
+        return confirmedResults;
       }
       for (let offset = 0; offset < queued.length; offset += 500) {
         const batch = queued.slice(offset, offset + 500);
@@ -220,7 +242,7 @@ export const AttendanceKioskPage = () => {
         }
       }
       await refreshQueueCount();
-      if (queued.length > 0) toast.success(`Synced ${queued.length} attendance punch(es).`);
+      toast.success(`Synced ${queued.length} attendance punch(es).`);
       return confirmedResults;
     } catch (error) {
       await refreshQueueCount();
@@ -300,11 +322,20 @@ export const AttendanceKioskPage = () => {
     void submitToken(token);
   };
 
-  const saveDeviceSettings = (event: FormEvent<HTMLFormElement>) => {
+  const saveDeviceSettings = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     try {
-      localStorage.setItem(DEVICE_CODE_KEY, deviceCode.trim());
+      const nextDeviceCode = deviceCode.trim();
+      const previouslyConfiguredCode = localStorage.getItem(DEVICE_CODE_KEY)?.trim() ?? "";
+      localStorage.setItem(DEVICE_CODE_KEY, nextDeviceCode);
       localStorage.setItem(DEVICE_API_KEY, deviceKey.trim());
+      if (!previouslyConfiguredCode && nextDeviceCode) {
+        const adoptedCount = await adoptUnconfiguredPunches(nextDeviceCode);
+        await refreshQueueCount();
+        if (adoptedCount > 0) {
+          toast.success(`Associated ${adoptedCount} unconfigured queued punch(es) with this device.`);
+        }
+      }
       showFeedback("Kiosk configured", "Device credentials are stored in this browser for syncing.", "success");
       void uploadQueue();
     } catch (error) {
@@ -372,7 +403,6 @@ export const AttendanceKioskPage = () => {
 
   useEffect(() => {
     void refreshQueueCount();
-    inputRef.current?.focus();
     const markOnline = () => {
       setOnline(true);
       void uploadQueue();
@@ -387,6 +417,10 @@ export const AttendanceKioskPage = () => {
       window.clearInterval(syncTimer);
     };
   }, [refreshQueueCount, uploadQueue]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   useEffect(() => () => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);

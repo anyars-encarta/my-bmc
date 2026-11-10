@@ -84,10 +84,7 @@ router.get("/", async (req, res, next) => {
       defaultSort: "name",
     });
 
-    const roleSet = (req.user?.roles ?? []).filter((role): role is string => typeof role === "string");
-    const typedRoles = roleSet.filter((role): role is Parameters<typeof resolveManagedUnitIds>[1][number] =>
-      isAppRole(role),
-    );
+    const typedRoles = (req.user?.roles ?? []).filter(isAppRole);
     const managedIds = req.user?.id ? await resolveManagedUnitIds(req.user.id, typedRoles) : [];
 
     const filters = [];

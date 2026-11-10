@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { db } from "../../db/index.js";
 import { appUserRole, user } from "../../db/schema/index.js";
-import { auth } from "../../lib/auth.js";
+import { APIError } from "better-auth/api";
+import { auth, signUpAdminUser } from "../../lib/auth.js";
 import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
 import {
@@ -141,6 +142,7 @@ const rejectUnauthorizedSuperAdmin = (
 };
 
 router.post("/", requireAnyRole([...LIST_ROLES]), async (req, res, next) => {
+  let createdUserId: string | null = null;
   try {
     const parsed = createUserSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -151,17 +153,28 @@ router.post("/", requireAnyRole([...LIST_ROLES]), async (req, res, next) => {
     const actorRoles = req.user?.roles ?? [];
     rejectUnauthorizedSuperAdmin(parsed.data.roles, actorRoles);
 
-    const created = await auth.api.signUpEmail({
-      body: {
-        name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
-        password: parsed.data.password,
-        ...(parsed.data.image ? { image: parsed.data.image } : {}),
-        ...(parsed.data.imageCldPubId ? { imageCldPubId: parsed.data.imageCldPubId } : {}),
-      },
+    const created = await signUpAdminUser({
+      name: parsed.data.name,
+      email: parsed.data.email.toLowerCase(),
+      password: parsed.data.password,
+      ...(parsed.data.image ? { image: parsed.data.image } : {}),
+      ...(parsed.data.imageCldPubId ? { imageCldPubId: parsed.data.imageCldPubId } : {}),
     });
+    createdUserId = created.user.id;
     const roles = normalizeRoles(parsed.data.roles);
-    await replaceUserRoles(created.user.id, parsed.data.roles, req.user?.id ?? null);
+    try {
+      await replaceUserRoles(created.user.id, roles, req.user?.id ?? null);
+    } catch (roleAssignmentError) {
+      try {
+        await db.delete(user).where(eq(user.id, created.user.id));
+      } catch (cleanupError) {
+        console.error("Failed to remove a newly created user after role assignment failed.", {
+          userId: created.user.id,
+          cleanupError,
+        });
+      }
+      throw roleAssignmentError;
+    }
 
     res.status(201).json({
       data: {
@@ -172,6 +185,14 @@ router.post("/", requireAnyRole([...LIST_ROLES]), async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (
+      createdUserId === null &&
+      error instanceof APIError &&
+      ["USER_ALREADY_EXISTS", "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"].includes(error.body?.code ?? "")
+    ) {
+      next(conflict("A user with this email already exists.", "USER_EMAIL_DUPLICATE"));
+      return;
+    }
     if (
       error &&
       typeof error === "object" &&

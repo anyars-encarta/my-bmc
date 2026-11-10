@@ -723,20 +723,20 @@ router.post(
         ))
         .returning({ id: attendanceCorrection.id });
       if (!claimed) throw conflict("This correction request was decided by another user.", "CONCURRENT_MODIFICATION");
-      const outcome = nextStatus === "APPLYING"
-        ? await applyAttendanceCorrection(correctionId)
-        : { id: correctionId, status: nextStatus };
-      if (!outcome) {
-        throw conflict("This correction is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
-      }
       await addAuditEntry(req, {
         action: "UPDATE",
         entityType: "attendance_correction",
         entityId: correctionId,
         reason: body.data.reason,
         before: { status: "PENDING" },
-        after: { status: outcome.status },
+        after: { status: nextStatus },
       });
+      const outcome = nextStatus === "APPLYING"
+        ? await applyAttendanceCorrection(correctionId)
+        : { id: correctionId, status: nextStatus };
+      if (!outcome) {
+        throw conflict("This correction is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
+      }
       res.json({ data: { id: correctionId, status: outcome.status } });
     } catch (error) {
       next(error);
@@ -891,20 +891,20 @@ router.post(
         ))
         .returning({ id: manualPunchRequest.id });
       if (!claimed) throw conflict("This manual punch was decided by another user.", "CONCURRENT_MODIFICATION");
-      const outcome = nextStatus === "APPLYING"
-        ? await applyManualPunch(requestId)
-        : { id: requestId, status: nextStatus };
-      if (!outcome) {
-        throw conflict("This manual punch is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
-      }
       await addAuditEntry(req, {
         action: "UPDATE",
         entityType: "manual_punch_request",
         entityId: requestId,
         reason: body.data.reason,
         before: { status: "PENDING" },
-        after: { status: outcome.status },
+        after: { status: nextStatus },
       });
+      const outcome = nextStatus === "APPLYING"
+        ? await applyManualPunch(requestId)
+        : { id: requestId, status: nextStatus };
+      if (!outcome) {
+        throw conflict("This manual punch is already being applied.", "ATTENDANCE_APPROVAL_IN_PROGRESS");
+      }
       res.json({ data: { id: requestId, status: outcome.status } });
     } catch (error) {
       next(error);

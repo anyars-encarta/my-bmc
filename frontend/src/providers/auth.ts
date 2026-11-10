@@ -290,6 +290,7 @@ export const authProvider: AuthProvider = {
         email,
         password,
         name: name?.trim() || email,
+        role: "staff",
         status: "active",
         image: typeof image === "string" ? image : undefined,
         imageCldPubId: typeof imageCldPubId === "string" ? imageCldPubId : "",

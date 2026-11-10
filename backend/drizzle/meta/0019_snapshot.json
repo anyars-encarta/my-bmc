@@ -1134,7 +1134,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'accounts'"
+          "default": "'staff'"
         },
         "status": {
           "name": "status",
@@ -1326,7 +1326,6 @@
         "registrar",
         "records_officer",
         "cashier",
-        "accounts",
         "billing_officer",
         "doctor",
         "nurse",

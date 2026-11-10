@@ -138,6 +138,13 @@
     {
       "idx": 19,
       "version": "7",
+      "when": 1794230000000,
+      "tag": "0019_kind_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
       "when": 1794244500000,
       "tag": "0020_normalize_application_roles",
       "breakpoints": true

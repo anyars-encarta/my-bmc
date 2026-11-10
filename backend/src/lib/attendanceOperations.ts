@@ -173,6 +173,39 @@ export const applyManualPunch = async (id: string) => {
           linked.shift,
         );
       }
+    } else {
+      const [linked] = await db.select({
+        record: attendanceRecord,
+        roster: rosterEntry,
+        shift: shiftType,
+      }).from(attendanceRecord)
+        .leftJoin(rosterEntry, eq(rosterEntry.id, attendanceRecord.rosterEntryId))
+        .leftJoin(shiftType, eq(shiftType.id, attendanceRecord.shiftTypeId))
+        .where(eq(attendanceRecord.manualClockOutRequestId, id))
+        .limit(1);
+      if (linked && linked.record.clockOutAt) {
+        const approvedOvertimeMinutes = await getApprovedOvertimeMinutes(linked.record.id);
+        const metrics = calculateAttendanceMetrics({
+          clockInAt: linked.record.clockInAt,
+          clockOutAt: linked.record.clockOutAt,
+          plannedStart: linked.roster?.plannedStart ?? linked.record.clockInAt,
+          plannedEnd: linked.roster?.plannedEnd ?? linked.record.clockInAt,
+          graceLateMinutes: linked.shift?.graceLateMinutes ?? 0,
+          breakMinutes: linked.shift?.breakMinutes ?? 0,
+          approvedOvertimeMinutes,
+        });
+        if (metrics.earlyLeaveMinutes > 0) {
+          await db.insert(attendanceException).values({
+            staffId: linked.record.staffId,
+            exceptionDate: linked.record.attendanceDate,
+            exceptionType: "EARLY_LEAVE",
+            attendanceRecordId: linked.record.id,
+            rosterEntryId: linked.record.rosterEntryId,
+            note: `Approved manual clock-out: ${request.reason}`,
+            jobKey: `EARLY_LEAVE_MANUAL:${id}`,
+          }).onConflictDoNothing();
+        }
+      }
     }
     return completeManualPunch(id, claimToken);
   }

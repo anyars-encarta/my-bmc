@@ -120,6 +120,15 @@ const workforceSelfServiceRoles = [
   "roster_officer",
   "staff",
 ];
+const attendanceSelfServiceRoles = [
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
+  "accounts",
+  "unit_manager",
+  "staff",
+];
 
 function WorkforceRoleGate({
   allowedRoles,
@@ -319,7 +328,7 @@ function App() {
                       <Route path="devices" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><DevicesPage /></WorkforceRoleGate>} />
                       <Route path="attendance" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager", "payroll_officer", "accounts", "unit_manager"]}><AttendanceOperationsPage /></WorkforceRoleGate>} />
                       <Route path="attendance-pilot" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><AttendancePilotPage /></WorkforceRoleGate>} />
-                      <Route path="my-attendance" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MyAttendancePage /></WorkforceRoleGate>} />
+                      <Route path="my-attendance" element={<WorkforceRoleGate allowedRoles={attendanceSelfServiceRoles}><MyAttendancePage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />
