@@ -65,7 +65,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-router.post("/", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.post("/", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const parsed = payloadSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -81,7 +81,7 @@ router.post("/", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"])
   }
 });
 
-router.patch("/:id", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.patch("/:id", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const roleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     if (!roleId) {

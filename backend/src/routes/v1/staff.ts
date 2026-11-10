@@ -31,7 +31,7 @@ import { nowAtFacility } from "../../lib/facilityClock.js";
 
 const router = Router();
 
-const STAFF_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"] as const;
+const STAFF_WRITE_ROLES = ["super_admin", "hospital_admin", "hr_manager", "payroll_officer"] as const;
 
 const normalizeEmptyStaffInputs = (value: unknown) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -118,7 +118,7 @@ const mapSort = (field: string, descending: boolean) => {
 };
 
 const canViewPayout = (roles: string[]) =>
-  roles.some((role) => ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER"].includes(role));
+  roles.some((role) => ["super_admin", "hospital_admin", "hr_manager", "payroll_officer"].includes(role));
 
 const sanitizeStaffRecord = (record: typeof staff.$inferSelect, roles: string[]) => {
   if (canViewPayout(roles)) {
@@ -795,7 +795,7 @@ router.patch("/:id", requireAnyRole([...STAFF_WRITE_ROLES]), async (req, res, ne
   }
 });
 
-router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.post("/:id/deactivate", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const staffId = parseRouteId(req.params.id);
     if (!staffId) {
@@ -880,7 +880,7 @@ router.post("/:id/deactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", 
   }
 });
 
-router.post("/:id/reactivate", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.post("/:id/reactivate", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const staffId = parseRouteId(req.params.id);
     if (!staffId) {
@@ -1028,7 +1028,7 @@ router.get("/:id/licenses", async (req, res, next) => {
   }
 });
 
-router.post("/:id/licenses", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.post("/:id/licenses", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const staffId = parseRouteId(req.params.id);
     if (!staffId) {
@@ -1049,7 +1049,7 @@ router.post("/:id/licenses", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "H
   }
 });
 
-router.patch("/:id/licenses/:licenseId", requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]), async (req, res, next) => {
+router.patch("/:id/licenses/:licenseId", requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]), async (req, res, next) => {
   try {
     const staffId = parseRouteId(req.params.id);
     const licenseId = parseRouteId(req.params.licenseId);
@@ -1085,7 +1085,7 @@ router.patch("/:id/licenses/:licenseId", requireAnyRole(["SUPER_ADMIN", "HOSPITA
 
 router.post(
   "/migrations/department-org-units/dry-run",
-  requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]),
+  requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]),
   async (_req, res, next) => {
     try {
       const staffRows = await db.select().from(staff).orderBy(asc(staff.department), asc(staff.lastName));
@@ -1132,7 +1132,7 @@ router.post(
 
 router.post(
   "/migrations/department-org-units/apply",
-  requireAnyRole(["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]),
+  requireAnyRole(["super_admin", "hospital_admin", "hr_manager"]),
   async (_req, res, next) => {
     try {
       const staffRows = await db.select().from(staff).where(eq(staff.status, "active"));

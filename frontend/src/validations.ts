@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { APP_ROLES } from "@/types/auth";
 
 export const editUserSchema = z
   .object({
     name: z.string().trim().min(1, "Name is required"),
     email: z.string().trim().email("Enter a valid email address"),
-    role: z.enum(["admin", "accounts"]),
+    roles: z.array(z.enum(APP_ROLES)).min(1, "Assign at least one role"),
     status: z.enum(["active", "inactive"]),
     image: z.string().url().nullable().optional(),
     imageCldPubId: z.string().nullable().optional(),

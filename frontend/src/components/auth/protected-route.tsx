@@ -88,7 +88,9 @@ export function ProtectedRoute({ allowRoles }: ProtectedRouteProps) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (allowRoles && !allowRoles.includes(user.role)) {
+  const userRoles = new Set(user.roles ?? []);
+  if (user.role) userRoles.add(user.role);
+  if (allowRoles && !allowRoles.some((role) => userRoles.has(role))) {
     return <Navigate to="/dashboard" replace />;
   }
 

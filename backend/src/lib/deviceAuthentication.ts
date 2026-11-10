@@ -69,6 +69,7 @@ export const requireDeviceAuthentication = async (
           THEN ${windowStart} ELSE ${attendanceDevice.rateLimitWindowStart}
         END`,
         lastSeenAt: new Date(now),
+        healthAlertedAt: null,
       })
       .where(and(
         eq(attendanceDevice.id, device.id),

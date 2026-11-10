@@ -11,7 +11,7 @@ const router = Router();
 
 router.get(
   "/",
-  requireAnyRole(["SUPER_ADMIN", "AUDITOR", "DPO"]),
+  requireAnyRole(["super_admin", "auditor", "dpo"]),
   async (req, res, next) => {
     try {
       const query = parseListQuery(req, {

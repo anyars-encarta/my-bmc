@@ -4,8 +4,8 @@ import { db } from "../db/index.js";
 import { orgUnit, staff, userUnitScope } from "../db/schema/index.js";
 import type { AppRole } from "./platform.js";
 
-const ORG_ADMIN_ROLES: AppRole[] = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"];
-const SCOPED_MANAGER_ROLES: AppRole[] = ["UNIT_MANAGER", "ROSTER_OFFICER"];
+const ORG_ADMIN_ROLES: AppRole[] = ["super_admin", "hospital_admin", "hr_manager"];
+const SCOPED_MANAGER_ROLES: AppRole[] = ["unit_manager", "roster_officer"];
 
 const buildChildrenMap = (rows: Array<{ id: string; parentId: string | null }>) => {
   const children = new Map<string, string[]>();

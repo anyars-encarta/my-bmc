@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { User } from "@/types";
+import { getAppRoleLabel } from "@/types/auth";
 import { useBack, useOne } from "@refinedev/core";
 import {
   CalendarDays,
@@ -39,7 +40,7 @@ const formatDate = (value?: string | null) => {
 const roleBadgeVariant = (
   role: string,
 ): "default" | "secondary" | "outline" => {
-  if (role === "admin") return "default";
+  if (role === "super_admin" || role === "hospital_admin") return "default";
   if (role === "accounts") return "secondary";
   return "outline";
 };
@@ -116,12 +117,13 @@ const ShowUser = () => {
               </Avatar>
               <div>
                 <p className="font-semibold text-lg">{user.name}</p>
-                <Badge
-                  variant={roleBadgeVariant(user.role)}
-                  className="capitalize mt-1"
-                >
-                  {user.role}
-                </Badge>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {(user.roles ?? (user.role ? [user.role] : [])).map((role) => (
+                    <Badge key={role} variant={roleBadgeVariant(role)}>
+                      {getAppRoleLabel(role)}
+                    </Badge>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -168,10 +170,16 @@ const ShowUser = () => {
 
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Role</p>
-                <p className="mt-1 flex items-center gap-2 text-sm font-medium">
+                <div className="mt-1 flex items-center gap-2 text-sm font-medium">
                   <ShieldCheck className="size-4" />
-                  <span className="capitalize">{user.role}</span>
-                </p>
+                  <div className="flex flex-wrap gap-1">
+                    {(user.roles ?? (user.role ? [user.role] : [])).map((role) => (
+                      <Badge key={role} variant={roleBadgeVariant(role)}>
+                        {getAppRoleLabel(role)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="rounded-md border p-3">

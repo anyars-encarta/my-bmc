@@ -1,9 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { attendanceDevice, facilitySetup, punchLog } from "../../db/schema/index.js";
+import { attendanceDevice, facilitySetup, punchLog, staff } from "../../db/schema/index.js";
 import { MAX_DEVICE_BATCH_SIZE } from "../../lib/attendance.js";
 import { requireDeviceAuthentication } from "../../lib/deviceAuthentication.js";
 import { preflightPunch, withPreflightLimit } from "../../lib/punchProcessor.js";
@@ -21,6 +21,23 @@ const punchSchema = z.object({
   directionHint: z.enum(["IN", "OUT", "AUTO"]).optional().default("AUTO"),
   verifyMode: z.string().max(20).optional(),
 });
+
+const punchIdentity = (punch: {
+  credentialType: string;
+  credentialRef: string;
+  punchedAt: Date | string;
+  directionHint: string;
+  verifyMode?: string | null;
+}) => JSON.stringify([
+  punch.credentialType,
+  punch.credentialRef,
+  new Date(punch.punchedAt).toISOString(),
+  punch.directionHint,
+  punch.verifyMode ?? null,
+]);
+
+const employeeVisibleForResult = (result: string) =>
+  ["RECEIVED", "ACCEPTED", "CLOCK_IN", "CLOCK_OUT", "RECONCILIATION_REQUIRED"].includes(result);
 
 router.use(requireDeviceAuthentication);
 
@@ -109,6 +126,48 @@ router.post("/punches", async (req, res, next) => {
       };
     }));
 
+    const batchIdentityById = new Map<string, string>();
+    const conflictingIds = new Set<string>();
+    for (const entry of prepared) {
+      if (!entry.item || !entry.punchedAt) continue;
+      const identity = punchIdentity({
+        ...entry.item,
+        punchedAt: entry.punchedAt,
+        verifyMode: entry.item.verifyMode ?? null,
+      });
+      const priorIdentity = batchIdentityById.get(entry.item.deviceEventId);
+      if (priorIdentity && priorIdentity !== identity) {
+        conflictingIds.add(entry.item.deviceEventId);
+      } else {
+        batchIdentityById.set(entry.item.deviceEventId, identity);
+      }
+    }
+
+    const eventIds = [...batchIdentityById.keys()];
+    const existing = eventIds.length === 0
+      ? []
+      : await db.select({
+        id: punchLog.id,
+        deviceEventId: punchLog.deviceEventId,
+        credentialType: punchLog.credentialType,
+        credentialRef: punchLog.credentialRef,
+        punchedAt: punchLog.punchedAt,
+        directionHint: punchLog.directionHint,
+        verifyMode: punchLog.verifyMode,
+        staffId: punchLog.staffId,
+        result: punchLog.result,
+        processed: punchLog.processed,
+      }).from(punchLog).where(and(
+        eq(punchLog.deviceId, device.id),
+        inArray(punchLog.deviceEventId, eventIds),
+      ));
+    const existingByEventId = new Map(existing.map((event) => [event.deviceEventId, event]));
+    for (const event of existing) {
+      if (batchIdentityById.get(event.deviceEventId) !== punchIdentity(event)) {
+        conflictingIds.add(event.deviceEventId);
+      }
+    }
+
     const seenEventIds = new Set<string>();
     const inserts = prepared.flatMap((entry) => {
       if (
@@ -116,7 +175,9 @@ router.post("/punches", async (req, res, next) => {
         !entry.preflight ||
         !entry.receivedAt ||
         !entry.punchedAt ||
-        seenEventIds.has(entry.item.deviceEventId)
+        conflictingIds.has(entry.item.deviceEventId) ||
+        seenEventIds.has(entry.item.deviceEventId) ||
+        existingByEventId.has(entry.item.deviceEventId)
       ) return [];
       seenEventIds.add(entry.item.deviceEventId);
       return [{
@@ -145,29 +206,115 @@ router.post("/punches", async (req, res, next) => {
           id: punchLog.id,
           deviceEventId: punchLog.deviceEventId,
           staffId: punchLog.staffId,
+          result: punchLog.result,
+          processed: punchLog.processed,
+          credentialType: punchLog.credentialType,
+          credentialRef: punchLog.credentialRef,
+          punchedAt: punchLog.punchedAt,
+          directionHint: punchLog.directionHint,
+          verifyMode: punchLog.verifyMode,
         });
-    const newEvents = new Map(inserted.map((entry) => [entry.deviceEventId, entry]));
+    const insertedByEventId = new Map(inserted.map((entry) => [entry.deviceEventId, entry]));
+    const racedIds = eventIds.filter((eventId) =>
+      !insertedByEventId.has(eventId) &&
+      !existingByEventId.has(eventId) &&
+      !conflictingIds.has(eventId),
+    );
+    if (racedIds.length > 0) {
+      const raced = await db.select({
+        id: punchLog.id,
+        deviceEventId: punchLog.deviceEventId,
+        credentialType: punchLog.credentialType,
+        credentialRef: punchLog.credentialRef,
+        punchedAt: punchLog.punchedAt,
+        directionHint: punchLog.directionHint,
+        verifyMode: punchLog.verifyMode,
+        staffId: punchLog.staffId,
+        result: punchLog.result,
+        processed: punchLog.processed,
+      }).from(punchLog).where(and(
+        eq(punchLog.deviceId, device.id),
+        inArray(punchLog.deviceEventId, racedIds),
+      ));
+      for (const event of raced) {
+        if (batchIdentityById.get(event.deviceEventId) !== punchIdentity(event)) {
+          conflictingIds.add(event.deviceEventId);
+        } else {
+          existingByEventId.set(event.deviceEventId, event);
+        }
+      }
+    }
+
+    const jobsById = new Map<string, { id: string; staffId: string | null }>();
+    for (const event of inserted) {
+      jobsById.set(event.id, { id: event.id, staffId: event.staffId });
+    }
+    for (const event of existingByEventId.values()) {
+      if (!event.processed) jobsById.set(event.id, { id: event.id, staffId: event.staffId });
+    }
+    for (const job of jobsById.values()) {
+      schedulePunchProcessing(job.id, job.staffId, req.requestId);
+    }
+
+    const eventForResponse = new Map(existingByEventId);
+    for (const event of inserted) eventForResponse.set(event.deviceEventId, event);
+    const acceptedStaffIds = [...new Set([...eventForResponse.values()]
+      .filter((event) => employeeVisibleForResult(event.result) && event.staffId)
+      .map((event) => event.staffId as string))];
+    let employees: Array<{
+      id: string;
+      employeeId: string;
+      firstName: string;
+      lastName: string;
+      imageUrl: string | null;
+    }> = [];
+    if (acceptedStaffIds.length > 0) {
+      try {
+        employees = await db.select({
+        id: staff.id,
+        employeeId: staff.employeeId,
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        imageUrl: staff.imageUrl,
+        }).from(staff).where(inArray(staff.id, acceptedStaffIds));
+      } catch (error) {
+        console.error("Could not load employee details for accepted attendance punches.", error);
+      }
+    }
+    const employeeById = new Map(employees.map((employee) => [employee.id, {
+      employeeId: employee.employeeId,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      imageUrl: employee.imageUrl,
+    }]));
 
     const respondedEventIds = new Set<string>();
-    const jobs: Array<{ id: string; staffId: string | null }> = [];
     const results = prepared.map((entry) => {
       if (!entry.item || !entry.preflight) {
         return { deviceEventId: entry.deviceEventId, result: entry.result };
       }
-      if (respondedEventIds.has(entry.item.deviceEventId)) {
-        return { deviceEventId: entry.deviceEventId, result: "DUPLICATE" };
+      const eventId = entry.item.deviceEventId;
+      if (conflictingIds.has(eventId)) {
+        return { deviceEventId: eventId, result: "EVENT_ID_CONFLICT" };
       }
-      respondedEventIds.add(entry.item.deviceEventId);
-      const saved = newEvents.get(entry.item.deviceEventId);
-      if (!saved) return { deviceEventId: entry.deviceEventId, result: "DUPLICATE" };
-      jobs.push({ id: saved.id, staffId: saved.staffId });
-      return { deviceEventId: entry.deviceEventId, result: entry.result };
+      const saved = insertedByEventId.get(eventId) ?? existingByEventId.get(eventId);
+      if (!saved) return { deviceEventId: eventId, result: "DUPLICATE" };
+      const originalResult = saved.result;
+      const employee = employeeVisibleForResult(originalResult) && saved.staffId
+        ? employeeById.get(saved.staffId)
+        : undefined;
+      const isReplay = respondedEventIds.has(eventId) || existingByEventId.has(eventId);
+      respondedEventIds.add(eventId);
+      return isReplay
+        ? { deviceEventId: eventId, result: "DUPLICATE", originalResult, employee }
+        : {
+          deviceEventId: eventId,
+          result: entry.result,
+          ...(entry.result === "ACCEPTED" ? { employee } : {}),
+        };
     });
 
     res.status(200).json({ data: { results } });
-    for (const job of jobs) {
-      schedulePunchProcessing(job.id, job.staffId, req.requestId);
-    }
   } catch (error) {
     next(error);
   }

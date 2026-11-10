@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { APP_ROLE_OPTIONS, type AppRole } from "@/types/auth";
 import {
   useLink,
   useNotification,
@@ -36,16 +37,18 @@ type SignUpFormProps = {
   embedded?: boolean;
   title?: string;
   description?: string;
+  canAssignSuperAdmin?: boolean;
 };
 
 export const SignUpForm = ({
   embedded = false,
   title = "Sign up",
-  description = "Welcome to BMC Finance Desk.",
+  description = "Welcome to Encarta Hospital Management System.",
+  canAssignSuperAdmin = false,
 }: SignUpFormProps) => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"admin" | "accounts">("accounts");
+  const [role, setRole] = useState<AppRole>("staff");
   const [imageUpload, setImageUpload] = useState<UploadWidgetValue | null>(
     null,
   );
@@ -81,7 +84,7 @@ export const SignUpForm = ({
       name,
       email,
       password,
-      role,
+      ...(embedded ? { role, adminCreate: true } : {}),
       image: imageUpload?.url ?? null,
       imageCldPubId: imageUpload?.publicId ?? null,
     });
@@ -180,16 +183,24 @@ export const SignUpForm = ({
                   <Label htmlFor="role">Role</Label>
                   <Select
                     value={role}
-                    onValueChange={(value) =>
-                      setRole(value as "admin" | "accounts")
-                    }
+                    onValueChange={(value) => {
+                      const nextRole = APP_ROLE_OPTIONS.find((option) => option.value === value)?.value;
+                      if (nextRole) setRole(nextRole);
+                    }}
                   >
                     <SelectTrigger id="role">
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="accounts">Accounts</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
+                      {APP_ROLE_OPTIONS
+                        .filter((option) =>
+                          option.value !== "super_admin" || canAssignSuperAdmin,
+                        )
+                        .map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>

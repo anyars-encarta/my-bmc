@@ -1,8 +1,10 @@
 import express from "express";
 import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { account, user } from "../db/schema/index.js";
+import { account, appUserRole, user } from "../db/schema/index.js";
 import { hashPassword } from "better-auth/crypto";
+import type { StoredUserRole } from "../lib/appRoles.js";
+import { isAppRole } from "../lib/platform.js";
 
 const router = express.Router();
 
@@ -12,12 +14,27 @@ const parsePositiveInt = (value: unknown) => {
   return parsed;
 };
 
-const isValidRole = (
-  value: unknown,
-): value is "admin" | "accounts" => {
-  return (
-    value === "admin" ||
-    value === "accounts"
+const isValidRole = (value: unknown): value is StoredUserRole =>
+  value === "admin" || isAppRole(value);
+
+const isSuperAdminTarget = async (userId: string, legacyRole: string) => {
+  const rows = await db.select({ role: appUserRole.role })
+    .from(appUserRole)
+    .where(eq(appUserRole.userId, userId));
+  const assignedRoles = rows
+    .map(({ role }) => role.toLowerCase())
+    .filter((role) => role === "admin" || isAppRole(role));
+  const effectiveRoles = assignedRoles.length > 0
+    ? assignedRoles
+    : [legacyRole === "admin" ? "super_admin" : legacyRole];
+  return effectiveRoles.includes("admin") || effectiveRoles.includes("super_admin");
+};
+
+const isSuperAdminActor = (req: express.Request) => {
+  const roles = req.user?.roles ?? [];
+  return roles.includes("super_admin") || (
+    roles.length === 0 &&
+    (req.user?.legacyRole === "admin" || req.user?.role === "super_admin")
   );
 };
 
@@ -151,8 +168,8 @@ router.put("/:id", async (req, res) => {
     const isSelf = req.user?.id === id;
     const isAdmin =
       req.user?.legacyRole === "admin" ||
-      req.user?.roles?.includes("SUPER_ADMIN") ||
-      req.user?.roles?.includes("HOSPITAL_ADMIN");
+      req.user?.roles?.includes("super_admin") ||
+      req.user?.roles?.includes("hospital_admin");
 
     // Only admins can update other users
     if (!isSelf && !isAdmin) {
@@ -163,13 +180,19 @@ router.put("/:id", async (req, res) => {
     }
 
     const [found] = await db
-      .select({ id: user.id, email: user.email, status: user.status })
+      .select({ id: user.id, email: user.email, status: user.status, role: user.role })
       .from(user)
       .where(eq(user.id, id))
       .limit(1);
 
     if (!found) {
       return res.status(404).json({ success: false, error: "User not found." });
+    }
+    if (!isSuperAdminActor(req) && await isSuperAdminTarget(id, found.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Only super_admin can update a super_admin account.",
+      });
     }
 
     // --- name ---
@@ -206,16 +229,6 @@ router.put("/:id", async (req, res) => {
           error: "Email is already in use by another account.",
         });
       }
-    }
-
-    // --- role (skip for self-edits) ---
-    const roleRaw = req.body?.role;
-    const role = isValidRole(roleRaw) ? roleRaw : null;
-    if (!isSelf && !role) {
-      return res.status(400).json({
-        success: false,
-        error: "role must be one of: admin, accounts.",
-      });
     }
 
     // --- status (admin can set status for other users) ---
@@ -258,7 +271,6 @@ router.put("/:id", async (req, res) => {
       .set({
         name,
         ...(emailChanged ? { email: newEmail, emailVerified: false } : {}),
-        ...(!isSelf && role ? { role } : {}),
         ...(!isSelf && status ? { status } : {}),
         image,
         imageCldPubId,
@@ -324,8 +336,8 @@ router.delete("/:id", async (req, res) => {
     // Only admins can delete users
     const canDelete =
       req.user?.legacyRole === "admin" ||
-      req.user?.roles?.includes("SUPER_ADMIN") ||
-      req.user?.roles?.includes("HOSPITAL_ADMIN");
+      req.user?.roles?.includes("super_admin") ||
+      req.user?.roles?.includes("hospital_admin");
     if (!canDelete) {
       return res.status(403).json({
         success: false,
@@ -342,13 +354,19 @@ router.delete("/:id", async (req, res) => {
     }
 
     const [found] = await db
-      .select({ id: user.id })
+      .select({ id: user.id, role: user.role })
       .from(user)
       .where(eq(user.id, id))
       .limit(1);
 
     if (!found) {
       return res.status(404).json({ success: false, error: "User not found." });
+    }
+    if (!isSuperAdminActor(req) && await isSuperAdminTarget(id, found.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Only super_admin can delete a super_admin account.",
+      });
     }
 
     await db.delete(user).where(eq(user.id, id));

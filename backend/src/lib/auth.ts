@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -5,6 +6,8 @@ import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema/auth.js";
+import { appUserRole } from "../db/schema/sprintReady.js";
+import { APP_ROLES } from "./appRoles.js";
 import { z } from "zod";
 
 const normalizeOrigin = (value: string) => {
@@ -45,8 +48,9 @@ const authBaseUrl =
     ?.trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
-const RoleEnum = z.enum(["accounts", "admin"]);
+const RoleEnum = z.enum([...APP_ROLES, "admin"]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
+const adminSignupContext = new AsyncLocalStorage<boolean>();
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
 if (!trustedOrigins.length) throw new Error("FRONTEND_URL is not set in the .env file");
@@ -165,6 +169,26 @@ export const auth = betterAuth({
     provider: "pg",
     schema,
   }),
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (createdUser) => {
+          if (adminSignupContext.getStore()) return;
+          try {
+            await db.insert(appUserRole).values({
+              userId: createdUser.id,
+              role: "staff",
+            }).onConflictDoNothing();
+          } catch (error) {
+            console.error("Failed to assign the default staff role after user creation.", {
+              userId: createdUser.id,
+              error,
+            });
+          }
+        },
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     sendResetPassword: async ({ user, url }) => {
@@ -176,7 +200,8 @@ export const auth = betterAuth({
       role: {
         type: "string",
         required: true,
-        defaultValue: "accounts",
+        defaultValue: "staff",
+        input: false,
         validator: { input: RoleEnum },
       },
       status: {
@@ -193,3 +218,13 @@ export const auth = betterAuth({
     },
   },
 });
+
+export const signUpAdminUser = async (body: {
+  name: string;
+  email: string;
+  password: string;
+  image?: string;
+  imageCldPubId?: string;
+}) => {
+  return adminSignupContext.run(true, () => auth.api.signUpEmail({ body }));
+};

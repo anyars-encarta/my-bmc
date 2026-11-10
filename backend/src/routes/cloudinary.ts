@@ -55,7 +55,9 @@ router.post("/delete", async (req, res) => {
       });
     }
 
-    const canDeleteAny = actor.role === "admin";
+    const canDeleteAny = req.user?.roles?.some((role) =>
+      role === "super_admin" || role === "hospital_admin",
+    ) ?? false;
     const ownsImage = actor.imageCldPubId === normalizedPublicId;
 
     if (!canDeleteAny && !ownsImage) {

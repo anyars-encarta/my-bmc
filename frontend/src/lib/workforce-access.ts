@@ -3,12 +3,12 @@ type WorkforceIdentity = {
   roles?: string[];
 };
 
-const HR_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"] as const;
+const HR_ROLES = ["super_admin", "hospital_admin", "hr_manager"] as const;
 const READ_ROLES = [
   ...HR_ROLES,
-  "PAYROLL_OFFICER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
+  "payroll_officer",
+  "unit_manager",
+  "roster_officer",
 ] as const;
 
 const rolesFor = (identity?: WorkforceIdentity | null) => {

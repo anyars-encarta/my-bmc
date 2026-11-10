@@ -10,7 +10,7 @@ import { requireAnyRole } from "../../lib/platform.js";
 
 const router = Router();
 
-const FACILITY_WRITERS = ["SUPER_ADMIN", "HOSPITAL_ADMIN"] as const;
+const FACILITY_WRITERS = ["super_admin", "hospital_admin"] as const;
 const isValidIanaTimezone = (timezone: string) => {
   try {
     Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());

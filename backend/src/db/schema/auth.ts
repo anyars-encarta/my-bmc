@@ -1,4 +1,5 @@
 import { relations } from "drizzle-orm";
+import { AUTH_ROLE_VALUES } from "../../lib/appRoles.js";
 import {
   text,
   timestamp,
@@ -10,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Enum for user role
-export const roleEnum = pgEnum("role", ["accounts", "admin"]);
+export const roleEnum = pgEnum("role", AUTH_ROLE_VALUES);
 export const userStatusEnum = pgEnum("status", ["active", "inactive"]);
 
 const timestamps = {
@@ -31,14 +32,14 @@ export const user = pgTable(
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
     // Custom fields
-    role: roleEnum("role").notNull().default("accounts"),
+    role: roleEnum("role").notNull().default("staff"),
     status: userStatusEnum("status").notNull().default("active"),
     imageCldPubId: text("image_cld_pub_id"),
     ...timestamps,
   },
   (table) => ({
     emailIdx: index("user_email_idx").on(table.email),
-  })
+  }),
 );
 
 export const session = pgTable(
@@ -57,7 +58,7 @@ export const session = pgTable(
   (table) => ({
     userIdIdx: index("session_user_id_idx").on(table.userId),
     tokenIdx: index("session_token_idx").on(table.token),
-  })
+  }),
 );
 
 export const account = pgTable(
@@ -82,9 +83,9 @@ export const account = pgTable(
     userIdIdx: index("account_user_id_idx").on(table.userId),
     accountIdIdx: unique("account_account_id_unique").on(
       table.accountId,
-      table.providerId
+      table.providerId,
     ),
-  })
+  }),
 );
 
 export const verification = pgTable(
@@ -98,7 +99,7 @@ export const verification = pgTable(
   },
   (table) => ({
     identifierIdx: index("verification_identifier_idx").on(table.identifier),
-  })
+  }),
 );
 
 // Relations

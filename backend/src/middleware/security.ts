@@ -90,38 +90,36 @@ const securityMiddleware = async (
   res: Response,
   next: NextFunction,
 ) => {
-  const role = req.user?.role ?? "guest";
-  switch (role) {
-    case "SUPER_ADMIN":
-      return protectWithRateLimit(
-        req,
-        res,
-        next,
-        1000,
-        "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.",
-      );
-    case "ACCOUNTS":
-    case "PAYROLL_OFFICER":
-    case "HR_MANAGER":
-    case "UNIT_MANAGER":
-      return protectWithRateLimit(
-        req,
-        res,
-        next,
-        200,
-        "User request limit exceeded (200 per minute). Please wait before making another request.",
-      );
-    default:
-      return protectWithRateLimit(
-        req,
-        res,
-        next,
-        role === "guest" ? 20 : 120,
-        role === "guest"
-          ? "Guest request limit exceeded (20 per minute). Please sign up for higher limits or wait before making another request."
-          : "User request limit exceeded (120 per minute). Please wait before making another request.",
-      );
+  const roles = new Set<string>(req.user?.roles ?? []);
+  if (req.user?.role) roles.add(req.user.role);
+  if (roles.has("super_admin")) {
+    return protectWithRateLimit(
+      req,
+      res,
+      next,
+      1000,
+      "Admin request limit exceeded (1000 per minute). Slow down, admin! Please wait before making another request.",
+    );
   }
+  if (["accounts", "payroll_officer", "hr_manager", "unit_manager"].some((role) => roles.has(role))) {
+    return protectWithRateLimit(
+      req,
+      res,
+      next,
+      200,
+      "User request limit exceeded (200 per minute). Please wait before making another request.",
+    );
+  }
+  const isGuest = roles.size === 0;
+  return protectWithRateLimit(
+    req,
+    res,
+    next,
+    isGuest ? 20 : 120,
+    isGuest
+      ? "Guest request limit exceeded (20 per minute). Please sign up for higher limits or wait before making another request."
+      : "User request limit exceeded (120 per minute). Please wait before making another request.",
+  );
 };
 
 export default securityMiddleware;

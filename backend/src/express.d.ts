@@ -1,4 +1,5 @@
 import type { AttendanceDevice } from "./db/schema/sprintReady.js";
+import type { AppRole, StoredUserRole } from "./lib/appRoles.js";
 
 declare global {
   namespace Express {
@@ -9,9 +10,9 @@ declare global {
         id?: string;
         email?: string;
         name?: string;
-        role?: string | null;
-        roles?: string[];
-        legacyRole?: "admin" | "accounts";
+        role?: AppRole | null;
+        roles?: AppRole[];
+        legacyRole?: StoredUserRole;
       };
     }
   }

@@ -120,6 +120,34 @@
       "when": 1793974264782,
       "tag": "0016_attendance_exception_types",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793979000000,
+      "tag": "0017_sprint6_attendance_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794220000000,
+      "tag": "0018_attendance_approval_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794230000000,
+      "tag": "0019_kind_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794244500000,
+      "tag": "0020_normalize_application_roles",
+      "breakpoints": true
     }
   ]
 }

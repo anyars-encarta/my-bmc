@@ -99,11 +99,11 @@ export const RostersPage = () => {
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
   const roles = identity?.roles ?? (identity?.role ? [identity.role] : []);
   const canEdit = roles.some((role) =>
-    ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"].includes(role),
+    ["super_admin", "hr_manager", "unit_manager", "roster_officer"].includes(role),
   );
-  const canOverrideRest = roles.some((role) => ["SUPER_ADMIN", "HR_MANAGER"].includes(role));
+  const canOverrideRest = roles.some((role) => ["super_admin", "hr_manager"].includes(role));
   const canPublish = roles.some((role) =>
-    ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER"].includes(role),
+    ["super_admin", "hr_manager", "unit_manager"].includes(role),
   );
 
   const [units, setUnits] = useState<Unit[]>([]);

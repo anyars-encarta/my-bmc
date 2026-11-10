@@ -4,41 +4,19 @@ import type { NextFunction, Request, Response } from "express";
 
 import { db } from "../db/index.js";
 import { appUserRole, auditLog, user, userUnitScope } from "../db/schema/index.js";
+import {
+  APP_ROLES,
+  isAppRole,
+  type AppRole,
+  type StoredUserRole,
+} from "./appRoles.js";
 
-export const APP_ROLES = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "PAYROLL_OFFICER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
-  "REGISTRAR",
-  "RECORDS_OFFICER",
-  "CASHIER",
-  "ACCOUNTS",
-  "BILLING_OFFICER",
-  "DOCTOR",
-  "NURSE",
-  "PHARMACIST",
-  "PHARMACY_TECH",
-  "LAB_SCIENTIST",
-  "RADIOGRAPHER",
-  "RADIOLOGIST",
-  "STORE_KEEPER",
-  "PROCUREMENT_OFFICER",
-  "REPORT_VIEWER",
-  "AUDITOR",
-  "DPO",
-  "STAFF",
-] as const;
-
-export type AppRole = (typeof APP_ROLES)[number];
-
-const ROLE_SET = new Set<AppRole>(APP_ROLES);
+export { APP_ROLES, isAppRole };
+export type { AppRole };
 
 const ROLE_PERMISSION_MAP: Record<AppRole, string[]> = {
-  SUPER_ADMIN: ["*"],
-  HOSPITAL_ADMIN: [
+  super_admin: ["*"],
+  hospital_admin: [
     "facility.read",
     "facility.write",
     "users.read",
@@ -47,35 +25,37 @@ const ROLE_PERMISSION_MAP: Record<AppRole, string[]> = {
     "staff.read",
     "audit.read",
   ],
-  HR_MANAGER: ["staff.read", "staff.write", "roster.read", "roster.write"],
-  PAYROLL_OFFICER: ["payroll.read", "payroll.write", "staff.read"],
-  UNIT_MANAGER: ["staff.read", "roster.read", "roster.publish"],
-  ROSTER_OFFICER: ["roster.read", "roster.write", "staff.read"],
-  REGISTRAR: ["patient.read", "patient.write", "consent.read", "consent.write"],
-  RECORDS_OFFICER: ["patient.read", "consent.read"],
-  CASHIER: ["billing.read", "billing.write"],
-  ACCOUNTS: ["payments.read", "payments.write", "users.read"],
-  BILLING_OFFICER: ["billing.read", "billing.write"],
-  DOCTOR: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
-  NURSE: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
-  PHARMACIST: ["pharmacy.read", "pharmacy.write", "patient.read"],
-  PHARMACY_TECH: ["pharmacy.read", "pharmacy.write"],
-  LAB_SCIENTIST: ["laboratory.read", "laboratory.write", "patient.read"],
-  RADIOGRAPHER: ["radiology.read", "radiology.write", "patient.read"],
-  RADIOLOGIST: ["radiology.read", "radiology.report.write", "patient.read"],
-  STORE_KEEPER: ["inventory.read", "inventory.write"],
-  PROCUREMENT_OFFICER: ["inventory.read", "procurement.write"],
-  REPORT_VIEWER: ["reporting.read"],
-  AUDITOR: ["audit.read", "reporting.read"],
-  DPO: ["audit.read", "privacy.read", "consent.read"],
-  STAFF: ["self.read", "schedule.read"],
+  hr_manager: ["staff.read", "staff.write", "roster.read", "roster.write"],
+  payroll_officer: ["payroll.read", "payroll.write", "staff.read"],
+  unit_manager: ["staff.read", "roster.read", "roster.publish"],
+  roster_officer: ["roster.read", "roster.write", "staff.read"],
+  registrar: ["patient.read", "patient.write", "consent.read", "consent.write"],
+  records_officer: ["patient.read", "consent.read"],
+  cashier: ["billing.read", "billing.write"],
+  accounts: ["payments.read", "payments.write", "users.read"],
+  billing_officer: ["billing.read", "billing.write"],
+  doctor: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  nurse: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  midwife: ["patient.read", "encounter.read", "encounter.write", "consent.read"],
+  pharmacist: ["pharmacy.read", "pharmacy.write", "patient.read"],
+  pharmacy_tech: ["pharmacy.read", "pharmacy.write"],
+  lab_scientist: ["laboratory.read", "laboratory.write", "patient.read"],
+  radiographer: ["radiology.read", "radiology.write", "patient.read"],
+  radiologist: ["radiology.read", "radiology.report.write", "patient.read"],
+  store_keeper: ["inventory.read", "inventory.write"],
+  procurement_officer: ["inventory.read", "procurement.write"],
+  report_viewer: ["reporting.read"],
+  auditor: ["audit.read", "reporting.read"],
+  dpo: ["audit.read", "privacy.read", "consent.read"],
+  staff: ["self.read", "schedule.read"],
 };
 
 const LEGACY_TO_APP_ROLE: Record<"admin" | "accounts", AppRole> = {
-  admin: "SUPER_ADMIN",
-  accounts: "ACCOUNTS",
+  admin: "super_admin",
+  accounts: "accounts",
 };
 
+/** Maps an HTTP method to the audit action used for successful writes. */
 const mapMethodToAction = (method: string) => {
   if (method === "POST") return "CREATE";
   if (method === "PATCH" || method === "PUT") return "UPDATE";
@@ -83,6 +63,7 @@ const mapMethodToAction = (method: string) => {
   return null;
 };
 
+/** Extracts the API entity and its first path identifier for audit records. */
 const parseEntity = (path: string) => {
   const clean = path.split("?")[0] ?? "";
   const segments = clean.replace(/^\/api(\/v1)?\/?/, "").split("/").filter(Boolean);
@@ -92,18 +73,16 @@ const parseEntity = (path: string) => {
   return { entityType, entityId };
 };
 
+/** Normalizes IPv4-mapped IPv6 addresses before they are stored in the audit log. */
 const parseClientIp = (ip?: string | null) => {
   if (!ip) return null;
   if (ip.startsWith("::ffff:")) return ip.slice(7);
   return ip;
 };
 
-export const isAppRole = (value: unknown): value is AppRole => {
-  return typeof value === "string" && ROLE_SET.has(value as AppRole);
-};
-
+/** Resolves the sorted union of permissions granted by a user's assigned roles. */
 export const resolveRolePermissions = (roles: AppRole[]) => {
-  if (roles.includes("SUPER_ADMIN")) {
+  if (roles.includes("super_admin")) {
     return ["*"];
   }
 
@@ -117,7 +96,8 @@ export const resolveRolePermissions = (roles: AppRole[]) => {
   return Array.from(values).sort();
 };
 
-export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accounts") => {
+/** Loads assigned application roles, falling back to the supported legacy role. */
+export const loadUserRoles = async (userId: string, legacyRole: StoredUserRole) => {
   const rows = await db
     .select({ role: appUserRole.role })
     .from(appUserRole)
@@ -128,17 +108,19 @@ export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accou
     return roles;
   }
 
-  return [LEGACY_TO_APP_ROLE[legacyRole]];
+  return [legacyRole === "admin" ? LEGACY_TO_APP_ROLE.admin : legacyRole];
 };
 
+/** Determines whether a user's roles satisfy an allowed-role list. */
 export const userHasRole = (userRoles: AppRole[], allowed: readonly string[]) => {
-  if (userRoles.includes("SUPER_ADMIN")) {
+  if (userRoles.includes("super_admin")) {
     return true;
   }
 
   return allowed.some((role) => userRoles.includes(role as AppRole));
 };
 
+/** Creates middleware that rejects requests without an allowed application role. */
 export const requireAnyRole = (allowed: readonly string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const roles = (req.user?.roles ?? []).filter((role): role is AppRole => isAppRole(role));
@@ -159,6 +141,7 @@ export const requireAnyRole = (allowed: readonly string[]) => {
   };
 };
 
+/** Creates the monthly audit-log partition for a YYYY-MM period. */
 export const ensureAuditPartition = async (period: string) => {
   const [yearPart, monthPart] = period.split("-");
   const parsedYear = Number.parseInt(yearPart ?? "", 10);
@@ -177,6 +160,7 @@ export const ensureAuditPartition = async (period: string) => {
   `));
 };
 
+/** Ensures that audit-log partitions exist for the current and next month. */
 export const ensureAuditPartitions = async () => {
   const now = new Date();
   const current = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -188,14 +172,17 @@ export const ensureAuditPartitions = async () => {
   await ensureAuditPartition(next);
 };
 
+/** Generates a unique request identifier. */
 export const createRequestId = () => randomUUID();
 
+/** Attaches a request identifier to the request and response headers. */
 export const attachRequestId = (req: Request, res: Response, next: NextFunction) => {
   req.requestId = req.header("x-request-id")?.trim() || createRequestId();
   res.setHeader("X-Request-Id", req.requestId);
   next();
 };
 
+/** Writes a generic audit record after a successful mutating response. */
 export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const action = mapMethodToAction(req.method);
   if (!action) {
@@ -233,7 +220,8 @@ export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunc
   next();
 };
 
-export const loadMePayload = async (userId: string, fallbackRole: "admin" | "accounts") => {
+/** Loads the current user's profile, assigned roles, permissions, and unit scopes. */
+export const loadMePayload = async (userId: string, fallbackRole: StoredUserRole) => {
   const [currentUser] = await db
     .select({
       id: user.id,
@@ -272,6 +260,7 @@ export const loadMePayload = async (userId: string, fallbackRole: "admin" | "acc
   };
 };
 
+/** Checks whether a user has a specific assigned application role. */
 export const roleExistsForUser = async (userId: string, role: AppRole) => {
   const [row] = await db
     .select({ role: appUserRole.role })
