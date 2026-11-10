@@ -31,7 +31,18 @@ import {
   type TreeMenuItem,
 } from "@refinedev/core";
 import { APP_NAME } from "@/constants/app";
-import { Building2, ChevronRight, ListIcon, LogOut } from "lucide-react";
+import {
+  Building2,
+  ChevronRight,
+  Coins,
+  Fingerprint,
+  Folder,
+  LayoutDashboard,
+  ListIcon,
+  LogOut,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import React from "react";
 import { useList } from "@refinedev/core";
 import PageLoader from "@/components/PageLoader";
@@ -48,6 +59,22 @@ export function Sidebar() {
     return !Array.isArray(allowedRoles) ||
       allowedRoles.some((role: string) => roles.has(role));
   });
+  const menuGroups = Array.from(
+    visibleMenuItems.reduce((groups, item) => {
+      const group = String(item.meta?.menuGroup ?? "Other");
+      const items = groups.get(group) ?? [];
+      items.push(item);
+      groups.set(group, items);
+      return groups;
+    }, new Map<string, TreeMenuItem[]>()),
+    ([label, items]) => ({
+      label,
+      icon: MENU_GROUP_ICONS[label] ?? Folder,
+      items: items.sort((left, right) =>
+        String(getDisplayName(left)).localeCompare(String(getDisplayName(right))),
+      ),
+    }),
+  );
 
   return (
     <ShadcnSidebar
@@ -75,10 +102,12 @@ export function Sidebar() {
           },
         )}
       >
-        {visibleMenuItems.map((item: TreeMenuItem) => (
-          <SidebarItem
-            key={item.key || item.name}
-            item={item}
+        {menuGroups.map((group) => (
+          <SidebarMenuGroup
+            key={group.label}
+            label={group.label}
+            icon={group.icon}
+            items={group.items}
             selectedKey={selectedKey}
           />
         ))}
@@ -87,6 +116,58 @@ export function Sidebar() {
         <LogoutButton />
       </ShadcnSidebarContent>
     </ShadcnSidebar>
+  );
+}
+
+const MENU_GROUP_ICONS: Record<string, LucideIcon> = {
+  Administration: Building2,
+  Attendance: Fingerprint,
+  Finance: Coins,
+  Overview: LayoutDashboard,
+  Workforce: Users,
+};
+
+function SidebarMenuGroup({
+  label,
+  icon: Icon,
+  items,
+  selectedKey,
+}: {
+  label: string;
+  icon: LucideIcon;
+  items: TreeMenuItem[];
+  selectedKey?: string;
+}) {
+  const { open } = useShadcnSidebar();
+
+  if (!open) {
+    return (
+      <div className="flex flex-col">
+        {items.map((item) => (
+          <SidebarItem key={item.key || item.name} item={item} selectedKey={selectedKey} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <Collapsible defaultOpen className="border-t border-sidebar-border pt-2">
+      <CollapsibleTrigger asChild>
+        <Button
+          variant="ghost"
+          className="group flex h-9 w-full items-center justify-start gap-2 px-3 text-xs font-semibold uppercase text-muted-foreground hover:bg-cyan-500/10"
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-left">{label}</span>
+          <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-1">
+        {items.map((item) => (
+          <SidebarItem key={item.key || item.name} item={item} selectedKey={selectedKey} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

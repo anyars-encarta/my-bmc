@@ -257,6 +257,7 @@ function App() {
                     icon: <resource.icon className="h-4 w-4" />,
                     canDelete: resource.canDelete,
                     allowedRoles: resource.allowedRoles,
+                    menuGroup: resource.menuGroup,
                   },
                 }))}
                 options={{
