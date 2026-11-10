@@ -1,8 +1,10 @@
 import express from "express";
 import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { account, user } from "../db/schema/index.js";
+import { account, appUserRole, user } from "../db/schema/index.js";
 import { hashPassword } from "better-auth/crypto";
+import type { StoredUserRole } from "../lib/appRoles.js";
+import { isAppRole } from "../lib/platform.js";
 
 const router = express.Router();
 
@@ -12,65 +14,8 @@ const parsePositiveInt = (value: unknown) => {
   return parsed;
 };
 
-const isValidRole = (
-  value: unknown,
-): value is
-  | "accounts"
-  | "admin"
-  | "super_admin"
-  | "hospital_admin"
-  | "hr_manager"
-  | "payroll_officer"
-  | "unit_manager"
-  | "roster_officer"
-  | "registrar"
-  | "records_officer"
-  | "cashier"
-  | "billing_officer"
-  | "doctor"
-  | "nurse"
-  | "midwife"
-  | "pharmacist"
-  | "pharmacy_tech"
-  | "lab_scientist"
-  | "radiographer"
-  | "radiologist"
-  | "store_keeper"
-  | "procurement_officer"
-  | "report_viewer"
-  | "auditor"
-  | "dpo"
-  | "staff" => {
-  return (
-    value === "accounts" ||
-    value === "admin" ||
-    value === "super_admin" ||
-    value === "hospital_admin" ||
-    value === "hr_manager" ||
-    value === "payroll_officer" ||
-    value === "unit_manager" ||
-    value === "roster_officer" ||
-    value === "registrar" ||
-    value === "records_officer" ||
-    value === "cashier" ||
-    value === "accounts" ||
-    value === "billing_officer" ||
-    value === "doctor" ||
-    value === "nurse" ||
-    value === "midwife" ||
-    value === "pharmacist" ||
-    value === "pharmacy_tech" ||
-    value === "lab_scientist" ||
-    value === "radiographer" ||
-    value === "radiologist" ||
-    value === "store_keeper" ||
-    value === "procurement_officer" ||
-    value === "report_viewer" ||
-    value === "auditor" ||
-    value === "dpo" ||
-    value === "staff"
-  );
-};
+const isValidRole = (value: unknown): value is StoredUserRole =>
+  value === "admin" || isAppRole(value);
 
 const isValidStatus = (value: unknown): value is "active" | "inactive" => {
   return value === "active" || value === "inactive";
@@ -268,6 +213,17 @@ router.put("/:id", async (req, res) => {
         error: "role must be one of: accounts, admin, super_admin, hospital_admin, hr_manager, payroll_officer, unit_manager, roster_officer, registrar, records_officer, cashier, billing_officer, doctor, nurse, midwife, pharmacist, pharmacy_tech, lab_scientist, radiographer, radiologist, store_keeper, procurement_officer, report_viewer, auditor, dpo, staff.",
       });
     }
+    if (
+      !isSelf &&
+      (role === "super_admin" || role === "admin") &&
+      !req.user?.roles?.includes("super_admin") &&
+      req.user?.legacyRole !== "admin"
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "Only super_admin can assign the super_admin role.",
+      });
+    }
 
     // --- status (admin can set status for other users) ---
     const statusRaw = req.body?.status;
@@ -329,6 +285,16 @@ router.put("/:id", async (req, res) => {
         updatedAt: user.updatedAt,
       });
 
+    if (!isSelf && role) {
+      const applicationRole = role === "admin" ? "super_admin" : role;
+      await db.delete(appUserRole).where(eq(appUserRole.userId, id));
+      await db.insert(appUserRole).values({
+        userId: id,
+        role: applicationRole,
+        grantedBy: req.user?.id ?? null,
+      });
+    }
+
     // Update auth account row if email or password changed
     if (emailChanged || plainPassword) {
       const accountSetData: { accountId?: string; password?: string } = {};
@@ -375,7 +341,7 @@ router.delete("/:id", async (req, res) => {
     // Only admins can delete users
     const canDelete =
       req.user?.legacyRole === "admin" ||
-      req.user?.roles?.includes("admin") ||
+      req.user?.legacyRole === "admin" ||
       req.user?.roles?.includes("super_admin") ||
       req.user?.roles?.includes("hospital_admin");
     if (!canDelete) {

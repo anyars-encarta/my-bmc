@@ -71,6 +71,7 @@ type Identity = {
   email?: string;
   fullName?: string;
   role?: string;
+  roles?: string[];
 };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
@@ -122,7 +123,8 @@ export const ApprovalReviewPage = () => {
   const [newAmount, setNewAmount] = useState("");
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 
-  const isAccountsUser = identity?.role === "accounts";
+  const isAccountsUser = identity?.role === "accounts" ||
+    (identity?.roles ?? []).includes("accounts");
   const isBusy = busyActionKey !== null;
   const isActionBusy = (actionKey: string) => busyActionKey === actionKey;
 

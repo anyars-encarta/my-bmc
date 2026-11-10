@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import type { AppRole } from "./auth";
+
 export type MetricCardProps = {
   title: string;
   value: string;
@@ -12,7 +14,7 @@ export type UploadWidgetValue = {
   publicId?: string | null;
 };
 
-export type UserRole = "admin" | "accounts";
+export type UserRole = AppRole;
 export type UserStatus = "active" | "inactive";
 
 export type User = {
@@ -23,6 +25,7 @@ export type User = {
   image?: string | null;
   imageCldPubId?: string | null;
   role: UserRole;
+  roles: UserRole[];
   status: UserStatus;
   createdAt: string;
   updatedAt: string;

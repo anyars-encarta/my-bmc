@@ -2,6 +2,7 @@ import type { AuthProvider } from "@refinedev/core";
 
 import { BACKEND_BASE_URL } from "@/constants";
 import { authClient } from "@/lib/auth-client";
+import { APP_ROLES, type AppRole } from "@/types/auth";
 import { clearMeCache, createAuthHeaders, fetchMe } from "./me";
 
 type AuthUser = {
@@ -9,6 +10,7 @@ type AuthUser = {
   name?: string | null;
   email: string;
   role?: string | null;
+  roles?: string[];
   status?: string | null;
   image?: string | null;
 };
@@ -22,13 +24,21 @@ type AuthSessionData = {
 
 type RegisterParams = {
   email: string;
+  name?: string;
   password: string;
-  role?: string;
+  role?: AppRole;
+  adminCreate?: boolean;
   image?: string | null;
   imageCldPubId?: string | null;
 };
 
 const sessionUrl = `${BACKEND_BASE_URL.replace(/\/+$/, "")}/auth/get-session`;
+const usersUrl = `${BACKEND_BASE_URL.replace(/\/+$/, "")}/v1/users`;
+
+const normalizeRole = (value: string | null | undefined): AppRole | undefined => {
+  if (value === "admin") return "super_admin";
+  return APP_ROLES.find((role) => role === value);
+};
 
 const getSessionData = async (): Promise<AuthSessionData | null> => {
   const response = await fetch(sessionUrl, {
@@ -234,14 +244,52 @@ export const authProvider: AuthProvider = {
       success: true,
     };
   },
-  register: async ({ email, password, role, image, imageCldPubId }: RegisterParams) => {
-    const roleValue = role === "admin" ? "admin" : "accounts";
+  register: async ({
+    email,
+    name,
+    password,
+    role,
+    adminCreate,
+    image,
+    imageCldPubId,
+  }: RegisterParams) => {
+    if (adminCreate) {
+      try {
+        const response = await fetch(usersUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: createAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            name: name?.trim() || email,
+            email,
+            password,
+            roles: [role ?? "staff"],
+            image,
+            imageCldPubId,
+          }),
+        });
+        const payload = (await response.json()) as { message?: string; error?: string };
+        if (!response.ok) {
+          return {
+            success: false,
+            error: new Error(payload.message || payload.error || "Unable to create user."),
+          };
+        }
+        clearMeCache();
+        return { success: true, redirectTo: "/users" };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error : new Error("Unable to create user."),
+        };
+      }
+    }
+
     const response = await authClient.signUp.email(
       {
         email,
         password,
-        name: email,
-        role: roleValue,
+        name: name?.trim() || email,
         status: "active",
         image: typeof image === "string" ? image : undefined,
         imageCldPubId: typeof imageCldPubId === "string" ? imageCldPubId : "",
@@ -284,7 +332,6 @@ export const authProvider: AuthProvider = {
         return null;
       }
       let explicitRoles: string[] = [];
-      let roleLookupSucceeded = false;
       try {
         const response = await fetch(
           `${BACKEND_BASE_URL.replace(/\/+$/, "")}/v1/users/${encodeURIComponent(sessionUser.id)}/roles`,
@@ -298,19 +345,20 @@ export const authProvider: AuthProvider = {
           throw new Error(`Role lookup failed with status ${response.status}.`);
         }
         const payload = (await response.json()) as { data?: unknown };
-        explicitRoles = Array.isArray(payload.data)
-          ? payload.data.filter((role): role is string => typeof role === "string")
-          : [];
-        roleLookupSucceeded = true;
+          explicitRoles = Array.isArray(payload.data)
+            ? payload.data.filter((role): role is string =>
+              typeof role === "string" && Boolean(normalizeRole(role)))
+            : [];
       } catch (error) {
         console.error("Unable to load application roles for the current user:", error);
       }
 
-      const legacyAdminFallback =
-        roleLookupSucceeded && explicitRoles.length === 0 && sessionUser.role === "admin"
-          ? ["SUPER_ADMIN"]
+      const sessionRole = normalizeRole(sessionUser.role);
+      const roles = explicitRoles.length > 0
+        ? explicitRoles.map((role) => normalizeRole(role)).filter((role): role is AppRole => Boolean(role))
+        : sessionRole
+          ? [sessionRole]
           : [];
-      const roles = explicitRoles.length > 0 ? explicitRoles : legacyAdminFallback;
 
       const fallbackName =
         typeof sessionUser.name === "string" && sessionUser.name.trim().length > 0
@@ -326,7 +374,7 @@ export const authProvider: AuthProvider = {
         lastName,
         fullName: fallbackName,
         avatar: typeof sessionUser.image === "string" ? sessionUser.image : undefined,
-        role: roles[0] || sessionUser.role || undefined,
+        role: roles[0],
         roles,
         permissions: [],
         status: sessionUser.status || undefined,
@@ -350,7 +398,7 @@ export const authProvider: AuthProvider = {
       lastName,
       fullName: safeName,
       avatar: undefined,
-      role: me?.roles?.[0] || undefined,
+      role: me?.roles?.[0] ?? normalizeRole(currentUser.role),
       roles: me?.roles ?? [],
       permissions: me?.permissions ?? [],
       status: currentUser.status || undefined,

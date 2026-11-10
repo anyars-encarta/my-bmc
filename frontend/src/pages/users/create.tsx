@@ -12,15 +12,18 @@ const CreateUser = () => {
   const { data: identity, isLoading: isIdentityLoading } = useGetIdentity<{
     id: string;
     role?: string;
+    roles?: string[];
   }>();
 
   if (isIdentityLoading) {
     return <PageLoader />;
   }
 
-  const isAdmin = identity?.role === "admin";
+  const roles = new Set(identity?.roles ?? []);
+  if (identity?.role) roles.add(identity.role);
+  const canCreateUsers = roles.has("super_admin") || roles.has("hospital_admin");
 
-  if (!isAdmin) {
+  if (!canCreateUsers) {
     return <Navigate to="/users" replace />;
   }
 
@@ -29,6 +32,7 @@ const CreateUser = () => {
       <CreateViewHeader title="Create User" />
       <SignUpForm
         embedded
+        canAssignSuperAdmin={roles.has("super_admin")}
         title="Create user account"
         description="Add a new system user with the appropriate account role."
       />

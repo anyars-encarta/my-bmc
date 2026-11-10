@@ -33,14 +33,14 @@ import {
 
 const router = Router();
 
-const HR_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"] as const;
+const HR_ROLES = ["super_admin", "hospital_admin", "hr_manager"] as const;
 const GLOBAL_READ_ROLES = [
   ...HR_ROLES,
-  "PAYROLL_OFFICER",
-  "ACCOUNTS",
+  "payroll_officer",
+  "accounts",
 ] as const;
-const ATTENDANCE_READ_ROLES = [...GLOBAL_READ_ROLES, "UNIT_MANAGER"] as const;
-const ATTENDANCE_WRITE_ROLES = [...HR_ROLES, "UNIT_MANAGER"] as const;
+const ATTENDANCE_READ_ROLES = [...GLOBAL_READ_ROLES, "unit_manager"] as const;
+const ATTENDANCE_WRITE_ROLES = [...HR_ROLES, "unit_manager"] as const;
 const MAX_ROWS = 1000;
 
 const staffSummary = {
@@ -350,7 +350,7 @@ router.get(
 
 router.get(
   "/me/attendance",
-  requireAnyRole(["STAFF", ...ATTENDANCE_READ_ROLES]),
+  requireAnyRole(["staff", ...ATTENDANCE_READ_ROLES]),
   async (req, res, next) => {
     try {
       const actor = requestActor(req);
@@ -607,7 +607,7 @@ router.get(
 
 router.post(
   "/attendance/:attendanceId/corrections",
-  requireAnyRole(["STAFF", ...ATTENDANCE_WRITE_ROLES]),
+  requireAnyRole(["staff", ...ATTENDANCE_WRITE_ROLES]),
   async (req, res, next) => {
     try {
       const attendanceId = parseUuid(req.params.attendanceId, "attendanceId");
@@ -636,7 +636,7 @@ router.post(
         .limit(1);
       if (!record) throw notFound("Attendance record not found.", "ATTENDANCE_NOT_FOUND");
       const isSelf = record.userId === actor.userId;
-      if (actor.roles.includes("STAFF") && !isSelf) {
+      if (actor.roles.includes("staff") && !isSelf) {
         throw notFound("Attendance record not found.", "ATTENDANCE_NOT_FOUND");
       }
       if (!isSelf || actor.roles.some((role) => ATTENDANCE_WRITE_ROLES.includes(role as typeof ATTENDANCE_WRITE_ROLES[number]))) {
@@ -1330,7 +1330,7 @@ router.put(
 
 router.get(
   "/attendance/me/corrections",
-  requireAnyRole(["STAFF", ...ATTENDANCE_READ_ROLES]),
+  requireAnyRole(["staff", ...ATTENDANCE_READ_ROLES]),
   async (req, res, next) => {
     try {
       const actor = requestActor(req);

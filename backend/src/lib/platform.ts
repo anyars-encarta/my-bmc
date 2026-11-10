@@ -4,38 +4,15 @@ import type { NextFunction, Request, Response } from "express";
 
 import { db } from "../db/index.js";
 import { appUserRole, auditLog, user, userUnitScope } from "../db/schema/index.js";
+import {
+  APP_ROLES,
+  isAppRole,
+  type AppRole,
+  type StoredUserRole,
+} from "./appRoles.js";
 
-export const APP_ROLES = [
-  "super_admin",
-  "hospital_admin",
-  "hr_manager",
-  "payroll_officer",
-  "unit_manager",
-  "roster_officer",
-  "registrar",
-  "records_officer",
-  "cashier",
-  "accounts",
-  "billing_officer",
-  "doctor",
-  "nurse",
-  "midwife",
-  "pharmacist",
-  "pharmacy_tech",
-  "lab_scientist",
-  "radiographer",
-  "radiologist",
-  "store_keeper",
-  "procurement_officer",
-  "report_viewer",
-  "auditor",
-  "dpo",
-  "staff",
-] as const;
-
-export type AppRole = (typeof APP_ROLES)[number];
-
-const ROLE_SET = new Set<AppRole>(APP_ROLES);
+export { APP_ROLES, isAppRole };
+export type { AppRole };
 
 const ROLE_PERMISSION_MAP: Record<AppRole, string[]> = {
   super_admin: ["*"],
@@ -103,11 +80,6 @@ const parseClientIp = (ip?: string | null) => {
   return ip;
 };
 
-/** Checks whether an untrusted role value is part of the application role set. */
-export const isAppRole = (value: unknown): value is AppRole => {
-  return typeof value === "string" && ROLE_SET.has(value as AppRole);
-};
-
 /** Resolves the sorted union of permissions granted by a user's assigned roles. */
 export const resolveRolePermissions = (roles: AppRole[]) => {
   if (roles.includes("super_admin")) {
@@ -125,7 +97,7 @@ export const resolveRolePermissions = (roles: AppRole[]) => {
 };
 
 /** Loads assigned application roles, falling back to the supported legacy role. */
-export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accounts") => {
+export const loadUserRoles = async (userId: string, legacyRole: StoredUserRole) => {
   const rows = await db
     .select({ role: appUserRole.role })
     .from(appUserRole)
@@ -136,7 +108,7 @@ export const loadUserRoles = async (userId: string, legacyRole: "admin" | "accou
     return roles;
   }
 
-  return [LEGACY_TO_APP_ROLE[legacyRole]];
+  return [legacyRole === "admin" ? LEGACY_TO_APP_ROLE.admin : legacyRole];
 };
 
 /** Determines whether a user's roles satisfy an allowed-role list. */
@@ -249,7 +221,7 @@ export const auditWriteMiddleware = (req: Request, res: Response, next: NextFunc
 };
 
 /** Loads the current user's profile, assigned roles, permissions, and unit scopes. */
-export const loadMePayload = async (userId: string, fallbackRole: "admin" | "accounts") => {
+export const loadMePayload = async (userId: string, fallbackRole: StoredUserRole) => {
   const [currentUser] = await db
     .select({
       id: user.id,

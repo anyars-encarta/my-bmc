@@ -32,16 +32,16 @@ const consentCreateSchema = z.object({
 });
 
 const CONSENT_READ_ROLES = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "REGISTRAR",
-  "RECORDS_OFFICER",
-  "DOCTOR",
-  "NURSE",
-  "DPO",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "registrar",
+  "records_officer",
+  "doctor",
+  "nurse",
+  "dpo",
 ] as const;
-const CONSENT_WRITE_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "REGISTRAR"] as const;
+const CONSENT_WRITE_ROLES = ["super_admin", "hospital_admin", "hr_manager", "registrar"] as const;
 
 const hasRole = (roles: string[], allowed: readonly string[]) =>
   roles.some((role) => allowed.includes(role));

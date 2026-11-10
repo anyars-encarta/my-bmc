@@ -9,6 +9,7 @@ import {
 } from "@/components/refine-ui/views/edit-view";
 import UploadWidget from "@/components/upload-widget";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -33,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { User } from "@/types";
+import { APP_ROLE_OPTIONS } from "@/types/auth";
 import { editUserSchema, EditUserValues } from "@/validations";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -70,7 +72,7 @@ const EditUser = () => {
     defaultValues: {
       name: "",
       email: "",
-      role: "accounts",
+      roles: ["staff"],
       status: "active",
       image: null,
       imageCldPubId: null,
@@ -96,7 +98,7 @@ const EditUser = () => {
     reset({
       name: record.name,
       email: record.email,
-      role: record.role as EditUserValues["role"],
+      roles: record.roles ?? (record.role ? [record.role] : ["staff"]),
       status: record.status,
       image: record.image ?? null,
       imageCldPubId: record.imageCldPubId ?? null,
@@ -111,7 +113,7 @@ const EditUser = () => {
     await onFinish({
       name: values.name.trim(),
       email: values.email.trim().toLowerCase(),
-      role: values.role,
+      roles: values.roles,
       status: values.status,
       image: values.image ?? null,
       imageCldPubId: values.imageCldPubId ?? null,
@@ -202,82 +204,36 @@ const EditUser = () => {
                 <div className="grid gap-5 md:grid-cols-2">
                   <FormField
                     control={control}
-                    name="role"
+                    name="roles"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>
-                          Role <span className="text-orange-600">*</span>
+                          Roles <span className="text-orange-600">*</span>
                         </FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select role" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="accounts">Accounts</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="auditor">Auditor</SelectItem>
-                            <SelectItem value="billing_officer">
-                              Billing Officer
-                            </SelectItem>
-                            <SelectItem value="cashier">Cashier</SelectItem>
-                            <SelectItem value="doctor">Doctor</SelectItem>
-                            <SelectItem value="dpo">DPO</SelectItem>
-                            <SelectItem value="hospital_admin">
-                              Hospital Admin
-                            </SelectItem>
-                            <SelectItem value="hr_manager">
-                              HR Manager
-                            </SelectItem>
-                            <SelectItem value="lab_scientist">
-                              Lab Scientist
-                            </SelectItem>
-                            <SelectItem value="midwife">Midwife</SelectItem>
-                            <SelectItem value="nurse">Nurse</SelectItem>
-                            <SelectItem value="payroll_officer">
-                              Payroll Officer
-                            </SelectItem>
-                            <SelectItem value="pharmacy_tech">
-                              Pharmacy Tech
-                            </SelectItem>
-                            <SelectItem value="pharmacist">
-                              Pharmacist
-                            </SelectItem>
-                            <SelectItem value="procurement_officer">
-                              Procurement Officer
-                            </SelectItem>
-                            <SelectItem value="radiologist">
-                              Radiologist
-                            </SelectItem>
-                            <SelectItem value="records_officer">
-                              Records Officer
-                            </SelectItem>
-                            <SelectItem value="radiographer">
-                              Radiographer
-                            </SelectItem>
-                            <SelectItem value="registrar">Registrar</SelectItem>
-                            <SelectItem value="report_viewer">
-                              Report Viewer
-                            </SelectItem>
-                            <SelectItem value="roster_officer">
-                              Roster Officer
-                            </SelectItem>
-                            <SelectItem value="staff">Staff</SelectItem>
-                            <SelectItem value="store_keeper">
-                              Store Keeper
-                            </SelectItem>
-                            <SelectItem value="super_admin">
-                              Super Admin
-                            </SelectItem>
-                            <SelectItem value="unit_manager">
-                              Unit Manager
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {APP_ROLE_OPTIONS
+                            .filter((option) =>
+                              option.value !== "super_admin" ||
+                              loggedInUser?.roles?.includes("super_admin"),
+                            )
+                            .map((option) => (
+                              <label
+                                key={option.value}
+                                className="flex items-center gap-2 rounded-md border p-3 text-sm"
+                              >
+                                <Checkbox
+                                  checked={field.value?.includes(option.value) ?? false}
+                                  onCheckedChange={(checked) => {
+                                    const current = field.value ?? [];
+                                    field.onChange(checked
+                                      ? [...new Set([...current, option.value])]
+                                      : current.filter((role) => role !== option.value));
+                                  }}
+                                />
+                                {option.label}
+                              </label>
+                            ))}
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}

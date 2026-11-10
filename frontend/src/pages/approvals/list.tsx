@@ -39,6 +39,7 @@ type Identity = {
   email?: string;
   fullName?: string;
   role?: string;
+  roles?: string[];
 };
 
 const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
@@ -130,10 +131,12 @@ export const ApprovalQueueList = () => {
       .filter(Boolean)
       .map((value) => String(value).toLowerCase().trim());
     const normalizedSearch = searchQuery.trim().toLowerCase();
+    const identityRoles = new Set(identity?.roles ?? []);
+    if (identity?.role) identityRoles.add(identity.role);
 
     return payments
       .filter((payment) => {
-        if (identity?.role === "admin" || identity?.role === "accounts") {
+        if (identityRoles.has("super_admin") || identityRoles.has("accounts")) {
           return true;
         }
 
@@ -184,6 +187,7 @@ export const ApprovalQueueList = () => {
     identity?.fullName,
     identity?.id,
     identity?.role,
+    identity?.roles,
     paymentsResult?.data,
     searchQuery,
   ]);
@@ -255,7 +259,7 @@ export const ApprovalQueueList = () => {
                 <DataLine label="Approver" value={item.approvingOfficer} />
               </div>
               <div className="flex gap-2">
-                {identity?.role === "accounts" ? (
+                {(identity?.roles ?? []).includes("accounts") || identity?.role === "accounts" ? (
                   <Button
                     size="sm"
                     variant="outline"

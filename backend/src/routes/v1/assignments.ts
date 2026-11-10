@@ -37,14 +37,14 @@ import { materializeFixedScheduleForStaff } from "../../jobs/fixedScheduleMateri
 
 const router = Router();
 
-const HR_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"] as const;
+const HR_ROLES = ["super_admin", "hospital_admin", "hr_manager"] as const;
 const READ_ROLES = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "PAYROLL_OFFICER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
+  "unit_manager",
+  "roster_officer",
 ] as const;
 
 const assignmentReason = z.enum([

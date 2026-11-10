@@ -52,7 +52,7 @@ export const StaffShow = () => {
   const canReadAssignments = canReadStaffAssignments(identity);
   const canWriteAssignments = canWriteStaffAssignments(identity);
   const canWriteAttendanceCredentials = identityRoles.some((role) =>
-    ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"].includes(role),
+    ["super_admin", "hospital_admin", "hr_manager"].includes(role),
   );
   const [licenses, setLicenses] = useState<StaffLicenseRecord[]>([]);
   const [orgUnitLabels, setOrgUnitLabels] = useState<Record<string, string>>({});

@@ -87,7 +87,7 @@ export const StaffEdit = () => {
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
   const roles = identity?.roles ?? (identity?.role ? [identity.role] : []);
   const canManageStaffWorkflows = roles.some((role) =>
-    ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"].includes(role),
+    ["super_admin", "hospital_admin", "hr_manager"].includes(role),
   );
   const [orgUnits, setOrgUnits] = useState<OrgUnitRecord[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRoleRecord[]>([]);

@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema/auth.js";
+import { appUserRole } from "../db/schema/sprintReady.js";
+import { APP_ROLES } from "./appRoles.js";
 import { z } from "zod";
 
 const normalizeOrigin = (value: string) => {
@@ -45,35 +47,7 @@ const authBaseUrl =
     ?.trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\/+$/, "") || "http://localhost:8000/api/auth";
-const RoleEnum = z.enum([
-  "accounts",
-  "admin",
-  "super_admin",
-  "hospital_admin",
-  "hr_manager",
-  "payroll_officer",
-  "unit_manager",
-  "roster_officer",
-  "registrar",
-  "records_officer",
-  "cashier",
-  "accounts",
-  "billing_officer",
-  "doctor",
-  "nurse",
-  "midwife",
-  "pharmacist",
-  "pharmacy_tech",
-  "lab_scientist",
-  "radiographer",
-  "radiologist",
-  "store_keeper",
-  "procurement_officer",
-  "report_viewer",
-  "auditor",
-  "dpo",
-  "staff",
-]);
+const RoleEnum = z.enum([...APP_ROLES, "admin"]);
 const UserStatusEnum = z.enum(["active", "inactive"]);
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is not set in the .env file");
@@ -193,6 +167,18 @@ export const auth = betterAuth({
     provider: "pg",
     schema,
   }),
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (createdUser) => {
+          await db.insert(appUserRole).values({
+            userId: createdUser.id,
+            role: "staff",
+          }).onConflictDoNothing();
+        },
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     sendResetPassword: async ({ user, url }) => {
@@ -204,7 +190,8 @@ export const auth = betterAuth({
       role: {
         type: "string",
         required: true,
-        defaultValue: "accounts",
+        defaultValue: "staff",
+        input: false,
         validator: { input: RoleEnum },
       },
       status: {

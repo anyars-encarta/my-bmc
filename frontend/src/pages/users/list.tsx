@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { User } from "@/types";
+import { APP_ROLE_OPTIONS, getAppRoleLabel } from "@/types/auth";
 import {
   HttpError,
   useDelete,
@@ -56,7 +57,7 @@ const extractErrorMessage = (error: unknown, fallback: string) => {
 const roleBadgeVariant = (
   role: string,
 ): "default" | "secondary" | "outline" => {
-  if (role === "admin") return "default";
+  if (role === "super_admin" || role === "hospital_admin") return "default";
   if (role === "accounts") return "secondary";
   return "outline";
 };
@@ -220,17 +221,18 @@ const ListUsers = () => {
           ),
         },
         {
-          id: "role",
-          accessorKey: "role",
-          size: 110,
+          id: "roles",
+          accessorKey: "roles",
+          size: 220,
           header: () => <p className="column-title">Role</p>,
-          cell: ({ getValue }) => (
-            <Badge
-              variant={roleBadgeVariant(String(getValue() ?? ""))}
-              className="capitalize"
-            >
-              {String(getValue() ?? "")}
-            </Badge>
+          cell: ({ row }) => (
+            <div className="flex flex-wrap gap-1">
+              {(row.original.roles ?? (row.original.role ? [row.original.role] : [])).map((role) => (
+                <Badge key={role} variant={roleBadgeVariant(role)}>
+                  {getAppRoleLabel(role)}
+                </Badge>
+              ))}
+            </div>
           ),
         },
         {
@@ -410,7 +412,7 @@ const ListUsers = () => {
             values: {
               name: record.name,
               email: record.email,
-              role: record.role,
+              roles: record.roles ?? (record.role ? [record.role] : ["staff"]),
               status: nextStatus,
               image: record.image ?? null,
               imageCldPubId: record.imageCldPubId ?? null,
@@ -491,64 +493,11 @@ const ListUsers = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All roles</SelectItem>
-                  <SelectItem value="accounts">Accounts</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="auditor">Auditor</SelectItem>
-                  <SelectItem value="billing_officer">
-                    Billing Officer
-                  </SelectItem>
-                  <SelectItem value="cashier">Cashier</SelectItem>
-                  <SelectItem value="doctor">Doctor</SelectItem>
-                  <SelectItem value="dpo">DPO</SelectItem>
-                  <SelectItem value="hospital_admin">
-                    Hospital Admin
-                  </SelectItem>
-                  <SelectItem value="hr_manager">
-                    HR Manager
-                  </SelectItem>
-                  <SelectItem value="lab_scientist">
-                    Lab Scientist
-                  </SelectItem>
-                  <SelectItem value="midwife">Midwife</SelectItem>
-                  <SelectItem value="nurse">Nurse</SelectItem>
-                  <SelectItem value="payroll_officer">
-                    Payroll Officer
-                  </SelectItem>
-                  <SelectItem value="pharmacy_tech">
-                    Pharmacy Tech
-                  </SelectItem>
-                  <SelectItem value="pharmacist">
-                    Pharmacist
-                  </SelectItem>
-                  <SelectItem value="procurement_officer">
-                    Procurement Officer
-                  </SelectItem>
-                  <SelectItem value="radiologist">
-                    Radiologist
-                  </SelectItem>
-                  <SelectItem value="records_officer">
-                    Records Officer
-                  </SelectItem>
-                  <SelectItem value="radiographer">
-                    Radiographer
-                  </SelectItem>
-                  <SelectItem value="registrar">Registrar</SelectItem>
-                  <SelectItem value="report_viewer">
-                    Report Viewer
-                  </SelectItem>
-                  <SelectItem value="roster_officer">
-                    Roster Officer
-                  </SelectItem>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="store_keeper">
-                    Store Keeper
-                  </SelectItem>
-                  <SelectItem value="super_admin">
-                    Super Admin
-                  </SelectItem>
-                  <SelectItem value="unit_manager">
-                    Unit Manager
-                  </SelectItem>
+                  {APP_ROLE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 

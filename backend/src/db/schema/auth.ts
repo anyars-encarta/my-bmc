@@ -1,4 +1,5 @@
 import { relations } from "drizzle-orm";
+import { AUTH_ROLE_VALUES } from "../../lib/appRoles.js";
 import {
   text,
   timestamp,
@@ -10,35 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Enum for user role
-export const roleEnum = pgEnum("role", [
-  "accounts",
-  "admin",
-  "super_admin",
-  "hospital_admin",
-  "hr_manager",
-  "payroll_officer",
-  "unit_manager",
-  "roster_officer",
-  "registrar",
-  "records_officer",
-  "cashier",
-  "accounts",
-  "billing_officer",
-  "doctor",
-  "nurse",
-  "midwife",
-  "pharmacist",
-  "pharmacy_tech",
-  "lab_scientist",
-  "radiographer",
-  "radiologist",
-  "store_keeper",
-  "procurement_officer",
-  "report_viewer",
-  "auditor",
-  "dpo",
-  "staff",
-]);
+export const roleEnum = pgEnum("role", AUTH_ROLE_VALUES);
 export const userStatusEnum = pgEnum("status", ["active", "inactive"]);
 
 const timestamps = {
@@ -59,7 +32,7 @@ export const user = pgTable(
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
     // Custom fields
-    role: roleEnum("role").notNull().default("accounts"),
+    role: roleEnum("role").notNull().default("staff"),
     status: userStatusEnum("status").notNull().default("active"),
     imageCldPubId: text("image_cld_pub_id"),
     ...timestamps,

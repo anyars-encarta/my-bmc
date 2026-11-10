@@ -99,26 +99,26 @@ const brandedTitle = ({
 };
 
 const workforceReadRoles = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "PAYROLL_OFFICER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
+  "unit_manager",
+  "roster_officer",
 ];
 const staffWriteRoles = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "PAYROLL_OFFICER",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "payroll_officer",
 ];
 const workforceSelfServiceRoles = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
-  "STAFF",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "unit_manager",
+  "roster_officer",
+  "staff",
 ];
 
 function WorkforceRoleGate({
@@ -311,14 +311,14 @@ function App() {
                         <Route path="show/:id" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffShow /></WorkforceRoleGate>} />
                       </Route>
                       <Route path="org-units" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><OrgUnitList /></WorkforceRoleGate>} />
-                      <Route path="transfers" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><TransfersPage /></WorkforceRoleGate>} />
-                      <Route path="rosters" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><RostersPage /></WorkforceRoleGate>} />
+                      <Route path="transfers" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><TransfersPage /></WorkforceRoleGate>} />
+                      <Route path="rosters" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager", "unit_manager", "roster_officer"]}><RostersPage /></WorkforceRoleGate>} />
                       <Route path="my-schedule" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MySchedulePage /></WorkforceRoleGate>} />
-                      <Route path="public-holidays" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"]}><PublicHolidaysPage /></WorkforceRoleGate>} />
+                      <Route path="public-holidays" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager", "unit_manager", "roster_officer"]}><PublicHolidaysPage /></WorkforceRoleGate>} />
                       <Route path="staffing-requirements" element={<WorkforceRoleGate allowedRoles={workforceReadRoles}><StaffingRequirementsPage /></WorkforceRoleGate>} />
-                      <Route path="devices" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><DevicesPage /></WorkforceRoleGate>} />
-                      <Route path="attendance" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER", "PAYROLL_OFFICER", "ACCOUNTS", "UNIT_MANAGER"]}><AttendanceOperationsPage /></WorkforceRoleGate>} />
-                      <Route path="attendance-pilot" element={<WorkforceRoleGate allowedRoles={["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"]}><AttendancePilotPage /></WorkforceRoleGate>} />
+                      <Route path="devices" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><DevicesPage /></WorkforceRoleGate>} />
+                      <Route path="attendance" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager", "payroll_officer", "accounts", "unit_manager"]}><AttendanceOperationsPage /></WorkforceRoleGate>} />
+                      <Route path="attendance-pilot" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><AttendancePilotPage /></WorkforceRoleGate>} />
                       <Route path="my-attendance" element={<WorkforceRoleGate allowedRoles={workforceSelfServiceRoles}><MyAttendancePage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
@@ -339,10 +339,10 @@ function App() {
                         <Route path="show/:id" element={<SetupShow />} />
                       </Route>
                       <Route path="users">
-                        <Route index element={<ListUsers />} />
-                        <Route path="create" element={<CreateUser />} />
-                        <Route path="edit/:id" element={<EditUser />} />
-                        <Route path="show/:id" element={<ShowUser />} />
+                        <Route index element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin"]}><ListUsers /></WorkforceRoleGate>} />
+                        <Route path="create" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin"]}><CreateUser /></WorkforceRoleGate>} />
+                        <Route path="edit/:id" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin"]}><EditUser /></WorkforceRoleGate>} />
+                        <Route path="show/:id" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin"]}><ShowUser /></WorkforceRoleGate>} />
                       </Route>
                       <Route path="approvals">
                         <Route index element={<ApprovalQueueList />} />

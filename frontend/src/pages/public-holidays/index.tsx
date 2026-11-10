@@ -19,7 +19,7 @@ const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
 export const PublicHolidaysPage = () => {
   const { data: identity } = useGetIdentity<Identity>();
   const roles = identity?.roles ?? (identity?.role ? [identity.role] : []);
-  const canManage = roles.some((role) => ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"].includes(role));
+  const canManage = roles.some((role) => ["super_admin", "hospital_admin", "hr_manager"].includes(role));
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [holidayDate, setHolidayDate] = useState("");
   const [name, setName] = useState("");

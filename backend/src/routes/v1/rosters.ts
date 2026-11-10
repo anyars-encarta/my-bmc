@@ -45,17 +45,17 @@ import { validateRoster, type RosterRuleEntry } from "../../lib/rosterRules.js";
 
 const router = Router();
 
-const ADMIN_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"] as const;
+const ADMIN_ROLES = ["super_admin", "hospital_admin", "hr_manager"] as const;
 const READ_ROLES = [
-  "SUPER_ADMIN",
-  "HOSPITAL_ADMIN",
-  "HR_MANAGER",
-  "UNIT_MANAGER",
-  "ROSTER_OFFICER",
+  "super_admin",
+  "hospital_admin",
+  "hr_manager",
+  "unit_manager",
+  "roster_officer",
 ] as const;
-const EDIT_ROLES = ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"] as const;
-const HR_OVERRIDE_ROLES = ["SUPER_ADMIN", "HR_MANAGER"] as const;
-const PERIOD_CREATE_ROLES = ["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER", "ROSTER_OFFICER"] as const;
+const EDIT_ROLES = ["super_admin", "hr_manager", "unit_manager", "roster_officer"] as const;
+const HR_OVERRIDE_ROLES = ["super_admin", "hr_manager"] as const;
+const PERIOD_CREATE_ROLES = ["super_admin", "hr_manager", "unit_manager", "roster_officer"] as const;
 const periodMutationQueues = new Map<string, Promise<void>>();
 const periodInputSchema = z.object({
   orgUnitId: z.string().uuid(),
@@ -97,7 +97,7 @@ const routeId = (value: string | string[] | undefined) => Array.isArray(value) ?
 const getRoles = (roles: unknown): AppRole[] =>
   Array.isArray(roles) ? roles.filter(isAppRole) : [];
 const hasAny = (roles: AppRole[], allowed: readonly string[]) =>
-  roles.includes("SUPER_ADMIN") || allowed.some((role) => roles.includes(role as AppRole));
+  roles.includes("super_admin") || allowed.some((role) => roles.includes(role as AppRole));
 const addDays = (date: string, days: number) => getScheduleDateAfterDays(date, days);
 
 const ensureUnitAccess = async (
@@ -685,7 +685,7 @@ router.post("/roster-periods/:id/validate", requireAnyRole([...READ_ROLES]), asy
   }
 });
 
-router.post("/roster-periods/:id/publish", requireAnyRole(["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER"]), async (req, res, next) => {
+router.post("/roster-periods/:id/publish", requireAnyRole(["super_admin", "hr_manager", "unit_manager"]), async (req, res, next) => {
   try {
     const periodId = routeId(req.params.id);
     if (!periodId) throw badRequest("Roster period ID is required.", "ROSTER_PERIOD_ID_REQUIRED");
@@ -749,7 +749,7 @@ router.post("/roster-periods/:id/publish", requireAnyRole(["SUPER_ADMIN", "HR_MA
   }
 });
 
-router.post("/roster-periods/:id/lock", requireAnyRole(["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER"]), async (req, res, next) => {
+router.post("/roster-periods/:id/lock", requireAnyRole(["super_admin", "hr_manager", "unit_manager"]), async (req, res, next) => {
   try {
     const periodId = routeId(req.params.id);
     if (!periodId) throw badRequest("Roster period ID is required.", "ROSTER_PERIOD_ID_REQUIRED");
@@ -1303,7 +1303,7 @@ const getScheduleForStaff = async (staffId: string, from: string, to: string) =>
     ))
     .orderBy(asc(rosterEntry.rosterDate), asc(shiftType.startTime));
 
-router.get("/me/schedule", requireAnyRole([...READ_ROLES, "STAFF"]), async (req, res, next) => {
+router.get("/me/schedule", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
   try {
     if (!req.user?.id) throw forbidden("Sign in to view your schedule.", "SCHEDULE_SELF_REQUIRED");
     const parsed = scheduleQuerySchema.safeParse({
@@ -1322,7 +1322,7 @@ router.get("/me/schedule", requireAnyRole([...READ_ROLES, "STAFF"]), async (req,
   }
 });
 
-router.get("/staff/:staffId/schedule", requireAnyRole([...READ_ROLES, "STAFF"]), async (req, res, next) => {
+router.get("/staff/:staffId/schedule", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
   try {
     const staffId = routeId(req.params.staffId);
     if (!staffId) throw badRequest("Staff ID is required.", "STAFF_ID_REQUIRED");
@@ -1352,7 +1352,7 @@ router.get("/staff/:staffId/schedule", requireAnyRole([...READ_ROLES, "STAFF"]),
   }
 });
 
-router.get("/me/notifications", requireAnyRole([...READ_ROLES, "STAFF"]), async (req, res, next) => {
+router.get("/me/notifications", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
   try {
     if (!req.user?.id) throw forbidden("Sign in to view notifications.", "NOTIFICATION_SELF_REQUIRED");
     const [person] = await db.select({ id: staff.id }).from(staff)
@@ -1369,7 +1369,7 @@ router.get("/me/notifications", requireAnyRole([...READ_ROLES, "STAFF"]), async 
   }
 });
 
-router.post("/me/notifications/:id/read", requireAnyRole([...READ_ROLES, "STAFF"]), async (req, res, next) => {
+router.post("/me/notifications/:id/read", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
   try {
     if (!req.user?.id) throw forbidden("Sign in to update notifications.", "NOTIFICATION_SELF_REQUIRED");
     const notificationId = routeId(req.params.id);
@@ -1411,7 +1411,7 @@ const getCurrentStaff = async (userId: string | undefined) => {
   return person;
 };
 
-router.get("/shift-swaps/eligible", requireAnyRole(["STAFF"]), async (req, res, next) => {
+router.get("/shift-swaps/eligible", requireAnyRole(["staff"]), async (req, res, next) => {
   try {
     const person = await getCurrentStaff(req.user?.id);
     const entryId = typeof req.query.entryId === "string" ? req.query.entryId : "";
@@ -1476,7 +1476,7 @@ const getSwapEntry = async (id: string) => {
   return entry ?? null;
 };
 
-router.get("/shift-swaps", requireAnyRole([...READ_ROLES, "STAFF"]), async (req, res, next) => {
+router.get("/shift-swaps", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
   try {
     const roles = getRoles(req.user?.roles);
     const selfOnly = !hasAny(roles, READ_ROLES);
@@ -1527,7 +1527,7 @@ router.get("/shift-swaps", requireAnyRole([...READ_ROLES, "STAFF"]), async (req,
   }
 });
 
-router.post("/shift-swaps", requireAnyRole(["STAFF"]), async (req, res, next) => {
+router.post("/shift-swaps", requireAnyRole(["staff"]), async (req, res, next) => {
   try {
     const parsed = swapInputSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1578,7 +1578,7 @@ router.post("/shift-swaps", requireAnyRole(["STAFF"]), async (req, res, next) =>
   }
 });
 
-router.post("/shift-swaps/:id/accept", requireAnyRole(["STAFF"]), async (req, res, next) => {
+router.post("/shift-swaps/:id/accept", requireAnyRole(["staff"]), async (req, res, next) => {
   try {
     const swapId = routeId(req.params.id);
     if (!swapId) throw badRequest("Shift swap ID is required.", "SHIFT_SWAP_ID_REQUIRED");
@@ -1603,7 +1603,7 @@ router.post("/shift-swaps/:id/accept", requireAnyRole(["STAFF"]), async (req, re
   }
 });
 
-router.post("/shift-swaps/:id/reject", requireAnyRole(["STAFF", ...READ_ROLES]), async (req, res, next) => {
+router.post("/shift-swaps/:id/reject", requireAnyRole(["staff", ...READ_ROLES]), async (req, res, next) => {
   try {
     const swapId = routeId(req.params.id);
     if (!swapId) throw badRequest("Shift swap ID is required.", "SHIFT_SWAP_ID_REQUIRED");
@@ -1639,7 +1639,7 @@ router.post("/shift-swaps/:id/reject", requireAnyRole(["STAFF", ...READ_ROLES]),
   }
 });
 
-router.post("/shift-swaps/:id/approve", requireAnyRole(["SUPER_ADMIN", "HR_MANAGER", "UNIT_MANAGER"]), async (req, res, next) => {
+router.post("/shift-swaps/:id/approve", requireAnyRole(["super_admin", "hr_manager", "unit_manager"]), async (req, res, next) => {
   try {
     const swapId = routeId(req.params.id);
     if (!swapId) throw badRequest("Shift swap ID is required.", "SHIFT_SWAP_ID_REQUIRED");

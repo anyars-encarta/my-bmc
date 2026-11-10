@@ -129,13 +129,13 @@ const flattenUnits = (units: OrgUnitRecord[]): OrgUnitRecord[] =>
   units.flatMap((unit) => [unit, ...flattenUnits(unit.children ?? [])]);
 
 const isHr = (roles: string[]) =>
-  roles.some((role) => ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"].includes(role));
+  roles.some((role) => ["super_admin", "hospital_admin", "hr_manager"].includes(role));
 
 export const AttendanceOperationsPage = () => {
   const { data: identity } = useGetIdentity<{ role?: string; roles?: string[] }>();
   const roles = identity?.roles ?? (identity?.role ? [identity.role] : []);
   const canApprove = isHr(roles);
-  const canManageAttendance = canApprove || roles.includes("UNIT_MANAGER");
+  const canManageAttendance = canApprove || roles.includes("unit_manager");
   const [tab, setTab] = useState("log");
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [exceptions, setExceptions] = useState<AttendanceException[]>([]);

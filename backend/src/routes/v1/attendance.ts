@@ -16,7 +16,7 @@ import { hashDeviceKey } from "../../lib/deviceAuthentication.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
 const router = Router();
-const HR_ROLES = ["SUPER_ADMIN", "HOSPITAL_ADMIN", "HR_MANAGER"] as const;
+const HR_ROLES = ["super_admin", "hospital_admin", "hr_manager"] as const;
 
 const deviceCreateSchema = z.object({
   code: z.string().trim().min(1).max(30),
