@@ -668,7 +668,7 @@ function RegistrationWizard({ mode }: { mode: Mode }) {
           </CardContent>
         </Card>
 
-        <div className="order-first xl:sticky xl:top-20 xl:order-none">
+        <div className="order-first xl:sticky xl:top-20 xl:order-0">
           <DuplicatePanel candidates={candidates} checking={checking} ready={checkReady} />
         </div>
       </div>
