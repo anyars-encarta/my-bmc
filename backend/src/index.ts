@@ -4,6 +4,7 @@ import { runLicenceExpiryJob } from "./jobs/licenceExpiryJob.js";
 import { materializeFixedScheduleWindow } from "./jobs/fixedScheduleMaterializer.js";
 import { seedGhanaPublicHolidays } from "./jobs/ghanaHolidaySeed.js";
 import { startAttendanceJobs } from "./jobs/attendanceJobs.js";
+import { startPatientJobs } from "./jobs/patientJobs.js";
 
 const PORT = 8000;
 
@@ -26,6 +27,7 @@ const start = async () => {
   });
 
   startAttendanceJobs();
+  startPatientJobs();
 
   setInterval(async () => {
     try {

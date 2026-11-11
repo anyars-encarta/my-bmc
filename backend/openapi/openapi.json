@@ -430,6 +430,2774 @@
         "parameters": [{ "$ref": "#/components/parameters/Id" }],
         "responses": { "200": { "description": "Requirement deleted" } }
       }
+    },
+    "/patients": {
+      "get": {
+        "summary": "Search patients",
+        "tags": [
+          "Patients"
+        ],
+        "description": "Exact lookups by MRN, phone and identifier number plus trigram name search, widening to sound-alike surnames when nothing matches. RESTRICTED/VIP rows are masked unless the caller holds a break-glass grant.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 2
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "lastName",
+                "-lastName",
+                "registeredAt",
+                "-registeredAt",
+                "mrn",
+                "-mrn"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "INACTIVE",
+                "DECEASED",
+                "MERGED"
+              ]
+            }
+          },
+          {
+            "name": "status__in",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sex",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MALE",
+                "FEMALE",
+                "INTERSEX",
+                "UNKNOWN"
+              ]
+            }
+          },
+          {
+            "name": "confidentiality",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NORMAL",
+                "RESTRICTED",
+                "VIP"
+              ]
+            }
+          },
+          {
+            "name": "isUnidentified",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "registeredAt__gte",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "registeredAt__lte",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated patients",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "pagination",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientSummary"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "mergedFromMrn"
+                      ],
+                      "properties": {
+                        "mergedFromMrn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Set when the search matched the MRN of a merged record; the row is the surviving patient."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Register a patient",
+        "tags": [
+          "Patients"
+        ],
+        "description": "Runs the duplicate detector first. Send `unidentified: true` for the emergency unknown-patient flow.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PatientRegistrationRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UnidentifiedPatientRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientDetail"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": [
+                        "acknowledgedDuplicates"
+                      ],
+                      "properties": {
+                        "acknowledgedDuplicates": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`PATIENT_DUPLICATE_CANDIDATES` (details.candidates, details.blocking) or `PATIENT_IDENTIFIER_IN_USE`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/references": {
+      "get": {
+        "summary": "Pick-list data for the registry screens",
+        "tags": [
+          "Patients"
+        ],
+        "responses": {
+          "200": {
+            "description": "Units, consent witnesses and registry settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientReferences"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/duplicate-check": {
+      "post": {
+        "summary": "Live duplicate check for the registration wizard",
+        "tags": [
+          "Patients"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DuplicateCheckResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/duplicates": {
+      "get": {
+        "summary": "Duplicate review queue",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "DISMISSED",
+                "MERGED"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "-score",
+                "-detectedAt"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate pairs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DuplicatePair"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/duplicates/sweep": {
+      "post": {
+        "summary": "Run the duplicate sweep now",
+        "tags": [
+          "Patients"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "sinceDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sweep result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "scanned",
+                        "queued"
+                      ],
+                      "properties": {
+                        "scanned": {
+                          "type": "integer"
+                        },
+                        "queued": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/duplicates/{candidateId}/dismiss": {
+      "post": {
+        "summary": "Mark a candidate pair as different patients",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dismissed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already reviewed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/merge/preview": {
+      "get": {
+        "summary": "Side-by-side comparison and merge pre-checks",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "name": "survivorId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "mergedId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MergePreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/merge": {
+      "post": {
+        "summary": "Merge a duplicate into the surviving record",
+        "tags": [
+          "Patients"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Merged; module re-pointing is tracked by merge tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MergeResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A pre-check failed (`PATIENT_MERGE_*`) or a record changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}": {
+      "get": {
+        "summary": "Open a patient chart",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chart header, or a pointer to the survivor when the record was merged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/PatientChart"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PatientMergedPointer"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update demographics, status or confidentiality",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientChart"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONCURRENT_MODIFICATION`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/identify": {
+      "post": {
+        "summary": "Identify an unidentified patient, or merge it into an existing record",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PatientIdentifyRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PatientIdentifyByMergeRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Identified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/PatientDetail"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PatientIdentifyByMergeResult"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already identified, duplicate candidates or a concurrent change",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/identifiers": {
+      "get": {
+        "summary": "List a patient's identifiers",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patient identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientIdentifier"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a patient identifier",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientIdentifierInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientIdentifier"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/identifiers/{identifierId}": {
+      "patch": {
+        "summary": "Update a patient identifier",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "identifierId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientIdentifierUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientIdentifier"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/contacts": {
+      "get": {
+        "summary": "List a patient's contacts",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patient contacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientContact"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a patient contact",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientContactInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientContact"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/contacts/{contactId}": {
+      "patch": {
+        "summary": "Update a patient contact",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientContactUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientContact"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove a patient contact",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "success"
+                      ],
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/allergies": {
+      "get": {
+        "summary": "List a patient's allergies",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patient allergies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientAllergy"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a patient allergie",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientAllergyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientAllergy"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/allergies/{allergyId}": {
+      "patch": {
+        "summary": "Update a patient allergie",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "allergyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientAllergyUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientAllergy"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/conditions": {
+      "get": {
+        "summary": "List a patient's conditions",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patient conditions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientCondition"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a patient condition",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientConditionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientCondition"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/conditions/{conditionId}": {
+      "patch": {
+        "summary": "Update a patient condition",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "conditionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientConditionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientCondition"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/consents": {
+      "get": {
+        "summary": "Effective consents and consent history",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientConsents"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Record a consent decision",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientConsentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientConsentRecord"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/timeline": {
+      "get": {
+        "summary": "Visits, encounters, results and admissions",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timeline, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientTimelineEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/photo": {
+      "post": {
+        "summary": "Save or remove the patient photo",
+        "tags": [
+          "Patients"
+        ],
+        "description": "Saving a photo needs a granted PHOTOGRAPHY consent (`403 CONSENT_REQUIRED`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatientPhotoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PatientPhotoResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONCURRENT_MODIFICATION`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/wristband": {
+      "get": {
+        "summary": "Wristband PDF with the Code 128 MRN",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wristband PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/card": {
+      "get": {
+        "summary": "Patient card PDF with the Code 128 MRN",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Patient card PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patients/{id}/audit": {
+      "get": {
+        "summary": "Audit trail of a patient record",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action__in",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PatientAuditEntry"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merge-tasks": {
+      "get": {
+        "summary": "Recent merges and their re-pointing status",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MergeSummary"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merge-tasks/{id}": {
+      "get": {
+        "summary": "Status of one merge",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merge status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MergeSummary"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Merge not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merge-tasks/{id}/retry": {
+      "post": {
+        "summary": "Retry the unfinished re-pointing tasks of a merge",
+        "tags": [
+          "Patients"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merge status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MergeSummary"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Merge not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/break-glass": {
+      "post": {
+        "summary": "Request break-glass access to a restricted record",
+        "tags": [
+          "Break-glass"
+        ],
+        "description": "Grants 4 hours of access, audits the reason and notifies the DPO and unit manager.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakGlassRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An active grant already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BreakGlassGrant"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Granted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BreakGlassGrant"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Patient not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`BREAK_GLASS_NOT_REQUIRED`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/privacy/break-glass-reviews": {
+      "get": {
+        "summary": "Break-glass review queue",
+        "tags": [
+          "Break-glass"
+        ],
+        "description": "The DPO and auditors see every grant; unit managers see grants for patients registered in their unit subtree.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "REVIEWED",
+                "ALL"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "pagination"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BreakGlassReviewItem"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not permitted, or a restricted record without break-glass (`code=BREAK_GLASS_REQUIRED`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/privacy/break-glass-reviews/{id}/review": {
+      "post": {
+        "summary": "Record the review outcome of a break-glass access",
+        "tags": [
+          "Break-glass"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakGlassReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reviewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "reviewOutcome",
+                        "reviewedAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reviewOutcome": {
+                          "type": "string",
+                          "enum": [
+                            "JUSTIFIED",
+                            "UNJUSTIFIED",
+                            "ESCALATED"
+                          ]
+                        },
+                        "reviewedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted, or reviewing your own access (`BREAK_GLASS_SELF_REVIEW`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already reviewed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failure or business rule; `code` identifies the rule",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -637,6 +3405,2994 @@
             }
           },
           "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "PatientSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "mrn",
+          "firstName",
+          "middleName",
+          "lastName",
+          "preferredName",
+          "fullName",
+          "sex",
+          "dateOfBirth",
+          "dobEstimated",
+          "estimatedAgeYears",
+          "ageYears",
+          "isMinor",
+          "photoUrl",
+          "status",
+          "deceasedAt",
+          "confidentiality",
+          "isUnidentified",
+          "registeredAt",
+          "masked",
+          "redacted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mrn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferredName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "sex": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN",
+              null
+            ]
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "dobEstimated": {
+            "type": "boolean"
+          },
+          "estimatedAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ageYears": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isMinor": {
+            "type": "boolean"
+          },
+          "photoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "DECEASED",
+              "MERGED"
+            ]
+          },
+          "deceasedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "confidentiality": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "RESTRICTED",
+              "VIP"
+            ]
+          },
+          "isUnidentified": {
+            "type": "boolean"
+          },
+          "registeredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "masked": {
+            "type": "boolean",
+            "description": "True when the identity is hidden because the record is RESTRICTED/VIP and the caller holds no break-glass grant."
+          },
+          "redacted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields withheld from the caller's role."
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "mrn",
+          "firstName",
+          "middleName",
+          "lastName",
+          "preferredName",
+          "fullName",
+          "sex",
+          "dateOfBirth",
+          "dobEstimated",
+          "estimatedAgeYears",
+          "ageYears",
+          "isMinor",
+          "photoUrl",
+          "status",
+          "deceasedAt",
+          "confidentiality",
+          "isUnidentified",
+          "registeredAt",
+          "masked",
+          "redacted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mrn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferredName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "sex": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN",
+              null
+            ]
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "dobEstimated": {
+            "type": "boolean"
+          },
+          "estimatedAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ageYears": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isMinor": {
+            "type": "boolean"
+          },
+          "photoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "DECEASED",
+              "MERGED"
+            ]
+          },
+          "deceasedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "confidentiality": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "RESTRICTED",
+              "VIP"
+            ]
+          },
+          "isUnidentified": {
+            "type": "boolean"
+          },
+          "registeredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "masked": {
+            "type": "boolean",
+            "description": "True when the identity is hidden because the record is RESTRICTED/VIP and the caller holds no break-glass grant."
+          },
+          "redacted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields withheld from the caller's role."
+          },
+          "maritalStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SINGLE",
+              "MARRIED",
+              "DIVORCED",
+              "WIDOWED",
+              "SEPARATED",
+              "OTHER",
+              null
+            ]
+          },
+          "nationality": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "religion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occupation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bloodGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-",
+              null
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "altPhone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "town": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "district": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "digitalAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "photoPublicId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mergedIntoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "registeredUnitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PatientAllergySummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "substance",
+          "reaction",
+          "severity"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "DRUG",
+              "FOOD",
+              "LATEX",
+              "ENVIRON",
+              "OTHER"
+            ]
+          },
+          "substance": {
+            "type": "string"
+          },
+          "reaction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MILD",
+              "MODERATE",
+              "SEVERE",
+              "LIFE_THREATENING",
+              null
+            ]
+          }
+        }
+      },
+      "PatientBreakGlassState": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "expiresAt",
+          "reason"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "PatientChart": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PatientDetail"
+          },
+          {
+            "type": "object",
+            "required": [
+              "allergies",
+              "restriction",
+              "breakGlass"
+            ],
+            "properties": {
+              "allergies": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PatientAllergySummary"
+                }
+              },
+              "restriction": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "RESTRICTED",
+                  "VIP",
+                  "SELF",
+                  null
+                ]
+              },
+              "breakGlass": {
+                "$ref": "#/components/schemas/PatientBreakGlassState"
+              }
+            }
+          }
+        ]
+      },
+      "PatientMergedPointer": {
+        "type": "object",
+        "required": [
+          "id",
+          "mrn",
+          "status",
+          "mergedIntoId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mrn": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "MERGED"
+            ]
+          },
+          "mergedIntoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "PatientIdentifierInput": {
+        "type": "object",
+        "required": [
+          "idType",
+          "idValue"
+        ],
+        "properties": {
+          "idType": {
+            "type": "string",
+            "enum": [
+              "NHIS",
+              "GHANA_CARD",
+              "PASSPORT",
+              "DRIVERS_LICENCE",
+              "VOTER_ID",
+              "SSNIT",
+              "STAFF_ID",
+              "EXTERNAL_MRN"
+            ]
+          },
+          "idValue": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "validTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        }
+      },
+      "PatientContactInput": {
+        "type": "object",
+        "required": [
+          "contactType",
+          "name"
+        ],
+        "properties": {
+          "contactType": {
+            "type": "string",
+            "enum": [
+              "NEXT_OF_KIN",
+              "EMERGENCY",
+              "GUARDIAN",
+              "EMPLOYER"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 150
+          },
+          "relationship": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "canConsent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatientConsentEntry": {
+        "type": "object",
+        "required": [
+          "consentType",
+          "status"
+        ],
+        "properties": {
+          "consentType": {
+            "type": "string",
+            "enum": [
+              "TREATMENT",
+              "DATA_PROCESSING",
+              "SMS_CONTACT",
+              "INSURER_SHARING",
+              "PHOTOGRAPHY",
+              "RESEARCH"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "GRANTED",
+              "WITHDRAWN",
+              "DECLINED"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientRegistrationRequest": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "sex"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "lastName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "preferredName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN"
+            ]
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "dobEstimated": {
+            "type": "boolean"
+          },
+          "estimatedAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 130
+          },
+          "maritalStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SINGLE",
+              "MARRIED",
+              "DIVORCED",
+              "WIDOWED",
+              "SEPARATED",
+              "OTHER",
+              null
+            ]
+          },
+          "nationality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "religion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 40
+          },
+          "occupation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "bloodGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-",
+              null
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "altPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "addressLine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "town": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "district": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "digitalAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientIdentifierInput"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientContactInput"
+            }
+          },
+          "consents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientConsentEntry"
+            }
+          },
+          "captureMethod": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "ELECTRONIC",
+              "VERBAL_WITNESSED"
+            ]
+          },
+          "witnessStaffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "acknowledgeDuplicates": {
+            "type": "boolean",
+            "description": "Set after the registrar has reviewed the duplicate candidates."
+          },
+          "duplicateOverrideReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "Required (min 10 characters) when a BLOCK-level candidate is overridden."
+          },
+          "unidentified": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "confidentiality": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "RESTRICTED",
+              "VIP"
+            ]
+          },
+          "registeredUnitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "UnidentifiedPatientRequest": {
+        "type": "object",
+        "required": [
+          "unidentified",
+          "sex",
+          "estimatedAgeYears"
+        ],
+        "properties": {
+          "unidentified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN"
+            ]
+          },
+          "estimatedAgeYears": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 130
+          },
+          "registeredUnitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "PatientIdentifyRequest": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "sex"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "lastName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "preferredName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN"
+            ]
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "dobEstimated": {
+            "type": "boolean"
+          },
+          "estimatedAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 130
+          },
+          "maritalStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SINGLE",
+              "MARRIED",
+              "DIVORCED",
+              "WIDOWED",
+              "SEPARATED",
+              "OTHER",
+              null
+            ]
+          },
+          "nationality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "religion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 40
+          },
+          "occupation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "bloodGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-",
+              null
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "altPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "addressLine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "town": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "district": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "digitalAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientIdentifierInput"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientContactInput"
+            }
+          },
+          "consents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientConsentEntry"
+            }
+          },
+          "captureMethod": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "ELECTRONIC",
+              "VERBAL_WITNESSED"
+            ]
+          },
+          "witnessStaffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "acknowledgeDuplicates": {
+            "type": "boolean",
+            "description": "Set after the registrar has reviewed the duplicate candidates."
+          },
+          "duplicateOverrideReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "Required (min 10 characters) when a BLOCK-level candidate is overridden."
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PatientIdentifyByMergeRequest": {
+        "type": "object",
+        "required": [
+          "mergeIntoPatientId",
+          "reason"
+        ],
+        "properties": {
+          "mergeIntoPatientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500
+          }
+        }
+      },
+      "PatientIdentifyByMergeResult": {
+        "type": "object",
+        "required": [
+          "mergedIntoId",
+          "mergeLogId",
+          "status"
+        ],
+        "properties": {
+          "mergedIntoId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mergeLogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "DONE",
+              "FAILED",
+              "MANUAL_REVIEW"
+            ]
+          }
+        }
+      },
+      "PatientUpdateRequest": {
+        "type": "object",
+        "description": "Only the fields that are sent are changed.",
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "lastName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "preferredName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "INTERSEX",
+              "UNKNOWN"
+            ]
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "dobEstimated": {
+            "type": "boolean"
+          },
+          "estimatedAgeYears": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 130
+          },
+          "maritalStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SINGLE",
+              "MARRIED",
+              "DIVORCED",
+              "WIDOWED",
+              "SEPARATED",
+              "OTHER",
+              null
+            ]
+          },
+          "nationality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "religion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 40
+          },
+          "occupation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "bloodGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-",
+              null
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "altPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 25
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "addressLine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "town": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "district": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          },
+          "digitalAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20
+          },
+          "confidentiality": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "RESTRICTED",
+              "VIP"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE",
+              "DECEASED"
+            ]
+          },
+          "deceasedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "registeredUnitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "DuplicateCheckRequest": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "middleName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "dateOfBirth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "idType",
+                "idValue"
+              ],
+              "properties": {
+                "idType": {
+                  "type": "string",
+                  "enum": [
+                    "NHIS",
+                    "GHANA_CARD",
+                    "PASSPORT",
+                    "DRIVERS_LICENCE",
+                    "VOTER_ID",
+                    "SSNIT",
+                    "STAFF_ID",
+                    "EXTERNAL_MRN"
+                  ]
+                },
+                "idValue": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "excludePatientId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "DuplicateCandidate": {
+        "type": "object",
+        "required": [
+          "patient",
+          "score",
+          "level",
+          "reasons"
+        ],
+        "properties": {
+          "patient": {
+            "$ref": "#/components/schemas/PatientSummary"
+          },
+          "score": {
+            "type": "number"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "BLOCK",
+              "WARN"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "IDENTIFIER",
+                "NAME",
+                "DATE_OF_BIRTH",
+                "PHONE",
+                "SURNAME_SOUNDS_ALIKE"
+              ]
+            }
+          }
+        }
+      },
+      "DuplicateCheckResult": {
+        "type": "object",
+        "required": [
+          "blocking",
+          "identifierInUse",
+          "candidates"
+        ],
+        "properties": {
+          "blocking": {
+            "type": "boolean"
+          },
+          "identifierInUse": {
+            "type": "boolean"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCandidate"
+            }
+          }
+        }
+      },
+      "PatientIdentifier": {
+        "type": "object",
+        "required": [
+          "id",
+          "idType",
+          "idValue",
+          "issuer",
+          "validTo",
+          "verified",
+          "verifiedAt",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idType": {
+            "type": "string",
+            "enum": [
+              "NHIS",
+              "GHANA_CARD",
+              "PASSPORT",
+              "DRIVERS_LICENCE",
+              "VOTER_ID",
+              "SSNIT",
+              "STAFF_ID",
+              "EXTERNAL_MRN"
+            ]
+          },
+          "idValue": {
+            "type": "string"
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "validTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "verifiedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE"
+            ]
+          }
+        }
+      },
+      "PatientIdentifierUpdate": {
+        "type": "object",
+        "properties": {
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "validTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "INACTIVE"
+            ]
+          }
+        }
+      },
+      "PatientContact": {
+        "type": "object",
+        "required": [
+          "id",
+          "contactType",
+          "name",
+          "relationship",
+          "phone",
+          "address",
+          "isPrimary",
+          "canConsent"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contactType": {
+            "type": "string",
+            "enum": [
+              "NEXT_OF_KIN",
+              "EMERGENCY",
+              "GUARDIAN",
+              "EMPLOYER"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "relationship": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "canConsent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatientContactUpdate": {
+        "type": "object",
+        "properties": {
+          "contactType": {
+            "type": "string",
+            "enum": [
+              "NEXT_OF_KIN",
+              "EMERGENCY",
+              "GUARDIAN",
+              "EMPLOYER"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 150
+          },
+          "relationship": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "canConsent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatientAllergy": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "substance",
+          "reaction",
+          "severity",
+          "status",
+          "notedOn",
+          "recordedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "DRUG",
+              "FOOD",
+              "LATEX",
+              "ENVIRON",
+              "OTHER"
+            ]
+          },
+          "substance": {
+            "type": "string"
+          },
+          "reaction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MILD",
+              "MODERATE",
+              "SEVERE",
+              "LIFE_THREATENING",
+              null
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "RESOLVED",
+              "ENTERED_IN_ERROR"
+            ]
+          },
+          "notedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recordedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientAllergyInput": {
+        "type": "object",
+        "required": [
+          "category",
+          "substance"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "DRUG",
+              "FOOD",
+              "LATEX",
+              "ENVIRON",
+              "OTHER"
+            ]
+          },
+          "substance": {
+            "type": "string",
+            "maxLength": 150
+          },
+          "reaction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MILD",
+              "MODERATE",
+              "SEVERE",
+              "LIFE_THREATENING",
+              null
+            ]
+          },
+          "notedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        }
+      },
+      "PatientAllergyUpdate": {
+        "type": "object",
+        "properties": {
+          "reaction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MILD",
+              "MODERATE",
+              "SEVERE",
+              "LIFE_THREATENING",
+              null
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "RESOLVED",
+              "ENTERED_IN_ERROR"
+            ]
+          }
+        }
+      },
+      "PatientCondition": {
+        "type": "object",
+        "required": [
+          "id",
+          "icd10Code",
+          "description",
+          "onsetDate",
+          "isChronic",
+          "status",
+          "recordedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icd10Code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "onsetDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "isChronic": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "RESOLVED",
+              "ENTERED_IN_ERROR"
+            ]
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recordedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientConditionInput": {
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "properties": {
+          "icd10Code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 10
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "onsetDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "isChronic": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatientConditionUpdate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "onsetDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "isChronic": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "RESOLVED",
+              "ENTERED_IN_ERROR"
+            ]
+          }
+        }
+      },
+      "PatientConsentRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "consentType",
+          "status",
+          "policyVersion",
+          "grantedAt",
+          "withdrawnAt",
+          "captureMethod",
+          "guardianName",
+          "guardianRelationship",
+          "note",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "consentType": {
+            "type": "string",
+            "enum": [
+              "TREATMENT",
+              "DATA_PROCESSING",
+              "SMS_CONTACT",
+              "INSURER_SHARING",
+              "PHOTOGRAPHY",
+              "RESEARCH"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "GRANTED",
+              "WITHDRAWN",
+              "DECLINED"
+            ]
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "grantedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "withdrawnAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "captureMethod": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "ELECTRONIC",
+              "VERBAL_WITNESSED"
+            ]
+          },
+          "guardianName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guardianRelationship": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capturedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "witnessName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientConsentInput": {
+        "type": "object",
+        "required": [
+          "consentType",
+          "status",
+          "captureMethod"
+        ],
+        "properties": {
+          "consentType": {
+            "type": "string",
+            "enum": [
+              "TREATMENT",
+              "DATA_PROCESSING",
+              "SMS_CONTACT",
+              "INSURER_SHARING",
+              "PHOTOGRAPHY",
+              "RESEARCH"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "GRANTED",
+              "WITHDRAWN",
+              "DECLINED"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "captureMethod": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "ELECTRONIC",
+              "VERBAL_WITNESSED"
+            ]
+          },
+          "witnessStaffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "guardianName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guardianRelationship": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientConsents": {
+        "type": "object",
+        "required": [
+          "effective",
+          "history"
+        ],
+        "properties": {
+          "effective": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "consentType",
+                "status",
+                "recordedAt"
+              ],
+              "properties": {
+                "consentType": {
+                  "type": "string",
+                  "enum": [
+                    "TREATMENT",
+                    "DATA_PROCESSING",
+                    "SMS_CONTACT",
+                    "INSURER_SHARING",
+                    "PHOTOGRAPHY",
+                    "RESEARCH"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "GRANTED",
+                    "WITHDRAWN",
+                    "DECLINED",
+                    "NOT_RECORDED"
+                  ]
+                },
+                "recordedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatientConsentRecord"
+            }
+          }
+        }
+      },
+      "PatientTimelineEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "occurredAt",
+          "title",
+          "status",
+          "reference",
+          "unitName"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "REGISTRATION",
+              "MERGE",
+              "APPOINTMENT",
+              "VISIT",
+              "ENCOUNTER",
+              "ADMISSION",
+              "LAB_ORDER",
+              "IMAGING_ORDER"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unitName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientPhotoRequest": {
+        "type": "object",
+        "required": [
+          "photoUrl"
+        ],
+        "properties": {
+          "photoUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "photoPublicId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatientPhotoResult": {
+        "type": "object",
+        "required": [
+          "photoUrl",
+          "photoPublicId",
+          "version"
+        ],
+        "properties": {
+          "photoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "photoPublicId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PatientAuditEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "occurredAt",
+          "actorName",
+          "actorRoles",
+          "action",
+          "entityType",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actorName": {
+            "type": "string"
+          },
+          "actorRoles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "action": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DuplicatePair": {
+        "type": "object",
+        "required": [
+          "id",
+          "score",
+          "reasons",
+          "status",
+          "source",
+          "detectedAt",
+          "reviewedAt",
+          "reviewedByName",
+          "patientA",
+          "patientB"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "score": {
+            "type": "number"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "DISMISSED",
+              "MERGED"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "REGISTRATION",
+              "SWEEP",
+              "MANUAL"
+            ]
+          },
+          "detectedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reviewedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "patientA": {
+            "$ref": "#/components/schemas/PatientSummary"
+          },
+          "patientB": {
+            "$ref": "#/components/schemas/PatientSummary"
+          }
+        }
+      },
+      "MergePrecheck": {
+        "type": "object",
+        "required": [
+          "code",
+          "passed",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "MergePreview": {
+        "type": "object",
+        "required": [
+          "survivor",
+          "merged",
+          "prechecks",
+          "canMerge",
+          "mergeableFields"
+        ],
+        "properties": {
+          "survivor": {
+            "$ref": "#/components/schemas/PatientDetail"
+          },
+          "merged": {
+            "$ref": "#/components/schemas/PatientDetail"
+          },
+          "prechecks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergePrecheck"
+            }
+          },
+          "canMerge": {
+            "type": "boolean"
+          },
+          "mergeableFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "preferredName",
+                "dateOfBirth",
+                "maritalStatus",
+                "nationality",
+                "religion",
+                "occupation",
+                "bloodGroup",
+                "phone",
+                "altPhone",
+                "email",
+                "addressLine",
+                "town",
+                "district",
+                "region",
+                "digitalAddress",
+                "photoUrl"
+              ]
+            }
+          }
+        }
+      },
+      "MergeRequest": {
+        "type": "object",
+        "required": [
+          "survivorId",
+          "mergedId",
+          "reason"
+        ],
+        "properties": {
+          "survivorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mergedId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500
+          },
+          "takeFromMerged": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "preferredName",
+                "dateOfBirth",
+                "maritalStatus",
+                "nationality",
+                "religion",
+                "occupation",
+                "bloodGroup",
+                "phone",
+                "altPhone",
+                "email",
+                "addressLine",
+                "town",
+                "district",
+                "region",
+                "digitalAddress",
+                "photoUrl"
+              ]
+            }
+          }
+        }
+      },
+      "MergeTask": {
+        "type": "object",
+        "required": [
+          "id",
+          "module",
+          "status",
+          "rowsMoved",
+          "note",
+          "attempts",
+          "completedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "module": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "DONE",
+              "FAILED",
+              "MANUAL_REVIEW"
+            ]
+          },
+          "rowsMoved": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MergeResult": {
+        "type": "object",
+        "required": [
+          "mergeLogId",
+          "survivorId",
+          "status",
+          "tasks"
+        ],
+        "properties": {
+          "mergeLogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "survivorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "DONE",
+              "FAILED",
+              "MANUAL_REVIEW"
+            ]
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergeTask"
+            }
+          }
+        }
+      },
+      "MergeSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "mergedAt",
+          "mergedByName",
+          "reason",
+          "survivorId",
+          "survivor",
+          "merged",
+          "status",
+          "tasks"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mergedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mergedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "survivorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "survivor": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "mrn",
+              "name"
+            ],
+            "properties": {
+              "mrn": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "merged": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "mrn",
+              "name"
+            ],
+            "properties": {
+              "mrn": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "DONE",
+              "FAILED",
+              "MANUAL_REVIEW"
+            ]
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MergeTask"
+            }
+          }
+        }
+      },
+      "PatientReferences": {
+        "type": "object",
+        "required": [
+          "units",
+          "staff",
+          "today",
+          "minorAgeThreshold",
+          "breakGlassReasonMinChars",
+          "accessLevel"
+        ],
+        "properties": {
+          "units": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "code",
+                "unitType"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "unitType": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "staff": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "firstName",
+                "lastName",
+                "employeeId"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "firstName": {
+                  "type": "string"
+                },
+                "lastName": {
+                  "type": "string"
+                },
+                "employeeId": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "today": {
+            "type": "string",
+            "format": "date"
+          },
+          "minorAgeThreshold": {
+            "type": "integer"
+          },
+          "breakGlassReasonMinChars": {
+            "type": "integer"
+          },
+          "accessLevel": {
+            "type": "string",
+            "enum": [
+              "FULL",
+              "MINIMAL"
+            ]
+          }
+        }
+      },
+      "BreakGlassRequest": {
+        "type": "object",
+        "required": [
+          "patientId",
+          "reason"
+        ],
+        "properties": {
+          "patientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 15,
+            "maxLength": 500
+          }
+        }
+      },
+      "BreakGlassGrant": {
+        "type": "object",
+        "required": [
+          "id",
+          "patientId",
+          "reason",
+          "grantedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "patientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "grantedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BreakGlassReviewItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "userName",
+          "userEmail",
+          "patientName",
+          "patientMrn",
+          "confidentiality",
+          "reason",
+          "grantedAt",
+          "expiresAt",
+          "active",
+          "reviewOverdue",
+          "reviewedAt",
+          "reviewedByName",
+          "reviewOutcome",
+          "reviewNote"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "userEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "patientName": {
+            "type": "string"
+          },
+          "patientMrn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidentiality": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "grantedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "reviewOverdue": {
+            "type": "boolean"
+          },
+          "reviewedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reviewedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewOutcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "JUSTIFIED",
+              "UNJUSTIFIED",
+              "ESCALATED",
+              null
+            ]
+          },
+          "reviewNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "BreakGlassReviewRequest": {
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "JUSTIFIED",
+              "UNJUSTIFIED",
+              "ESCALATED"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          }
         }
       }
     }

@@ -148,6 +148,13 @@
       "when": 1794244500000,
       "tag": "0020_normalize_application_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794323000000,
+      "tag": "0021_sprint7_patient_registry",
+      "breakpoints": true
     }
   ]
 }

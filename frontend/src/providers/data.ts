@@ -49,6 +49,7 @@ const RESOURCE_CONFIG: Record<string, ResourceConfig> = {
   staff: { api: "v1", path: "staff" },
   setup: { api: "v1", path: "facility", singleton: true },
   "org-units": { api: "v1", path: "org-units" },
+  patients: { api: "v1", path: "patients" },
   payments: { api: "legacy", path: "payments" },
   categories: { api: "legacy", path: "categories" },
   approval_queue: { api: "legacy", path: "payments" },

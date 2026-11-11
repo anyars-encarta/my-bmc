@@ -16,6 +16,8 @@
     "db:studio": "drizzle-kit studio",
     "seed": "tsx seed/seed.ts",
     "seed:workforce": "tsx seed/workforceSynthetic.ts",
+    "seed:patients": "tsx seed/patientSynthetic.ts",
+    "perf:patient-search": "tsx scripts/patient-search-perf.ts",
     "seed:reset": "tsx seed/deleteDB.ts",
     "seed:admin": "tsx seed/adminSeed.ts"
   },

@@ -8,12 +8,21 @@ import {
   CalendarDays,
   CalendarRange,
   Fingerprint,
+  GitMerge,
+  HeartPulse,
   LayoutDashboard,
   Layers3,
   Settings2,
+  ShieldAlert,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+import {
+  BREAK_GLASS_REVIEW_READ_ROLES,
+  PATIENT_MERGE_ROLES,
+  PATIENT_READ_ROLES,
+} from "./patients";
 
 type AppResource = {
   name: string;
@@ -23,7 +32,7 @@ type AppResource = {
   show?: string;
   canDelete?: boolean;
   allowedRoles?: string[];
-  menuGroup: "Administration" | "Attendance" | "Finance" | "Overview" | "Workforce";
+  menuGroup: "Administration" | "Attendance" | "Finance" | "Front Desk" | "Overview" | "Workforce";
   label: string;
   icon: LucideIcon;
 };
@@ -35,6 +44,33 @@ export const appResources: AppResource[] = [
     menuGroup: "Overview",
     label: "Dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    name: "patients",
+    list: "/patients",
+    create: "/patients/register",
+    edit: "/patients/edit/:id",
+    show: "/patients/show/:id",
+    allowedRoles: PATIENT_READ_ROLES,
+    menuGroup: "Front Desk",
+    label: "Patients",
+    icon: HeartPulse,
+  },
+  {
+    name: "patient-duplicates",
+    list: "/patient-duplicates",
+    allowedRoles: PATIENT_MERGE_ROLES,
+    menuGroup: "Front Desk",
+    label: "Duplicate Patients",
+    icon: GitMerge,
+  },
+  {
+    name: "break-glass-review",
+    list: "/break-glass-review",
+    allowedRoles: BREAK_GLASS_REVIEW_READ_ROLES,
+    menuGroup: "Administration",
+    label: "Break-glass Review",
+    icon: ShieldAlert,
   },
   {
     name: "org-units",

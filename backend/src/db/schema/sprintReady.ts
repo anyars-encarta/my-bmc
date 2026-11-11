@@ -105,6 +105,7 @@ export const breakGlassAccess = pgTable("break_glass_access", {
   reviewedBy: text("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   reviewOutcome: varchar("review_outcome", { length: 12 }),
+  reviewNote: varchar("review_note", { length: 500 }),
 });
 
 export type BreakGlassAccess = typeof breakGlassAccess.$inferSelect;
@@ -763,6 +764,8 @@ export const patientDuplicateCandidate = pgTable("patient_duplicate_candidate", 
   status: varchar("status", { length: 10 }).default('PENDING').notNull(),
   reviewedBy: text("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  detectedAt: timestamp("detected_at", { withTimezone: true }).defaultNow().notNull(),
+  source: varchar("source", { length: 12 }).default('SWEEP').notNull(),
 });
 
 export type PatientDuplicateCandidate = typeof patientDuplicateCandidate.$inferSelect;
@@ -776,6 +779,8 @@ export const patientMergeTask = pgTable("patient_merge_task", {
   rowsMoved: integer("rows_moved"),
   lastError: varchar("last_error", { length: 500 }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  attempts: integer("attempts").default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type PatientMergeTask = typeof patientMergeTask.$inferSelect;
