@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import {
@@ -28,6 +28,7 @@ import {
   duplicateReasons,
   getPatientConfig,
   looksLikeMrn,
+  normalizeIdentifierValue,
   normalizePhoneE164,
   orderDuplicatePair,
   scoreDuplicate,
@@ -157,13 +158,21 @@ const buildFilterPredicates = (query: ListQuery) => {
   return predicates;
 };
 
+/** Finds active identifier matches in compact form and the normalized Ghana Card format. */
 const findPatientIdsByIdentifierValue = async (value: string) => {
+  const compact = value.replace(/\s+/g, "");
+  const normalized = normalizeIdentifierValue("GHANA_CARD", value);
   const rows = await db
     .select({ patientId: patientIdentifier.patientId })
     .from(patientIdentifier)
-    .where(and(eq(patientIdentifier.status, "ACTIVE"), eq(patientIdentifier.idValue, value)))
-    .limit(20);
-  return rows.map((row) => row.patientId);
+    .where(
+      and(
+        eq(patientIdentifier.status, "ACTIVE"),
+        inArray(patientIdentifier.idValue, [...new Set([compact, normalized])]),
+      ),
+    )
+    .limit(40);
+  return [...new Set(rows.map((row) => row.patientId))];
 };
 
 /**
@@ -413,44 +422,64 @@ export const recordDuplicateCandidates = async (
   return inserted.length;
 };
 
-/** Nightly sweep: re-checks recently registered or changed patients against the whole registry. */
+/** Re-checks every qualifying patient in the requested sweep window using bounded keyset pages. */
 export const sweepDuplicateCandidates = async (options: { sinceHours?: number; limit?: number } = {}) => {
   const sinceHours = options.sinceHours ?? 25;
-  const recent = await db
-    .select()
-    .from(patient)
-    .where(
-      and(
-        inArray(patient.status, ["ACTIVE", "INACTIVE"]),
-        eq(patient.isUnidentified, false),
-        sql`${patient.updatedAt} >= now() - make_interval(hours => ${sinceHours})`,
-      ),
-    )
-    .orderBy(desc(patient.updatedAt))
-    .limit(options.limit ?? 500);
-
+  const pageSize = Math.max(1, options.limit ?? 500);
+  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const sweepStartedAt = new Date();
   const config = getPatientConfig();
+  let scanned = 0;
   let queued = 0;
-  for (const row of recent) {
-    const identifiers = await db
-      .select({ idType: patientIdentifier.idType, idValue: patientIdentifier.idValue })
-      .from(patientIdentifier)
-      .where(and(eq(patientIdentifier.patientId, row.id), eq(patientIdentifier.status, "ACTIVE")));
-    const candidates = await findDuplicateCandidates(
-      {
-        firstName: row.firstName,
-        middleName: row.middleName,
-        lastName: row.lastName,
-        dateOfBirth: row.dateOfBirth,
-        phone: row.phoneE164,
-        identifiers: identifiers as Array<{ idType: IdentifierType; idValue: string }>,
-        excludePatientId: row.id,
-      },
-      config,
-    );
-    queued += await recordDuplicateCandidates(row.id, candidates, "SWEEP");
+  let cursor: { updatedAt: Date; id: string } | null = null;
+  while (true) {
+    const page: Patient[] = await db
+      .select()
+      .from(patient)
+      .where(
+        and(
+          inArray(patient.status, ["ACTIVE", "INACTIVE"]),
+          eq(patient.isUnidentified, false),
+          gte(patient.updatedAt, since),
+          lte(patient.updatedAt, sweepStartedAt),
+          cursor
+            ? or(
+                gt(patient.updatedAt, cursor.updatedAt),
+                and(eq(patient.updatedAt, cursor.updatedAt), gt(patient.id, cursor.id)),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(patient.updatedAt), asc(patient.id))
+      .limit(pageSize);
+    if (page.length === 0) break;
+
+    for (const row of page) {
+      const identifiers = await db
+        .select({ idType: patientIdentifier.idType, idValue: patientIdentifier.idValue })
+        .from(patientIdentifier)
+        .where(and(eq(patientIdentifier.patientId, row.id), eq(patientIdentifier.status, "ACTIVE")));
+      const candidates = await findDuplicateCandidates(
+        {
+          firstName: row.firstName,
+          middleName: row.middleName,
+          lastName: row.lastName,
+          dateOfBirth: row.dateOfBirth,
+          phone: row.phoneE164,
+          identifiers: identifiers as Array<{ idType: IdentifierType; idValue: string }>,
+          excludePatientId: row.id,
+        },
+        config,
+      );
+      queued += await recordDuplicateCandidates(row.id, candidates, "SWEEP");
+      scanned += 1;
+    }
+
+    const last: Patient | undefined = page[page.length - 1];
+    if (!last || page.length < pageSize) break;
+    cursor = { updatedAt: last.updatedAt, id: last.id };
   }
-  return { scanned: recent.length, queued };
+  return { scanned, queued };
 };
 
 /* ------------------------------------------------------------------ */
@@ -908,7 +937,13 @@ export const processMergeTasks = async (mergeLogId: string) => {
           completedAt: new Date(),
           attempts,
         })
-        .where(eq(patientMergeTask.id, task.id));
+        .where(
+          and(
+            eq(patientMergeTask.id, task.id),
+            eq(patientMergeTask.status, task.status),
+            eq(patientMergeTask.attempts, task.attempts),
+          ),
+        );
     } catch (error) {
       const exhausted = attempts >= MAX_MERGE_TASK_ATTEMPTS;
       const message = databaseErrorInfo(error)?.message || (error instanceof Error ? error.message : String(error));
@@ -922,7 +957,13 @@ export const processMergeTasks = async (mergeLogId: string) => {
       await db
         .update(patientMergeTask)
         .set({ status: exhausted ? "MANUAL_REVIEW" : "FAILED", lastError: message.slice(0, 500), attempts })
-        .where(eq(patientMergeTask.id, task.id));
+        .where(
+          and(
+            eq(patientMergeTask.id, task.id),
+            eq(patientMergeTask.status, task.status),
+            eq(patientMergeTask.attempts, task.attempts),
+          ),
+        );
     }
   }
 

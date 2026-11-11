@@ -50,8 +50,8 @@ const clientIp = (req: Request) => {
 };
 
 /**
- * Writes a patient-scoped audit entry. Failures are logged rather than thrown so that an audit
- * outage cannot leave a completed change looking as if it had failed.
+ * Writes a patient-scoped audit entry. Failures are logged by default so an audit outage cannot
+ * make a completed mutation appear to have failed; callers may require a durable write for reads.
  */
 export const writePatientAudit = async (
   req: Request,
@@ -65,6 +65,7 @@ export const writePatientAudit = async (
     after?: unknown;
     orgUnitId?: string | null;
   },
+  options: { required?: boolean } = {},
 ) => {
   try {
     await db.insert(auditLog).values({
@@ -89,6 +90,7 @@ export const writePatientAudit = async (
       requestId: req.requestId,
       error,
     });
+    if (options.required) throw error;
   }
 };
 
@@ -184,12 +186,16 @@ export const assertChartAccess = async (
     });
   }
 
-  await writePatientAudit(req, {
-    action: "READ_RESTRICTED",
-    entityType,
-    entityId: patient.id,
-    patientId: patient.id,
-    reason: `Break-glass: ${grant.reason}`,
-  });
+  await writePatientAudit(
+    req,
+    {
+      action: "READ_RESTRICTED",
+      entityType,
+      entityId: patient.id,
+      patientId: patient.id,
+      reason: `Break-glass: ${grant.reason}`,
+    },
+    { required: true },
+  );
   return { restriction, grant };
 };

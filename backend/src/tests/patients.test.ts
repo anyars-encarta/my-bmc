@@ -535,6 +535,21 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     const listed = await api(registrar, "GET", `${base}/identifiers`);
     assert.equal(listed.body.data[0].verifiedByName, registrar.name);
     assert.equal("verifiedBy" in listed.body.data[0], false);
+    const alternateIdentifier = await api(registrar, "POST", `${base}/identifiers`, {
+      idType: "NHIS",
+      idValue: String(Date.now() - 1).slice(-8),
+    });
+    assert.equal(alternateIdentifier.status, 201);
+    await api(registrar, "PATCH", `${base}/identifiers/${identifier.body.data.id}`, { status: "INACTIVE" });
+    const blockedReactivation = await api(registrar, "PATCH", `${base}/identifiers/${identifier.body.data.id}`, {
+      status: "ACTIVE",
+    });
+    assert.equal(blockedReactivation.body.code, "PATIENT_IDENTIFIER_IN_USE");
+    await api(registrar, "PATCH", `${base}/identifiers/${alternateIdentifier.body.data.id}`, { status: "INACTIVE" });
+    const reactivated = await api(registrar, "PATCH", `${base}/identifiers/${identifier.body.data.id}`, {
+      status: "ACTIVE",
+    });
+    assert.equal(reactivated.body.data.status, "ACTIVE");
 
     assert.equal((await api(registrar, "POST", `${base}/allergies`, { category: "DRUG", substance: "Penicillin" })).status, 403);
     const allergy = await api(nurse, "POST", `${base}/allergies`, { category: "DRUG", substance: "Penicillin", severity: "SEVERE", reaction: "Anaphylaxis" });
@@ -549,7 +564,18 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     assert.equal(condition.body.data.icd10Code, "J45");
     assert.equal((await api(doctor, "GET", `${base}/conditions`)).body.data[0].recordedByName, doctor.name);
 
-    const photo = { photoUrl: "https://res.cloudinary.com/demo/image/upload/patient.jpg", photoPublicId: null };
+    const photoPublicId = `patients/${child.id}/photo`;
+    const photo = {
+      photoUrl: `https://res.cloudinary.com/demo/image/upload/${photoPublicId}.jpg`,
+      photoPublicId,
+    };
+    const unownedPhoto = {
+      photoUrl: "https://res.cloudinary.com/demo/image/upload/patients/another-patient/photo.jpg",
+      photoPublicId: "patients/another-patient/photo",
+    };
+    const ownershipRefused = await api(registrar, "POST", `${base}/photo`, unownedPhoto);
+    assert.equal(ownershipRefused.status, 422);
+    assert.equal(ownershipRefused.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
     const refused = await api(registrar, "POST", `${base}/photo`, photo);
     assert.equal(refused.status, 403);
     assert.equal(refused.body.code, "CONSENT_REQUIRED");

@@ -6,6 +6,10 @@ import { buildPatientCardPdf, buildWristbandPdf, type PatientPrintData } from ".
 
 const printData: PatientPrintData = {
   facilityName: "Bolgatanga Medical Centre",
+  facilityAddress: "Hospital Road, Bolgatanga",
+  facilityTelephone: "+233 38 123 4567",
+  facilityEmail: "info@example.org",
+  facilityGpsDigitalAddress: "UB-123-4567",
   firstName: "Kwame",
   middleName: "Yaw",
   lastName: "Mensah",
@@ -78,6 +82,31 @@ test("the patient card PDF is CR80 sized and handles estimated ages", () => {
   assert.ok(text.includes(`<${hex("Blood group O+")}>`));
 });
 
+test("the patient card back includes facility return details", () => {
+  const text = assertValidPdf(buildPatientCardPdf(printData), "242.646", "153.071");
+  assert.equal((text.match(/\/Type \/Page\b/g) ?? []).length, 2);
+  assert.ok(text.includes(`<${hex("IF FOUND, PLEASE RETURN TO")}>`));
+  assert.ok(text.includes(`<${hex("Address: Hospital Road, Bolgatanga")}>`));
+  assert.ok(text.includes(`<${hex("Tel: +233 38 123 4567")}>`));
+  assert.ok(text.includes(`<${hex("Email: info@example.org")}>`));
+  assert.ok(text.includes(`<${hex("Digital address: UB-123-4567")}>`));
+});
+
+test("the patient card embeds the facility logo to the left of its header text", () => {
+  const text = assertValidPdf(
+    buildPatientCardPdf({
+      ...printData,
+      logoImage: { bytes: Buffer.from("jpeg-logo"), width: 512, height: 512 },
+    }),
+    "242.646",
+    "153.071",
+  );
+  assert.ok(text.includes("/Subtype /Image"));
+  assert.ok(text.includes("/Im1 Do Q"));
+  assert.ok(text.includes("jpeg-logo"));
+  assert.ok(text.indexOf("/Im1 Do Q") < text.indexOf(`<${hex("Bolgatanga Medical Centre")}>`));
+});
+
 test("long names are shortened instead of overflowing the label", () => {
   const text = buildPatientCardPdf({
     ...printData,
@@ -87,4 +116,15 @@ test("long names are shortened instead of overflowing the label", () => {
   assert.ok(text.includes(hex("MENSAH-AGYEMANG")));
   assert.ok(text.includes(`${hex("...")}>`));
   assert.equal(text.includes(hex("Nana Kwabena Ofori")), false);
+});
+
+test("patient names with Polish and Chinese characters use the Unicode font on wristbands and cards", () => {
+  const name = { ...printData, firstName: "Łukasz O’Neil", lastName: "张三" };
+  for (const pdf of [buildWristbandPdf(name), buildPatientCardPdf(name)]) {
+    const text = pdf.toString("latin1");
+    assert.ok(text.includes("/Encoding /UniGB-UCS2-H"));
+    assert.ok(text.includes("<0141"), "Ł is encoded as UTF-16BE");
+    assert.ok(text.includes("<5f204e09"), "Chinese characters are encoded as UTF-16BE");
+    assert.ok(text.includes("204f92"), "curly apostrophes use their WinAnsi code");
+  }
 });

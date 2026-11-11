@@ -241,6 +241,15 @@ function RegistrationWizard({ mode }: { mode: Mode }) {
   /* ---------------- Submit ---------------- */
 
   const submit = async (acknowledge: boolean) => {
+    const invalidStep = [0, 1, 2]
+      .map((index) => ({ index, problems: stepProblems(index) }))
+      .find((entry) => entry.problems.length > 0);
+    if (invalidStep) {
+      setProblems(invalidStep.problems);
+      setStep(invalidStep.index);
+      return;
+    }
+
     setSaving(true);
     setErrors({});
     setProblems([]);

@@ -1,18 +1,19 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
 import { patient, patientDuplicateCandidate, patientMergeLog, patientMergeTask } from "../../db/schema/index.js";
-import { conflict, notFound, validationError } from "../../lib/errors.js";
+import { ApiError, conflict, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
-import { assertChartAccess, patientActor, writePatientAudit } from "../../lib/patientAccess.js";
+import { assertChartAccess, patientActor, type PatientActor, writePatientAudit } from "../../lib/patientAccess.js";
 import {
   loadUserNames,
   parseBody,
   parseId,
   presentPatientSummaries,
+  resolvePatientUnitScope,
   serializeContextFor,
 } from "../../lib/patientHttp.js";
 import {
@@ -26,7 +27,12 @@ import {
   sweepDuplicateCandidates,
   type MergeableField,
 } from "../../lib/patientRegistry.js";
-import { PATIENT_MERGE_ROLES, serializePatientDetail } from "../../lib/patientRules.js";
+import {
+  maskPatientSummary,
+  PATIENT_MERGE_ROLES,
+  serializePatientDetail,
+  serializePatientSummary,
+} from "../../lib/patientRules.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
 const router = Router();
@@ -142,6 +148,28 @@ router.post("/duplicates/:candidateId/dismiss", requireAnyRole(PATIENT_MERGE_ROL
   try {
     const actor = patientActor(req);
     const candidateId = parseId(req.params.candidateId, "candidateId");
+    const [candidate] = await db
+      .select()
+      .from(patientDuplicateCandidate)
+      .where(and(eq(patientDuplicateCandidate.id, candidateId), eq(patientDuplicateCandidate.status, "PENDING")))
+      .limit(1);
+    if (!candidate) {
+      throw conflict("This pair has already been reviewed.", "PATIENT_DUPLICATE_ALREADY_REVIEWED");
+    }
+
+    const [patientA, patientB, unitIds] = await Promise.all([
+      loadPatient(candidate.patientAId),
+      loadPatient(candidate.patientBId),
+      resolvePatientUnitScope(actor),
+    ]);
+    const isOutOfScope = (record: Awaited<ReturnType<typeof loadPatient>>) =>
+      record && unitIds !== null && (!record.registeredUnitId || !unitIds.includes(record.registeredUnitId));
+    if (!patientA || !patientB || isOutOfScope(patientA) || isOutOfScope(patientB)) {
+      throw notFound("Patient not found.", "PATIENT_NOT_FOUND");
+    }
+    await assertChartAccess(req, actor, patientA, "patient_duplicate_candidate");
+    await assertChartAccess(req, actor, patientB, "patient_duplicate_candidate");
+
     const [updated] = await db
       .update(patientDuplicateCandidate)
       .set({ status: "DISMISSED", reviewedBy: actor.userId, reviewedAt: new Date() })
@@ -235,47 +263,77 @@ router.post("/merge", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, next
 /* Merge task tracking (/merge-tasks)                                  */
 /* ------------------------------------------------------------------ */
 
-const loadMergeSummaries = async (logs: Array<typeof patientMergeLog.$inferSelect>) => {
+/** Loads merge history with both patient labels masked when chart or unit access is unavailable. */
+const loadMergeSummaries = async (
+  req: Request,
+  actor: PatientActor,
+  logs: Array<typeof patientMergeLog.$inferSelect>,
+) => {
   if (logs.length === 0) return [];
   const patientIds = [...new Set(logs.flatMap((log) => [log.survivorId, log.mergedId]))];
-  const [tasks, patients, names] = await Promise.all([
+  const [tasks, patients, names, unitIds, { todayIso }] = await Promise.all([
     db
       .select()
       .from(patientMergeTask)
       .where(inArray(patientMergeTask.mergeLogId, logs.map((log) => log.id))),
-    db
-      .select({ id: patient.id, mrn: patient.mrn, firstName: patient.firstName, lastName: patient.lastName })
-      .from(patient)
-      .where(inArray(patient.id, patientIds)),
+    db.select().from(patient).where(inArray(patient.id, patientIds)),
     loadUserNames(logs.map((log) => log.mergedBy)),
+    resolvePatientUnitScope(actor),
+    facilityToday(),
   ]);
-  const patientsById = new Map(patients.map((row) => [row.id, row]));
+  const summariesById = new Map<string, { mrn: string | null; fullName: string; masked: boolean }>();
+  await Promise.all(
+    patients.map(async (row) => {
+      if (unitIds !== null && (!row.registeredUnitId || !unitIds.includes(row.registeredUnitId))) {
+        const summary = maskPatientSummary(row);
+        summariesById.set(row.id, { mrn: summary.mrn, fullName: summary.fullName, masked: true });
+        return;
+      }
+      try {
+        await assertChartAccess(req, actor, row, "patient_merge");
+        const summary = serializePatientSummary(row, serializeContextFor(actor, todayIso));
+        summariesById.set(row.id, { mrn: summary.mrn, fullName: summary.fullName, masked: false });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "BREAK_GLASS_REQUIRED") {
+          const summary = maskPatientSummary(row);
+          summariesById.set(row.id, { mrn: summary.mrn, fullName: summary.fullName, masked: true });
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
   const label = (id: string) => {
-    const row = patientsById.get(id);
-    return row ? { mrn: row.mrn, name: `${row.firstName} ${row.lastName}` } : null;
+    const summary = summariesById.get(id);
+    return summary
+      ? { mrn: summary.masked ? null : summary.mrn, name: summary.masked ? "Restricted record" : summary.fullName }
+      : null;
   };
 
   return logs.map((log) => {
     const ownTasks = tasks
       .filter((task) => task.mergeLogId === log.id)
       .sort((left, right) => left.module.localeCompare(right.module));
+    const survivor = summariesById.get(log.survivorId);
+    const merged = summariesById.get(log.mergedId);
+    const detailsRestricted = !survivor || survivor.masked || !merged || merged.masked;
     return {
       id: log.id,
       mergedAt: log.mergedAt,
       mergedByName: names.get(log.mergedBy) ?? null,
-      reason: log.reason,
+      reason: detailsRestricted ? "Restricted merge details" : log.reason,
       survivorId: log.survivorId,
       survivor: label(log.survivorId),
       merged: label(log.mergedId),
       status: summarizeMergeStatus(ownTasks),
-      tasks: ownTasks.map(presentTask),
+      tasks: ownTasks.map((task) => (detailsRestricted ? { ...presentTask(task), note: null } : presentTask(task))),
     };
   });
 };
 
 mergeTaskRoutes.get("/", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, next) => {
   try {
-    patientActor(req);
+    const actor = patientActor(req);
     const query = parseListQuery(req, { sortable: ["mergedAt"], filterable: [], defaultSort: "-mergedAt", maxLimit: 50 });
     const [logs, totals] = await Promise.all([
       db
@@ -286,7 +344,7 @@ mergeTaskRoutes.get("/", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, n
         .offset(query.offset),
       db.select({ total: sql<number>`count(*)`.mapWith(Number) }).from(patientMergeLog),
     ]);
-    res.json(toPageResponse(await loadMergeSummaries(logs), query, totals[0]?.total ?? 0));
+    res.json(toPageResponse(await loadMergeSummaries(req, actor, logs), query, totals[0]?.total ?? 0));
   } catch (error) {
     next(error);
   }
@@ -294,10 +352,10 @@ mergeTaskRoutes.get("/", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, n
 
 mergeTaskRoutes.get("/:id", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, next) => {
   try {
-    patientActor(req);
+    const actor = patientActor(req);
     const id = parseId(req.params.id);
     const logs = await db.select().from(patientMergeLog).where(eq(patientMergeLog.id, id)).limit(1);
-    const [summary] = await loadMergeSummaries(logs);
+    const [summary] = await loadMergeSummaries(req, actor, logs);
     if (!summary) throw notFound("Merge not found.", "PATIENT_MERGE_NOT_FOUND");
     res.json({ data: summary });
   } catch (error) {
@@ -307,7 +365,7 @@ mergeTaskRoutes.get("/:id", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res
 
 mergeTaskRoutes.post("/:id/retry", requireAnyRole(PATIENT_MERGE_ROLES), async (req, res, next) => {
   try {
-    patientActor(req);
+    const actor = patientActor(req);
     const id = parseId(req.params.id);
     const logs = await db.select().from(patientMergeLog).where(eq(patientMergeLog.id, id)).limit(1);
     const log = logs[0];
@@ -327,7 +385,7 @@ mergeTaskRoutes.post("/:id/retry", requireAnyRole(PATIENT_MERGE_ROLES), async (r
       reason: "Merge re-pointing retried",
     });
 
-    const [summary] = await loadMergeSummaries(logs);
+    const [summary] = await loadMergeSummaries(req, actor, logs);
     res.json({ data: summary });
   } catch (error) {
     next(error);

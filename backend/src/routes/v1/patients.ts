@@ -18,8 +18,13 @@ import {
 } from "../../db/schema/index.js";
 import { conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { parseListQuery, toPageResponse } from "../../lib/listQuery.js";
-import { patientActor, writePatientAudit, type PatientActor } from "../../lib/patientAccess.js";
-import { buildPatientCardPdf, buildWristbandPdf, type PatientPrintData } from "../../lib/patientDocuments.js";
+import { assertChartAccess, patientActor, writePatientAudit, type PatientActor } from "../../lib/patientAccess.js";
+import {
+  buildPatientCardPdf,
+  buildWristbandPdf,
+  loadFacilityLogo,
+  type PatientPrintData,
+} from "../../lib/patientDocuments.js";
 import {
   loadPatientContext,
   loadStaffNames,
@@ -298,6 +303,21 @@ const photoSchema = z.object({
     .nullish()
     .transform((value) => value ?? null),
 });
+
+/** Extracts the Cloudinary public ID from an uploaded image URL. */
+const publicIdFromCloudinaryUrl = (value: string) => {
+  const path = new URL(value).pathname;
+  const uploadIndex = path.indexOf("/image/upload/");
+  if (uploadIndex < 0) return null;
+  const segments = path.slice(uploadIndex + "/image/upload/".length).split("/");
+  const versionIndex = segments.findIndex((segment) => /^v\d+$/.test(segment));
+  if (versionIndex >= 0) segments.splice(0, versionIndex + 1);
+  else if (segments[0]?.startsWith("s--")) segments.shift();
+  const last = segments.pop();
+  if (!last) return null;
+  const file = last.replace(/\.[^.]+$/, "");
+  return [...segments, file].join("/");
+};
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -907,9 +927,13 @@ router.post("/:id/identify", requireAnyRole(PATIENT_IDENTIFY_ROLES), async (req,
     if ((req.body as { mergeIntoPatientId?: unknown } | undefined)?.mergeIntoPatientId) {
       const payload = parseBody(identifyByMergeSchema, req.body);
       const survivor = await loadPatient(payload.mergeIntoPatientId);
-      if (!survivor || survivor.status === "MERGED") {
+      const unitIds = await resolvePatientUnitScope(actor);
+      const outOfScope =
+        survivor && unitIds !== null && (!survivor.registeredUnitId || !unitIds.includes(survivor.registeredUnitId));
+      if (!survivor || outOfScope || survivor.status === "MERGED") {
         throw notFound("The existing patient record was not found.", "PATIENT_NOT_FOUND");
       }
+      await assertChartAccess(req, actor, survivor, "patient_merge");
       const result = await mergePatients({
         survivor,
         merged: current,
@@ -1077,7 +1101,24 @@ router.patch(
       const values: Partial<typeof patientIdentifier.$inferInsert> = {};
       if (payload.issuer !== undefined) values.issuer = payload.issuer;
       if (payload.validTo !== undefined) values.validTo = payload.validTo;
-      if (payload.status !== undefined) values.status = payload.status;
+      if (payload.status !== undefined) {
+        if (payload.status === "ACTIVE" && current.status !== "ACTIVE") {
+          const [activeDuplicate] = await db
+            .select({ id: patientIdentifier.id })
+            .from(patientIdentifier)
+            .where(
+              and(
+                eq(patientIdentifier.patientId, context.patient.id),
+                eq(patientIdentifier.idType, current.idType),
+                eq(patientIdentifier.status, "ACTIVE"),
+                ne(patientIdentifier.id, current.id),
+              ),
+            )
+            .limit(1);
+          if (activeDuplicate) throw identifierInUse();
+        }
+        values.status = payload.status;
+      }
       if (payload.verified !== undefined && payload.verified !== current.verified) {
         values.verified = payload.verified;
         values.verifiedAt = payload.verified ? new Date() : null;
@@ -1545,8 +1586,17 @@ router.post("/:id/photo", requireAnyRole(PATIENT_PHOTO_ROLES), async (req, res, 
     const context = await loadPatientContext(req, { entityType: "patient_photo" });
     const payload = parseBody(photoSchema, req.body);
     const current = context.patient;
+    const patientPhotoPrefix = `patients/${current.id}/`;
 
     if (payload.photoUrl) {
+      if (
+        !payload.photoPublicId?.startsWith(patientPhotoPrefix) ||
+        publicIdFromCloudinaryUrl(payload.photoUrl) !== payload.photoPublicId
+      ) {
+        throw validationError("Upload the photo for this patient before saving it.", "PATIENT_PHOTO_OWNERSHIP_INVALID", {
+          fieldErrors: { photoUrl: ["The uploaded photo does not belong to this patient."] },
+        });
+      }
       const [latest] = await db
         .select({ status: consent.status })
         .from(consent)
@@ -1582,7 +1632,12 @@ router.post("/:id/photo", requireAnyRole(PATIENT_PHOTO_ROLES), async (req, res, 
     }
 
     // Only images in the patient folder are ever removed from storage on behalf of this route.
-    if (current.photoPublicId?.startsWith("patients/") && current.photoPublicId !== updated.photoPublicId) {
+    if (
+      current.photoPublicId?.startsWith(patientPhotoPrefix) &&
+      current.photoUrl &&
+      publicIdFromCloudinaryUrl(current.photoUrl) === current.photoPublicId &&
+      current.photoPublicId !== updated.photoPublicId
+    ) {
       try {
         const { cloudinary } = await import("../../lib/cloudinary.js");
         await cloudinary.uploader.destroy(current.photoPublicId);
@@ -1607,14 +1662,29 @@ router.post("/:id/photo", requireAnyRole(PATIENT_PHOTO_ROLES), async (req, res, 
   }
 });
 
-const loadPrintData = async (context: PatientContext): Promise<PatientPrintData> => {
+const loadPrintData = async (context: PatientContext, includeLogo: boolean): Promise<PatientPrintData> => {
   const [[facility], allergies] = await Promise.all([
-    db.select({ facilityName: facilitySetup.facilityName }).from(facilitySetup).limit(1),
+    db
+      .select({
+        facilityName: facilitySetup.facilityName,
+        logoUrl: facilitySetup.logoUrl,
+        address: facilitySetup.address,
+        telephone: facilitySetup.telephone,
+        email: facilitySetup.email,
+        gpsDigitalAddress: facilitySetup.gpsDigitalAddress,
+      })
+      .from(facilitySetup)
+      .limit(1),
     loadActiveAllergies(context.patient.id),
   ]);
   const current = context.patient;
   return {
     facilityName: facility?.facilityName ?? "Hospital",
+    facilityAddress: facility?.address ?? null,
+    facilityTelephone: facility?.telephone ?? null,
+    facilityEmail: facility?.email ?? null,
+    facilityGpsDigitalAddress: facility?.gpsDigitalAddress ?? null,
+    logoImage: includeLogo ? await loadFacilityLogo(facility?.logoUrl) : null,
     firstName: current.firstName,
     middleName: current.middleName,
     lastName: current.lastName,
@@ -1636,7 +1706,7 @@ const printRoute = (kind: "wristband" | "card", build: (data: PatientPrintData) 
   router.get(`/:id/${kind}`, requireAnyRole(PATIENT_PRINT_ROLES), async (req, res, next) => {
     try {
       const context = await loadPatientContext(req, { entityType: `patient_${kind}` });
-      const pdf = build(await loadPrintData(context));
+      const pdf = build(await loadPrintData(context, kind === "card"));
       await writePatientAudit(req, {
         action: "PRINT",
         entityType: `patient_${kind}`,

@@ -580,7 +580,7 @@ export const attendanceCorrection = pgTable("attendance_correction", {
   reason: text("reason").notNull(),
   requestedBy: text("requested_by").notNull(),
   requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow().notNull(),
-  status: varchar("status", { length: 10 }).default('PENDING').notNull(),
+  status: varchar("status", { length: 20 }).default('PENDING').notNull(),
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   appliedAt: timestamp("applied_at", { withTimezone: true }),

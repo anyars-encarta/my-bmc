@@ -29,8 +29,14 @@ const toLocalInput = (iso: string | null) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
+/** Scopes edit-form state to the patient ID in the current route. */
 export const PatientEdit = () => {
   const { id = "" } = useParams();
+  return <PatientEditForm key={id} id={id} />;
+};
+
+/** Loads and saves demographics for one patient record. */
+const PatientEditForm = ({ id }: { id: string }) => {
   const navigate = useNavigate();
   const references = usePatientReferences();
   const [patient, setPatient] = useState<PatientChart | null>(null);

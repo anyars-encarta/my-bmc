@@ -1,5 +1,5 @@
 import { Lock, Pencil, ShieldAlert, UserRoundSearch } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { BreakGlassDialog } from "@/components/clinical/BreakGlassDialog";
@@ -47,6 +47,7 @@ type ChartState =
 const isMergedPointer = (data: PatientChart | PatientMergedPointer): data is PatientMergedPointer =>
   data.status === "MERGED" && !("fullName" in data);
 
+/** Displays the patient chart while ignoring responses from superseded route requests. */
 export const PatientShow = () => {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -54,39 +55,54 @@ export const PatientShow = () => {
   const { can } = useRegistryAccess();
   const references = usePatientReferences();
   const [state, setState] = useState<ChartState>({ kind: "loading" });
+  const requestIdentity = useRef(0);
+  const requestPatientId = useRef(id);
   const [breakGlassOpen, setBreakGlassOpen] = useState(false);
   const [tab, setTab] = useState("summary");
   const mergedFromMrn = (location.state as { mergedFromMrn?: string } | null)?.mergedFromMrn;
 
   const load = useCallback(async () => {
+    const identity = ++requestIdentity.current;
+    const isCurrent = () => requestIdentity.current === identity && requestPatientId.current === id;
     try {
       const result = await registryRequest<PatientChart | PatientMergedPointer>(`patients/${id}`);
+      if (!isCurrent()) return;
       if (isMergedPointer(result.data)) {
         if (result.data.mergedIntoId) {
+          if (!isCurrent()) return;
           navigate(`/patients/show/${result.data.mergedIntoId}`, {
             replace: true,
             state: { mergedFromMrn: result.data.mrn },
           });
         } else {
+          if (!isCurrent()) return;
           setState({ kind: "error", message: "This record was merged and its surviving record could not be found." });
         }
         return;
       }
+      if (!isCurrent()) return;
       setState({ kind: "ready", patient: result.data });
     } catch (error) {
+      if (!isCurrent()) return;
       if (error instanceof RegistryError && error.code === "BREAK_GLASS_REQUIRED") {
         const details = error.details as { restriction?: string } | undefined;
+        if (!isCurrent()) return;
         setState({ kind: "restricted", restriction: details?.restriction ?? null });
       } else {
+        if (!isCurrent()) return;
         setState({ kind: "error", message: errorMessage(error, "The patient could not be loaded.") });
       }
     }
   }, [id, navigate]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    requestPatientId.current = id;
     setState({ kind: "loading" });
     setTab("summary");
     void load();
+    return () => {
+      requestIdentity.current += 1;
+    };
   }, [load]);
 
   if (state.kind === "loading") {
@@ -224,12 +240,28 @@ export const PatientShow = () => {
           <SummaryTab
             patient={patient}
             canPhoto={writable(PATIENT_PHOTO_ROLES)}
-            onPhotoSaved={(result) =>
-              setState({
-                kind: "ready",
-                patient: { ...patient, photoUrl: result.photoUrl, photoPublicId: result.photoPublicId, version: result.version },
-              })
-            }
+            onPhotoSaved={(result) => {
+              const savedPatientId = patient.id;
+              if (id !== savedPatientId) return;
+              setState((current) => {
+                if (
+                  current.kind !== "ready" ||
+                  current.patient.id !== savedPatientId ||
+                  result.version < (current.patient.version ?? 0)
+                ) {
+                  return current;
+                }
+                return {
+                  kind: "ready",
+                  patient: {
+                    ...current.patient,
+                    photoUrl: result.photoUrl,
+                    photoPublicId: result.photoPublicId,
+                    version: result.version,
+                  },
+                };
+              });
+            }}
           />
         </TabsContent>
         <TabsContent value="timeline">

@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useId, useMemo, type ReactNode } from "react";
+import { useId, useMemo, useRef, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import UploadWidget from "@/components/upload-widget";
@@ -504,7 +504,7 @@ export function ContactsEditor({
   );
 }
 
-/** Captures (camera or upload) and saves the patient photo. Saving needs photography consent. */
+/** Captures and serially saves patient photo changes; saving needs photography consent. */
 export function PatientPhotoField({
   patientId,
   photoUrl,
@@ -520,20 +520,22 @@ export function PatientPhotoField({
     () => (photoUrl ? { url: photoUrl, publicId: photoPublicId ?? null } : null),
     [photoUrl, photoPublicId],
   );
+  const saveQueue = useRef(Promise.resolve());
 
-  const save = async (next: UploadWidgetValue | null) => {
-    if ((next?.url ?? null) === (photoUrl ?? null)) return;
-    try {
-      const result = await registryRequest<PatientPhotoResult>(`patients/${patientId}/photo`, {
-        method: "POST",
-        body: { photoUrl: next?.url ?? null, photoPublicId: next?.publicId ?? null },
-      });
-      onSaved(result.data);
-      toast.success(next ? "Patient photo saved." : "Patient photo removed.");
-    } catch (error) {
-      toast.error(errorMessage(error, "The photo could not be saved."));
-    }
+  const save = (next: UploadWidgetValue | null) => {
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        const result = await registryRequest<PatientPhotoResult>(`patients/${patientId}/photo`, {
+          method: "POST",
+          body: { photoUrl: next?.url ?? null, photoPublicId: next?.publicId ?? null },
+        });
+        onSaved(result.data);
+        toast.success(next ? "Patient photo saved." : "Patient photo removed.");
+      } catch (error) {
+        toast.error(errorMessage(error, "The photo could not be saved."));
+      }
+    });
   };
 
-  return <UploadWidget value={value} onChange={(next) => void save(next)} folder="patients" />;
+  return <UploadWidget value={value} onChange={save} folder={`patients/${patientId}`} />;
 }

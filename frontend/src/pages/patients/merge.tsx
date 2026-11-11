@@ -62,12 +62,16 @@ const fieldText = (patient: PatientDetail, field: MergeableField) => {
   return value;
 };
 
+/** Tests whether the source value is available for a merge choice, independent of display text. */
+const hasMergeValue = (patient: PatientDetail, field: MergeableField) =>
+  field === "photoUrl" ? Boolean(patient.photoUrl) : Boolean(fieldText(patient, field));
+
 function PatientCell({ patient }: { patient: PatientSummary }) {
   if (patient.masked) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+      <Link to={`/patients/show/${patient.id}`} className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-2 hover:underline">
         <Lock className="size-4" aria-hidden="true" /> Restricted record
-      </span>
+      </Link>
     );
   }
   return (
@@ -141,7 +145,7 @@ function MergeWorkspace({
     setPicks(
       new Set(
         preview.mergeableFields.filter(
-          (field) => !fieldText(preview.survivor, field) && Boolean(fieldText(preview.merged, field)),
+          (field) => !hasMergeValue(preview.survivor, field) && hasMergeValue(preview.merged, field),
         ),
       ),
     );
@@ -269,7 +273,11 @@ function MergeWorkspace({
                   {preview.mergeableFields.map((field) => {
                     const left = fieldText(preview.survivor, field);
                     const right = fieldText(preview.merged, field);
-                    const selectable = left !== right && Boolean(right);
+                    const valuesDiffer =
+                      field === "photoUrl"
+                        ? preview.survivor.photoUrl !== preview.merged.photoUrl
+                        : left !== right;
+                    const selectable = valuesDiffer && hasMergeValue(preview.merged, field);
                     const choice = picks.has(field) ? "merged" : "survivor";
                     return (
                       <TableRow key={field}>
@@ -364,6 +372,7 @@ export const PatientDuplicatesPage = () => {
   const [tab, setTab] = useState("queue");
   const [pair, setPair] = useState<Pair | null>(null);
   const [page, setPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [keep, setKeep] = useState<PatientSummary | null>(null);
   const [duplicate, setDuplicate] = useState<PatientSummary | null>(null);
@@ -372,10 +381,14 @@ export const PatientDuplicatesPage = () => {
     () => registryRequest<DuplicatePair[]>(withQuery("patients/duplicates", { page, limit: 20 })),
     [page],
   );
-  const history = useLoader(() => registryRequest<MergeSummary[]>(withQuery("merge-tasks", { limit: 25 })), []);
+  const history = useLoader(
+    () => registryRequest<MergeSummary[]>(withQuery("merge-tasks", { page: historyPage, limit: 25 })),
+    [historyPage],
+  );
   const pairs = queue.data?.data ?? [];
   const pagination = queue.data?.pagination;
   const merges = history.data?.data ?? [];
+  const historyPagination = history.data?.pagination;
 
   const refresh = () => {
     queue.reload();
@@ -503,7 +516,7 @@ export const PatientDuplicatesPage = () => {
                   </TableBody>
                 </Table>
               ) : null}
-              {pagination && pagination.totalPages > 1 ? (
+              {pagination && (pagination.totalPages > 1 || page > 1) ? (
                 <div className="flex items-center justify-end gap-3 text-sm">
                   <span className="text-muted-foreground">
                     Page {pagination.page} of {pagination.totalPages}
@@ -589,6 +602,29 @@ export const PatientDuplicatesPage = () => {
                   </div>
                 </details>
               ))}
+              {historyPagination && historyPagination.totalPages > 1 ? (
+                <div className="flex items-center justify-end gap-3 text-sm">
+                  <span className="text-muted-foreground">
+                    Page {historyPagination.page} of {historyPagination.totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={historyPage <= 1}
+                    onClick={() => setHistoryPage(historyPage - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!historyPagination.hasMore}
+                    onClick={() => setHistoryPage(historyPage + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

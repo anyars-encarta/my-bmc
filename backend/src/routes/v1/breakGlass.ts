@@ -9,6 +9,7 @@ import {
   notification,
   orgUnit,
   patient,
+  publicHoliday,
   staff,
   user,
   type BreakGlassAccess,
@@ -23,6 +24,7 @@ import {
   writePatientAudit,
   type PatientRestriction,
 } from "../../lib/patientAccess.js";
+import { addFacilityWorkingDays, facilityDate } from "../../lib/facilityCalendar.js";
 import { loadUserNames, parseBody, parseId, resolvePatientUnitScope } from "../../lib/patientHttp.js";
 import { loadPatient } from "../../lib/patientRegistry.js";
 import {
@@ -34,12 +36,11 @@ import {
 } from "../../lib/patientRules.js";
 import { requireAnyRole } from "../../lib/platform.js";
 import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
+import { resolveFacilityTimezone } from "../../lib/facilityClock.js";
 
 const router = Router();
 /** Review queue, mounted at `/privacy/break-glass-reviews`. */
 export const breakGlassReviewRoutes = Router();
-
-const REVIEW_DUE_MS = 2 * 24 * 60 * 60 * 1000;
 
 const requestSchema = z.object({
   patientId: z.string().uuid(),
@@ -86,36 +87,56 @@ const notifyBreakGlass = async (
     relatedEntityId: grant.id,
   };
 
-  const [dpoUsers, unitHeads] = await Promise.all([
-    db
-      .select({ email: user.email })
-      .from(appUserRole)
-      .innerJoin(user, eq(user.id, appUserRole.userId))
-      .where(and(eq(appUserRole.role, "dpo"), eq(user.status, "active"))),
-    target.registeredUnitId
-      ? db
-          .select({ staffId: staff.id, email: staff.email })
-          .from(orgUnit)
-          .innerJoin(staff, eq(staff.id, orgUnit.headStaffId))
-          .where(eq(orgUnit.id, target.registeredUnitId))
-      : Promise.resolve([]),
-  ]);
-
-  const rows: Array<typeof notification.$inferInsert> = [
-    ...dpoUsers.map((entry) => ({ ...base, channel: "IN_APP", recipientType: "USER", toAddress: entry.email })),
-    ...unitHeads.map((entry) => ({
-      ...base,
-      channel: "IN_APP",
-      recipientType: "STAFF",
-      recipientId: entry.staffId,
-      toAddress: entry.email,
-    })),
-  ];
   const dpoEmail = getPatientConfig().dpoEmail;
-  if (dpoEmail && !dpoUsers.some((entry) => entry.email.toLowerCase() === dpoEmail.toLowerCase())) {
-    rows.push({ ...base, channel: "EMAIL", recipientType: "EXTERNAL", toAddress: dpoEmail });
+  try {
+    const [dpoUsers, unitHeads] = await Promise.all([
+      db
+        .select({ userId: user.id, email: user.email })
+        .from(appUserRole)
+        .innerJoin(user, eq(user.id, appUserRole.userId))
+        .where(and(eq(appUserRole.role, "dpo"), eq(user.status, "active"))),
+      target.registeredUnitId
+        ? db
+            .select({ staffId: staff.id, email: staff.email })
+            .from(orgUnit)
+            .innerJoin(staff, eq(staff.id, orgUnit.headStaffId))
+            .where(eq(orgUnit.id, target.registeredUnitId))
+        : Promise.resolve([]),
+    ]);
+    const inAppRows: Array<typeof notification.$inferInsert> = [
+      ...dpoUsers.map((entry) => ({
+        ...base,
+        channel: "IN_APP",
+        recipientType: "USER",
+        recipientId: entry.userId,
+        toAddress: entry.email,
+      })),
+      ...unitHeads.map((entry) => ({
+        ...base,
+        channel: "IN_APP",
+        recipientType: "STAFF",
+        recipientId: entry.staffId,
+        toAddress: entry.email,
+      })),
+    ];
+    if (inAppRows.length > 0) {
+      await db.insert(notification).values(inAppRows);
+    }
+  } catch (error) {
+    console.error("Failed to queue break-glass in-app notifications", { requestId: req.requestId, error });
   }
-  if (rows.length > 0) await db.insert(notification).values(rows);
+  if (dpoEmail) {
+    try {
+      await db.insert(notification).values({
+        ...base,
+        channel: "EMAIL",
+        recipientType: "EXTERNAL",
+        toAddress: dpoEmail,
+      });
+    } catch (error) {
+      console.error("Failed to queue break-glass email fallback", { requestId: req.requestId, error });
+    }
+  }
 };
 
 router.post("/", requireAnyRole(PATIENT_READ_ROLES), async (req, res, next) => {
@@ -131,7 +152,7 @@ router.post("/", requireAnyRole(PATIENT_READ_ROLES), async (req, res, next) => {
     const [target, unitIds] = await Promise.all([loadPatient(payload.patientId), resolvePatientUnitScope(actor)]);
     const outOfScope =
       target && unitIds !== null && (!target.registeredUnitId || !unitIds.includes(target.registeredUnitId));
-    if (!target || outOfScope || target.status === "MERGED") {
+    if (!target || outOfScope) {
       throw notFound("Patient not found.", "PATIENT_NOT_FOUND");
     }
 
@@ -215,7 +236,7 @@ breakGlassReviewRoutes.get("/", requireAnyRole(BREAK_GLASS_REVIEW_READ_ROLES), a
           : sql`false`,
     );
 
-    const [rows, totals] = await Promise.all([
+    const [rows, totals, timezone, holidayRows] = await Promise.all([
       db
         .select({
           grant: breakGlassAccess,
@@ -238,10 +259,14 @@ breakGlassReviewRoutes.get("/", requireAnyRole(BREAK_GLASS_REVIEW_READ_ROLES), a
         .from(breakGlassAccess)
         .leftJoin(patient, eq(patient.id, breakGlassAccess.patientId))
         .where(where),
+      resolveFacilityTimezone(),
+      db.select({ holidayDate: publicHoliday.holidayDate }).from(publicHoliday),
     ]);
 
     const reviewers = await loadUserNames(rows.map((row) => row.grant.reviewedBy));
     const now = Date.now();
+    const today = facilityDate(new Date(now), timezone);
+    const holidays = new Set(holidayRows.map((row) => row.holidayDate));
     const data = rows.map((row) => ({
       id: row.grant.id,
       userName: row.userName ?? "Unknown user",
@@ -253,7 +278,9 @@ breakGlassReviewRoutes.get("/", requireAnyRole(BREAK_GLASS_REVIEW_READ_ROLES), a
       grantedAt: row.grant.grantedAt,
       expiresAt: row.grant.expiresAt,
       active: row.grant.expiresAt.getTime() > now,
-      reviewOverdue: !row.grant.reviewedAt && now - row.grant.grantedAt.getTime() > REVIEW_DUE_MS,
+      reviewOverdue:
+        !row.grant.reviewedAt &&
+        today > addFacilityWorkingDays(facilityDate(row.grant.grantedAt, timezone), 2, holidays),
       reviewedAt: row.grant.reviewedAt,
       reviewedByName: row.grant.reviewedBy ? (reviewers.get(row.grant.reviewedBy) ?? null) : null,
       reviewOutcome: row.grant.reviewOutcome,

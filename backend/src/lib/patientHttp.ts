@@ -112,10 +112,7 @@ export const loadPatientContext = async (
     throw notFound("Patient not found.", "PATIENT_NOT_FOUND");
   }
 
-  const access =
-    found.status === "MERGED"
-      ? { restriction: null, grant: null }
-      : await assertChartAccess(req, actor, found, options.entityType ?? "patient");
+  const access = await assertChartAccess(req, actor, found, options.entityType ?? "patient");
   return { actor, patient: found, access, todayIso };
 };
 

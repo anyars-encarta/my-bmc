@@ -66,7 +66,12 @@ export const BreakGlassReviewPage = () => {
       });
       toast.success("Review recorded.");
       setSelected(null);
-      reload();
+      const nextLastPage = Math.max(1, Math.ceil(Math.max(0, (pagination?.total ?? 0) - 1) / 25));
+      if (status === "PENDING" && page > nextLastPage) {
+        setPage(nextLastPage);
+      } else {
+        reload();
+      }
     } catch (caught) {
       toast.error(errorMessage(caught, "The review could not be saved."));
     } finally {
