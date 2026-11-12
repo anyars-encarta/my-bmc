@@ -25,6 +25,7 @@ import {
   loadFacilityLogo,
   type PatientPrintData,
 } from "../../lib/patientDocuments.js";
+import { isTrustedPatientPhotoUpload, publicIdFromCloudinaryUrl } from "../../lib/patientPhotos.js";
 import {
   loadPatientContext,
   loadStaffNames,
@@ -302,22 +303,13 @@ const photoSchema = z.object({
     .regex(/^[A-Za-z0-9_./-]{1,255}$/)
     .nullish()
     .transform((value) => value ?? null),
+  photoUploadSignature: z
+    .string()
+    .regex(/^[a-f\d]{40}$/i)
+    .nullish()
+    .transform((value) => value ?? null),
+  photoUploadVersion: z.number().int().positive().nullish().transform((value) => value ?? null),
 });
-
-/** Extracts the Cloudinary public ID from an uploaded image URL. */
-const publicIdFromCloudinaryUrl = (value: string) => {
-  const path = new URL(value).pathname;
-  const uploadIndex = path.indexOf("/image/upload/");
-  if (uploadIndex < 0) return null;
-  const segments = path.slice(uploadIndex + "/image/upload/".length).split("/");
-  const versionIndex = segments.findIndex((segment) => /^v\d+$/.test(segment));
-  if (versionIndex >= 0) segments.splice(0, versionIndex + 1);
-  else if (segments[0]?.startsWith("s--")) segments.shift();
-  const last = segments.pop();
-  if (!last) return null;
-  const file = last.replace(/\.[^.]+$/, "");
-  return [...segments, file].join("/");
-};
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -1589,10 +1581,17 @@ router.post("/:id/photo", requireAnyRole(PATIENT_PHOTO_ROLES), async (req, res, 
     const patientPhotoPrefix = `patients/${current.id}/`;
 
     if (payload.photoUrl) {
-      if (
-        !payload.photoPublicId?.startsWith(patientPhotoPrefix) ||
-        publicIdFromCloudinaryUrl(payload.photoUrl) !== payload.photoPublicId
-      ) {
+      const { cloudinary } = await import("../../lib/cloudinary.js");
+      const cloudinaryConfig = cloudinary.config();
+      if (!isTrustedPatientPhotoUpload({
+        photoUrl: payload.photoUrl,
+        photoPublicId: payload.photoPublicId,
+        patientId: current.id,
+        cloudName: cloudinaryConfig.cloud_name,
+        apiSecret: cloudinaryConfig.api_secret,
+        signature: payload.photoUploadSignature,
+        version: payload.photoUploadVersion,
+      })) {
         throw validationError("Upload the photo for this patient before saving it.", "PATIENT_PHOTO_OWNERSHIP_INVALID", {
           fieldErrors: { photoUrl: ["The uploaded photo does not belong to this patient."] },
         });
@@ -1662,6 +1661,7 @@ router.post("/:id/photo", requireAnyRole(PATIENT_PHOTO_ROLES), async (req, res, 
   }
 });
 
+/** Loads patient card or wristband details plus the optional configured facility logo. */
 const loadPrintData = async (context: PatientContext, includeLogo: boolean): Promise<PatientPrintData> => {
   const [[facility], allergies] = await Promise.all([
     db
@@ -1678,13 +1678,22 @@ const loadPrintData = async (context: PatientContext, includeLogo: boolean): Pro
     loadActiveAllergies(context.patient.id),
   ]);
   const current = context.patient;
+  const logoImage = includeLogo
+    ? await loadFacilityLogo(facility?.logoUrl).catch((error) => {
+        console.error("Could not load the optional facility logo; generating the patient card without it.", {
+          patientId: current.id,
+          error,
+        });
+        return null;
+      })
+    : null;
   return {
     facilityName: facility?.facilityName ?? "Hospital",
     facilityAddress: facility?.address ?? null,
     facilityTelephone: facility?.telephone ?? null,
     facilityEmail: facility?.email ?? null,
     facilityGpsDigitalAddress: facility?.gpsDigitalAddress ?? null,
-    logoImage: includeLogo ? await loadFacilityLogo(facility?.logoUrl) : null,
+    logoImage,
     firstName: current.firstName,
     middleName: current.middleName,
     lastName: current.lastName,

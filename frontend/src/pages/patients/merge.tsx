@@ -277,7 +277,8 @@ function MergeWorkspace({
                       field === "photoUrl"
                         ? preview.survivor.photoUrl !== preview.merged.photoUrl
                         : left !== right;
-                    const selectable = valuesDiffer && hasMergeValue(preview.merged, field);
+                    const selectable =
+                      valuesDiffer && (field === "photoUrl" || hasMergeValue(preview.merged, field));
                     const choice = picks.has(field) ? "merged" : "survivor";
                     return (
                       <TableRow key={field}>
@@ -297,14 +298,34 @@ function MergeWorkspace({
                               }
                               className="grid grid-cols-2 gap-0"
                             >
-                              {(["survivor", "merged"] as const).map((side) => (
-                                <div key={side} className="flex items-center gap-2 p-2">
-                                  <RadioGroupItem value={side} id={`merge-${field}-${side}`} />
-                                  <Label htmlFor={`merge-${field}-${side}`} className="font-normal">
-                                    {(side === "survivor" ? left : right) || "— (empty)"}
-                                  </Label>
-                                </div>
-                              ))}
+                              {(["survivor", "merged"] as const).map((side) => {
+                                const source = side === "survivor" ? preview.survivor : preview.merged;
+                                const sideLabel = side === "survivor" ? "Survivor" : "Merged";
+                                return (
+                                  <div key={side} className="flex min-w-0 items-center gap-2 p-2">
+                                    <RadioGroupItem
+                                      value={side}
+                                      id={`merge-${field}-${side}`}
+                                      aria-label={`${sideLabel} record ${field === "photoUrl" ? "photo" : mergeFieldLabels[field]}`}
+                                    />
+                                    <Label htmlFor={`merge-${field}-${side}`} className="min-w-0 font-normal">
+                                      {field === "photoUrl" ? (
+                                        source.photoUrl ? (
+                                          <img
+                                            src={source.photoUrl}
+                                            alt={`${sideLabel} record photo`}
+                                            className="size-16 rounded border object-cover"
+                                          />
+                                        ) : (
+                                          <span>{sideLabel} record — no photo</span>
+                                        )
+                                      ) : (
+                                        (side === "survivor" ? left : right) || "— (empty)"
+                                      )}
+                                    </Label>
+                                  </div>
+                                );
+                              })}
                             </RadioGroup>
                           </TableCell>
                         ) : (

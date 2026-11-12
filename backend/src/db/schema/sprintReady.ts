@@ -133,7 +133,7 @@ export const notification = pgTable("notification", {
   id: uuid("id").primaryKey().defaultRandom(),
   channel: varchar("channel", { length: 8 }).notNull(),
   recipientType: varchar("recipient_type", { length: 8 }).notNull(),
-  recipientId: uuid("recipient_id"),
+  recipientId: text("recipient_id"),
   toAddress: varchar("to_address", { length: 255 }),
   template: varchar("template", { length: 60 }).notNull(),
   payload: jsonb("payload").default('{}').notNull(),
@@ -690,7 +690,11 @@ export const patientIdentifier = pgTable("patient_identifier", {
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   verifiedBy: text("verified_by"),
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
-});
+}, (table) => ({
+  oneActivePerPatientAndType: uniqueIndex("patient_identifier_patient_type_active_uq")
+    .on(table.patientId, table.idType)
+    .where(sql`${table.status} = 'ACTIVE'`),
+}));
 
 export type PatientIdentifier = typeof patientIdentifier.$inferSelect;
 export type NewPatientIdentifier = typeof patientIdentifier.$inferInsert;

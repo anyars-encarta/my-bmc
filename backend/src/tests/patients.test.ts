@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 import express from "express";
@@ -564,10 +564,18 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     assert.equal(condition.body.data.icd10Code, "J45");
     assert.equal((await api(doctor, "GET", `${base}/conditions`)).body.data[0].recordedByName, doctor.name);
 
+    const { cloudinary } = await import("../lib/cloudinary.js");
+    const cloudinaryConfig = cloudinary.config();
+    assert.ok(cloudinaryConfig.cloud_name && cloudinaryConfig.api_secret);
     const photoPublicId = `patients/${child.id}/photo`;
+    const photoUploadVersion = 1794413500;
     const photo = {
-      photoUrl: `https://res.cloudinary.com/demo/image/upload/${photoPublicId}.jpg`,
+      photoUrl: `https://res.cloudinary.com/${cloudinaryConfig.cloud_name}/image/upload/v${photoUploadVersion}/${photoPublicId}.jpg`,
       photoPublicId,
+      photoUploadSignature: createHash("sha1")
+        .update(`public_id=${photoPublicId}&version=${photoUploadVersion}${cloudinaryConfig.api_secret}`)
+        .digest("hex"),
+      photoUploadVersion,
     };
     const unownedPhoto = {
       photoUrl: "https://res.cloudinary.com/demo/image/upload/patients/another-patient/photo.jpg",
@@ -576,6 +584,12 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     const ownershipRefused = await api(registrar, "POST", `${base}/photo`, unownedPhoto);
     assert.equal(ownershipRefused.status, 422);
     assert.equal(ownershipRefused.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
+    const forgedUpload = await api(registrar, "POST", `${base}/photo`, {
+      ...photo,
+      photoUploadSignature: "0".repeat(40),
+    });
+    assert.equal(forgedUpload.status, 422);
+    assert.equal(forgedUpload.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
     const refused = await api(registrar, "POST", `${base}/photo`, photo);
     assert.equal(refused.status, 403);
     assert.equal(refused.body.code, "CONSENT_REQUIRED");

@@ -527,7 +527,12 @@ export function PatientPhotoField({
       try {
         const result = await registryRequest<PatientPhotoResult>(`patients/${patientId}/photo`, {
           method: "POST",
-          body: { photoUrl: next?.url ?? null, photoPublicId: next?.publicId ?? null },
+          body: {
+            photoUrl: next?.url ?? null,
+            photoPublicId: next?.publicId ?? null,
+            photoUploadSignature: next?.signature ?? null,
+            photoUploadVersion: next?.version ?? null,
+          },
         });
         onSaved(result.data);
         toast.success(next ? "Patient photo saved." : "Patient photo removed.");

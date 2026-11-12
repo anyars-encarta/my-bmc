@@ -12,6 +12,8 @@ export type MetricCardProps = {
 export type UploadWidgetValue = {
   url: string;
   publicId?: string | null;
+  signature?: string;
+  version?: number;
 };
 
 export type UserRole = AppRole;

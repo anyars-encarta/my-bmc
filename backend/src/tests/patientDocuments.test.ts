@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import jpeg from "jpeg-js";
 
 import { encodeCode128 } from "../lib/code128.js";
 import { buildPatientCardPdf, buildWristbandPdf, type PatientPrintData } from "../lib/patientDocuments.js";
@@ -93,17 +94,21 @@ test("the patient card back includes facility return details", () => {
 });
 
 test("the patient card embeds the facility logo to the left of its header text", () => {
-  const text = assertValidPdf(
-    buildPatientCardPdf({
-      ...printData,
-      logoImage: { bytes: Buffer.from("jpeg-logo"), width: 512, height: 512 },
-    }),
-    "242.646",
-    "153.071",
-  );
-  assert.ok(text.includes("/Subtype /Image"));
+  const logoJpeg = jpeg.encode({ data: Buffer.from([255, 255, 255, 255]), width: 1, height: 1 }, 90).data;
+  const pdf = buildPatientCardPdf({
+    ...printData,
+    logoImage: { bytes: logoJpeg, width: 1, height: 1 },
+  });
+  const text = assertValidPdf(pdf, "242.646", "153.071");
+  const imageHeader = text.indexOf("/Subtype /Image");
+  const streamHeader = /\/Length (\d+) >>\nstream\n/.exec(text.slice(imageHeader));
+  assert.ok(streamHeader, "PDF contains an image stream");
+  const streamStart = text.indexOf("stream\n", imageHeader) + "stream\n".length;
+  const embeddedJpeg = pdf.subarray(streamStart, streamStart + Number(streamHeader[1]));
+  const decoded = jpeg.decode(embeddedJpeg);
+  assert.equal(decoded.width, 1);
+  assert.equal(decoded.height, 1);
   assert.ok(text.includes("/Im1 Do Q"));
-  assert.ok(text.includes("jpeg-logo"));
   assert.ok(text.indexOf("/Im1 Do Q") < text.indexOf(`<${hex("Bolgatanga Medical Centre")}>`));
 });
 

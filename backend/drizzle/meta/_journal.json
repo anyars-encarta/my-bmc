@@ -162,6 +162,20 @@
       "when": 1794395940000,
       "tag": "0022_patient_merge_task_status",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794413500000,
+      "tag": "0023_patient_identifier_active_per_patient_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794413560000,
+      "tag": "0024_notification_recipient_id_text",
+      "breakpoints": true
     }
   ]
 }
