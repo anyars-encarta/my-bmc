@@ -1352,16 +1352,20 @@ router.get("/staff/:staffId/schedule", requireAnyRole([...READ_ROLES, "staff"]),
   }
 });
 
-router.get("/me/notifications", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
+router.get("/me/notifications", requireAnyRole([...READ_ROLES, "staff", "dpo"]), async (req, res, next) => {
   try {
     if (!req.user?.id) throw forbidden("Sign in to view notifications.", "NOTIFICATION_SELF_REQUIRED");
     const [person] = await db.select({ id: staff.id }).from(staff)
       .where(eq(staff.userId, req.user.id)).limit(1);
-    if (!person) throw notFound("No staff profile is linked to this account.", "STAFF_PROFILE_NOT_FOUND");
+    const recipients = [
+      and(eq(notification.recipientType, "USER"), eq(notification.recipientId, req.user.id)),
+      ...(person
+        ? [and(eq(notification.recipientType, "STAFF"), eq(notification.recipientId, person.id))]
+        : []),
+    ];
     const records = await db.select().from(notification).where(and(
       eq(notification.channel, "IN_APP"),
-      eq(notification.recipientType, "STAFF"),
-      eq(notification.recipientId, person.id),
+      or(...recipients),
     )).orderBy(desc(notification.createdAt)).limit(100);
     res.json({ data: records });
   } catch (error) {
@@ -1369,21 +1373,25 @@ router.get("/me/notifications", requireAnyRole([...READ_ROLES, "staff"]), async 
   }
 });
 
-router.post("/me/notifications/:id/read", requireAnyRole([...READ_ROLES, "staff"]), async (req, res, next) => {
+router.post("/me/notifications/:id/read", requireAnyRole([...READ_ROLES, "staff", "dpo"]), async (req, res, next) => {
   try {
     if (!req.user?.id) throw forbidden("Sign in to update notifications.", "NOTIFICATION_SELF_REQUIRED");
     const notificationId = routeId(req.params.id);
     if (!notificationId) throw badRequest("Notification ID is required.", "NOTIFICATION_ID_REQUIRED");
     const [person] = await db.select({ id: staff.id }).from(staff)
       .where(eq(staff.userId, req.user.id)).limit(1);
-    if (!person) throw notFound("No staff profile is linked to this account.", "STAFF_PROFILE_NOT_FOUND");
+    const recipients = [
+      and(eq(notification.recipientType, "USER"), eq(notification.recipientId, req.user.id)),
+      ...(person
+        ? [and(eq(notification.recipientType, "STAFF"), eq(notification.recipientId, person.id))]
+        : []),
+    ];
     const [updated] = await db.update(notification)
       .set({ status: "READ" })
       .where(and(
         eq(notification.id, notificationId),
         eq(notification.channel, "IN_APP"),
-        eq(notification.recipientType, "STAFF"),
-        eq(notification.recipientId, person.id),
+        or(...recipients),
       ))
       .returning({ id: notification.id });
     if (!updated) throw notFound("Notification not found.", "NOTIFICATION_NOT_FOUND");

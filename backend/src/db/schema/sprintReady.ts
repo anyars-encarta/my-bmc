@@ -105,6 +105,7 @@ export const breakGlassAccess = pgTable("break_glass_access", {
   reviewedBy: text("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   reviewOutcome: varchar("review_outcome", { length: 12 }),
+  reviewNote: varchar("review_note", { length: 500 }),
 });
 
 export type BreakGlassAccess = typeof breakGlassAccess.$inferSelect;
@@ -132,7 +133,7 @@ export const notification = pgTable("notification", {
   id: uuid("id").primaryKey().defaultRandom(),
   channel: varchar("channel", { length: 8 }).notNull(),
   recipientType: varchar("recipient_type", { length: 8 }).notNull(),
-  recipientId: uuid("recipient_id"),
+  recipientId: text("recipient_id"),
   toAddress: varchar("to_address", { length: 255 }),
   template: varchar("template", { length: 60 }).notNull(),
   payload: jsonb("payload").default('{}').notNull(),
@@ -579,7 +580,7 @@ export const attendanceCorrection = pgTable("attendance_correction", {
   reason: text("reason").notNull(),
   requestedBy: text("requested_by").notNull(),
   requestedAt: timestamp("requested_at", { withTimezone: true }).defaultNow().notNull(),
-  status: varchar("status", { length: 10 }).default('PENDING').notNull(),
+  status: varchar("status", { length: 20 }).default('PENDING').notNull(),
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   appliedAt: timestamp("applied_at", { withTimezone: true }),
@@ -689,7 +690,11 @@ export const patientIdentifier = pgTable("patient_identifier", {
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   verifiedBy: text("verified_by"),
   status: varchar("status", { length: 10 }).default('ACTIVE').notNull(),
-});
+}, (table) => ({
+  oneActivePerPatientAndType: uniqueIndex("patient_identifier_patient_type_active_uq")
+    .on(table.patientId, table.idType)
+    .where(sql`${table.status} = 'ACTIVE'`),
+}));
 
 export type PatientIdentifier = typeof patientIdentifier.$inferSelect;
 export type NewPatientIdentifier = typeof patientIdentifier.$inferInsert;
@@ -763,6 +768,8 @@ export const patientDuplicateCandidate = pgTable("patient_duplicate_candidate", 
   status: varchar("status", { length: 10 }).default('PENDING').notNull(),
   reviewedBy: text("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  detectedAt: timestamp("detected_at", { withTimezone: true }).defaultNow().notNull(),
+  source: varchar("source", { length: 12 }).default('SWEEP').notNull(),
 });
 
 export type PatientDuplicateCandidate = typeof patientDuplicateCandidate.$inferSelect;
@@ -776,6 +783,8 @@ export const patientMergeTask = pgTable("patient_merge_task", {
   rowsMoved: integer("rows_moved"),
   lastError: varchar("last_error", { length: 500 }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  attempts: integer("attempts").default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export type PatientMergeTask = typeof patientMergeTask.$inferSelect;

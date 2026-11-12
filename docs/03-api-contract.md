@@ -221,8 +221,14 @@ Sprint 6 jobs retry punch processing and interrupted approvals, auto-close overd
 | POST/GET | `/patients/:id/consents` | RG | records `consent` rows |
 | GET | `/patients/:id/timeline` | clinical | visits, encounters, results, admissions |
 | POST | `/patients/:id/photo` | RG | |
-| GET | `/patients/duplicates` · POST `/patients/merge` | RC | `{ survivorId, mergedId, reason }`; async re-pointing, status poll `/merge-tasks/:id` |
+| GET | `/patients/duplicates` · POST `/patients/merge` | RC | `{ survivorId, mergedId, reason, takeFromMerged[] }`; async re-pointing, status poll `/merge-tasks/:id` |
 | GET | `/patients/:id/wristband` · `/card` | RG NU | PDF with Code 128 MRN |
+| GET | `/patients/references` | registry roles | units, consent witnesses (name + Employee ID), today, minor-age and break-glass settings — feeds the pickers so no form asks for a record reference |
+| POST | `/patients/duplicate-check` | RG RC DR | live `DuplicateDetector` result for the wizard panel (`blocking`, `candidates[]`) |
+| POST | `/patients/duplicates/:id/dismiss` · `/patients/duplicates/sweep` | RC | "different patients" decision · run the duplicate sweep now |
+| GET | `/patients/merge/preview?survivorId&mergedId` | RC | both records, pre-check results, mergeable fields |
+| GET | `/merge-tasks` · POST `/merge-tasks/:id/retry` | RC | merge history · re-run unfinished re-pointing tasks |
+| GET | `/patients/:id/audit` | RC DP | audit trail of the record (actor names, never ids) |
 
 ### Appointments, visits & queue — Sprints 8–9
 
@@ -388,7 +394,7 @@ Sprint 6 jobs retry punch processing and interrupted approvals, auto-close overd
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST/GET | `/data-subject-requests` · `/:id/verify` · `/fulfil` · `/reject` | DP | patient or staff DSRs |
-| GET | `/privacy/break-glass-reviews` · POST `/:id/review` | DP UM | |
+| GET | `/privacy/break-glass-reviews` · POST `/:id/review` | DP UM (AU read) | delivered in Sprint 7 (S7-4); `{ outcome: JUSTIFIED\|UNJUSTIFIED\|ESCALATED, note }`; UM scoped to patients registered in their unit subtree; no self-review |
 | GET | `/retention/policies` · POST `/retention/runs/dry-run` | DP SA | |
 | GET | `/consents?subjectType&subjectId` | DP RG | |
 

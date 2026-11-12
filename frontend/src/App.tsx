@@ -46,6 +46,23 @@ import { DevicesPage } from "./pages/devices";
 import { AttendanceOperationsPage, MyAttendancePage } from "./pages/attendance";
 import { AttendanceKioskPage } from "./pages/attendance/kiosk";
 import { AttendancePilotPage } from "./pages/attendance/pilot";
+import { BreakGlassReviewPage } from "./pages/break-glass";
+import {
+  PatientDuplicatesPage,
+  PatientEdit,
+  PatientIdentify,
+  PatientList,
+  PatientRegister,
+  PatientShow,
+} from "./pages/patients";
+import {
+  BREAK_GLASS_REVIEW_READ_ROLES,
+  PATIENT_EDIT_ROLES,
+  PATIENT_IDENTIFY_ROLES,
+  PATIENT_MERGE_ROLES,
+  PATIENT_READ_ROLES,
+  PATIENT_REGISTER_ROLES,
+} from "./constants/patients";
 import CreateUser from "./pages/users/create";
 import EditUser from "./pages/users/edit";
 import ListUsers from "./pages/users/list";
@@ -63,6 +80,8 @@ import { getPublicApiBase } from "./lib/public-api";
 const HostingRenewalPage = lazy(
   () => import("./pages/hosting-renewal/hosting"),
 );
+
+const RECORD_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const formatPathSegment = (value: string) =>
   value.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -84,7 +103,11 @@ const brandedTitle = ({
   }
 
   if (pathname) {
-    const segment = pathname.split("/").filter(Boolean).at(-1);
+    // Record references in the path are never shown in the page title.
+    const segment = pathname
+      .split("/")
+      .filter((part) => part && !RECORD_REFERENCE.test(part))
+      .at(-1);
 
     if (segment) {
       return `Encarta | ${formatPathSegment(segment)}`;
@@ -330,6 +353,15 @@ function App() {
                       <Route path="attendance" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager", "payroll_officer", "accounts", "unit_manager"]}><AttendanceOperationsPage /></WorkforceRoleGate>} />
                       <Route path="attendance-pilot" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "hr_manager"]}><AttendancePilotPage /></WorkforceRoleGate>} />
                       <Route path="my-attendance" element={<WorkforceRoleGate allowedRoles={attendanceSelfServiceRoles}><MyAttendancePage /></WorkforceRoleGate>} />
+                      <Route path="patients">
+                        <Route index element={<WorkforceRoleGate allowedRoles={PATIENT_READ_ROLES}><PatientList /></WorkforceRoleGate>} />
+                        <Route path="register" element={<WorkforceRoleGate allowedRoles={PATIENT_REGISTER_ROLES}><PatientRegister /></WorkforceRoleGate>} />
+                        <Route path="identify/:id" element={<WorkforceRoleGate allowedRoles={PATIENT_IDENTIFY_ROLES}><PatientIdentify /></WorkforceRoleGate>} />
+                        <Route path="edit/:id" element={<WorkforceRoleGate allowedRoles={PATIENT_EDIT_ROLES}><PatientEdit /></WorkforceRoleGate>} />
+                        <Route path="show/:id" element={<WorkforceRoleGate allowedRoles={PATIENT_READ_ROLES}><PatientShow /></WorkforceRoleGate>} />
+                      </Route>
+                      <Route path="patient-duplicates" element={<WorkforceRoleGate allowedRoles={PATIENT_MERGE_ROLES}><PatientDuplicatesPage /></WorkforceRoleGate>} />
+                      <Route path="break-glass-review" element={<WorkforceRoleGate allowedRoles={BREAK_GLASS_REVIEW_READ_ROLES}><BreakGlassReviewPage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />
                         <Route path="create" element={<CategoryCreate />} />

@@ -4,6 +4,8 @@ declare global {
     info: {
       secure_url: string;
       public_id: string;
+      signature?: string;
+      version?: number;
       delete_token?: string;
     };
   };

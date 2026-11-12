@@ -37,6 +37,7 @@ import {
   Coins,
   Fingerprint,
   Folder,
+  HeartPulse,
   LayoutDashboard,
   ListIcon,
   LogOut,
@@ -123,6 +124,7 @@ const MENU_GROUP_ICONS: Record<string, LucideIcon> = {
   Administration: Building2,
   Attendance: Fingerprint,
   Finance: Coins,
+  "Front Desk": HeartPulse,
   Overview: LayoutDashboard,
   Workforce: Users,
 };

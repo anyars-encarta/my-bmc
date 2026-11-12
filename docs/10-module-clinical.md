@@ -179,6 +179,40 @@ Thresholds are configuration (`hams.patient.dup.block|warn`) and tuned during UA
 Search finds "Kwame Mensah" for "Kwame Mensa" / "Mensah Kwame"; duplicate block at ≥ 0.85; unidentified → identify → merge;
 merge re-points bills/encounters/appointments; restricted record read without break-glass → 403 + audit; MRN gapless under 50 concurrent registrations.
 
+### 1.6 Implementation notes — Express bridge (Sprint 7)
+
+Sprint 7 is delivered in the Express/Drizzle backend (`backend/src/routes/v1/patients.ts`, `patientMerge.ts`,
+`breakGlass.ts`; rules in `lib/patientRules.ts`, data access in `lib/patientRegistry.ts`). Points where the
+implementation is more specific than the sections above:
+
+- **No interactive transactions.** The Neon HTTP driver cannot hold a transaction open, so registration,
+  identification and merge are each written as **one statement** built from data-modifying CTEs. The MRN
+  allocation (`next_doc_number('MRN', year)`), the patient row and its identifiers, contacts and consents
+  commit or roll back together, which keeps MRNs gapless. The merge statement writes the log, flips the
+  duplicate to `MERGED`, applies the field picks, unions allergies/conditions/identifiers/contacts and creates
+  one `patient_merge_task` per module; re-pointing then runs as idempotent single-statement tasks
+  (`MERGE_MODULES`), retried by `PatientMergeTaskRetryJob` (5 min) or `POST /merge-tasks/:id/retry`.
+- **Migration `0021_sprint7_patient_registry`** adds lookup indexes plus `patient_duplicate_candidate.detected_at`
+  / `source`, `patient_merge_task.attempts` / `created_at` and `break_glass_access.review_note`.
+- **Search** = exact MRN / phone / identifier-number lookups + word-level trigram match on `name_key`
+  (`name_key %> key`), ranked by similarity. The double-metaphone (sound-alike surname) match is a
+  **fallback used only when nothing matches directly**; OR-ing it into every search made common surnames
+  scan tens of thousands of rows. Searching a merged record's MRN returns the survivor with `meta.mergedFromMrn`.
+- **Unidentified patients** take a per-day sequence (`next_doc_number('UNKNOWN_PT', yyyymmdd)`) for the
+  placeholder name. `POST /patients/:id/identify` accepts either full demographics or
+  `{ mergeIntoPatientId, reason }` to merge into an existing record.
+- **Access levels.** `FULL` (SA RG RC DR NU midwife DP) and `MINIMAL` (HA UM CS BO PH PT LS RT RL: identity +
+  allergies; other fields are absent and listed in `redacted`). UM is limited to patients registered in their
+  unit subtree. RESTRICTED / VIP / own-record (`STAFF_ID` identifier = caller's Employee ID) charts need an
+  active `break_glass_access` grant for every role.
+- **Configuration** is read from `HAMS_PATIENT_DUP_BLOCK`, `HAMS_PATIENT_DUP_WARN`, `HAMS_MINOR_AGE_THRESHOLD`,
+  `HAMS_BREAK_GLASS_REASON_MIN_CHARS`, `HAMS_PRIVACY_POLICY_VERSION` and `HAMS_DPO_EMAIL`
+  ([01](01-architecture-and-setup.md) §7), with the documented defaults when unset.
+- **Performance check:** `npm run seed:patients -- --count=300000` then `npm run perf:patient-search`
+  (synthetic rows carry an `SYN-` MRN and are removed with `npm run seed:patients -- --purge`).
+- **Database-backed tests** (`src/tests/patients.test.ts`) run when `TEST_DATABASE_URL` points at a disposable,
+  migrated database; the rule, Code 128 and PDF tests always run.
+
 ---
 
 ## 2. Appointments, Visits & OPD — Sprints 8–9

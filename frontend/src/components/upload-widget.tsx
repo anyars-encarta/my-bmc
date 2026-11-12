@@ -68,6 +68,8 @@ const UploadWidget = ({
             const payload: UploadWidgetValue = {
               url: result.info.secure_url,
               publicId: result.info.public_id,
+              signature: result.info.signature,
+              version: result.info.version,
             };
 
             setPreview(payload);
