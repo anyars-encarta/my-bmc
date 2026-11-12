@@ -508,7 +508,7 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     assert.equal((await auditRows(created.id, "STATUS_CHANGE")).length, 1);
   });
 
-  test("chart items, consent-gated photo and prints", async () => {
+  test("chart items, consent-gated photo and prints", async (t) => {
     const child = await mustRegister({
       firstName: "Kojo",
       lastName: `Item${token}`,
@@ -564,51 +564,57 @@ describe("patient registry", { skip: !testDatabaseUrl }, () => {
     assert.equal(condition.body.data.icd10Code, "J45");
     assert.equal((await api(doctor, "GET", `${base}/conditions`)).body.data[0].recordedByName, doctor.name);
 
-    const { cloudinary } = await import("../lib/cloudinary.js");
-    const cloudinaryConfig = cloudinary.config();
-    assert.ok(cloudinaryConfig.cloud_name && cloudinaryConfig.api_secret);
-    const photoPublicId = `patients/${child.id}/photo`;
-    const photoUploadVersion = 1794413500;
-    const photo = {
-      photoUrl: `https://res.cloudinary.com/${cloudinaryConfig.cloud_name}/image/upload/v${photoUploadVersion}/${photoPublicId}.jpg`,
-      photoPublicId,
-      photoUploadSignature: createHash("sha1")
-        .update(`public_id=${photoPublicId}&version=${photoUploadVersion}${cloudinaryConfig.api_secret}`)
-        .digest("hex"),
-      photoUploadVersion,
-    };
-    const unownedPhoto = {
-      photoUrl: "https://res.cloudinary.com/demo/image/upload/patients/another-patient/photo.jpg",
-      photoPublicId: "patients/another-patient/photo",
-    };
-    const ownershipRefused = await api(registrar, "POST", `${base}/photo`, unownedPhoto);
-    assert.equal(ownershipRefused.status, 422);
-    assert.equal(ownershipRefused.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
-    const forgedUpload = await api(registrar, "POST", `${base}/photo`, {
-      ...photo,
-      photoUploadSignature: "0".repeat(40),
-    });
-    assert.equal(forgedUpload.status, 422);
-    assert.equal(forgedUpload.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
-    const refused = await api(registrar, "POST", `${base}/photo`, photo);
-    assert.equal(refused.status, 403);
-    assert.equal(refused.body.code, "CONSENT_REQUIRED");
-    const verbal = await api(registrar, "POST", `${base}/consents`, { consentType: "PHOTOGRAPHY", status: "GRANTED", captureMethod: "VERBAL_WITNESSED" });
-    assert.equal(verbal.body.code, "PATIENT_CONSENT_WITNESS_REQUIRED");
-    const consent = await api(registrar, "POST", `${base}/consents`, {
-      consentType: "PHOTOGRAPHY",
-      status: "GRANTED",
-      captureMethod: "VERBAL_WITNESSED",
-      witnessStaffId: staffId,
-      guardianName: "Akua Item",
-      guardianRelationship: "Mother",
-    });
-    assert.equal(consent.status, 201, JSON.stringify(consent.body));
-    const consentView = await api(registrar, "GET", `${base}/consents`);
-    assert.equal(consentView.body.data.effective.find((row: any) => row.consentType === "PHOTOGRAPHY").status, "GRANTED");
-    assert.equal(consentView.body.data.effective.find((row: any) => row.consentType === "SMS_CONTACT").status, "NOT_RECORDED");
-    assert.equal(consentView.body.data.history[0].witnessName, "Nurse Tester");
-    assert.equal((await api(registrar, "POST", `${base}/photo`, photo)).body.data.photoUrl, photo.photoUrl);
+    await t.test(
+      "patient photo upload validation and photography consent",
+      { skip: !process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET },
+      async () => {
+        const { cloudinary } = await import("../lib/cloudinary.js");
+        const cloudinaryConfig = cloudinary.config();
+        assert.ok(cloudinaryConfig.cloud_name && cloudinaryConfig.api_secret);
+        const photoPublicId = `patients/${child.id}/photo`;
+        const photoUploadVersion = 1794413500;
+        const photo = {
+          photoUrl: `https://res.cloudinary.com/${cloudinaryConfig.cloud_name}/image/upload/v${photoUploadVersion}/${photoPublicId}.jpg`,
+          photoPublicId,
+          photoUploadSignature: createHash("sha1")
+            .update(`public_id=${photoPublicId}&version=${photoUploadVersion}${cloudinaryConfig.api_secret}`)
+            .digest("hex"),
+          photoUploadVersion,
+        };
+        const unownedPhoto = {
+          photoUrl: "https://res.cloudinary.com/demo/image/upload/patients/another-patient/photo.jpg",
+          photoPublicId: "patients/another-patient/photo",
+        };
+        const ownershipRefused = await api(registrar, "POST", `${base}/photo`, unownedPhoto);
+        assert.equal(ownershipRefused.status, 422);
+        assert.equal(ownershipRefused.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
+        const forgedUpload = await api(registrar, "POST", `${base}/photo`, {
+          ...photo,
+          photoUploadSignature: "0".repeat(40),
+        });
+        assert.equal(forgedUpload.status, 422);
+        assert.equal(forgedUpload.body.code, "PATIENT_PHOTO_OWNERSHIP_INVALID");
+        const refused = await api(registrar, "POST", `${base}/photo`, photo);
+        assert.equal(refused.status, 403);
+        assert.equal(refused.body.code, "CONSENT_REQUIRED");
+        const verbal = await api(registrar, "POST", `${base}/consents`, { consentType: "PHOTOGRAPHY", status: "GRANTED", captureMethod: "VERBAL_WITNESSED" });
+        assert.equal(verbal.body.code, "PATIENT_CONSENT_WITNESS_REQUIRED");
+        const consent = await api(registrar, "POST", `${base}/consents`, {
+          consentType: "PHOTOGRAPHY",
+          status: "GRANTED",
+          captureMethod: "VERBAL_WITNESSED",
+          witnessStaffId: staffId,
+          guardianName: "Akua Item",
+          guardianRelationship: "Mother",
+        });
+        assert.equal(consent.status, 201, JSON.stringify(consent.body));
+        const consentView = await api(registrar, "GET", `${base}/consents`);
+        assert.equal(consentView.body.data.effective.find((row: any) => row.consentType === "PHOTOGRAPHY").status, "GRANTED");
+        assert.equal(consentView.body.data.effective.find((row: any) => row.consentType === "SMS_CONTACT").status, "NOT_RECORDED");
+        assert.equal(consentView.body.data.history[0].witnessName, "Nurse Tester");
+        assert.equal((await api(registrar, "POST", `${base}/photo`, photo)).body.data.photoUrl, photo.photoUrl);
+      },
+    );
 
     for (const kind of ["wristband", "card"]) {
       const pdf = await api(nurse, "GET", `${base}/${kind}`);

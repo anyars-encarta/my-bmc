@@ -37,5 +37,9 @@ test("patient photo uploads require the configured account and a valid signed ve
   assert.equal(trustedUpload({ signature: "0".repeat(40) }), false);
   assert.equal(trustedUpload({ version: version + 1 }), false);
   assert.equal(trustedUpload({ photoUrl: photoUrl.replace(`v${version}`, `v${version + 1}`) }), false);
+  assert.equal(
+    trustedUpload({ photoUrl: photoUrl.replace("/upload/v", "/upload/c_fill,w_300/v") }),
+    false,
+  );
   assert.equal(trustedUpload({ apiSecret: undefined }), false);
 });

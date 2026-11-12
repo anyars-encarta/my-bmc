@@ -65,7 +65,9 @@ export const isTrustedPatientPhotoUpload = ({
   const url = new URL(photoUrl);
   const segments = url.pathname.split("/");
   if (segments[1] !== cloudName || segments[2] !== "image" || segments[3] !== "upload") return false;
-  const pathVersion = segments.slice(4).find((segment) => /^v\d+$/.test(segment))?.slice(1);
+  const versionSegment = segments[4];
+  if (!versionSegment || !/^v\d+$/.test(versionSegment)) return false;
+  const pathVersion = versionSegment.slice(1);
   if (pathVersion !== String(version)) return false;
 
   const expected = Buffer.from(
