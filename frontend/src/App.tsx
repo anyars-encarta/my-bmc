@@ -55,6 +55,10 @@ import {
   PatientRegister,
   PatientShow,
 } from "./pages/patients";
+import { AppointmentsPage } from "./pages/appointments";
+import { QueueBoardPage } from "./pages/appointments/queue";
+import { PublicQueuePage } from "./pages/appointments/public-queue";
+import { ChargeMasterPage } from "./pages/charge-master";
 import {
   BREAK_GLASS_REVIEW_READ_ROLES,
   PATIENT_EDIT_ROLES,
@@ -304,6 +308,7 @@ function App() {
                     }
                   />
                   <Route path="/kiosk" element={<AttendanceKioskPage />} />
+                  <Route path="/queue-display" element={<PublicQueuePage />} />
                   <Route
                     element={
                       <Authenticated key="guest-routes" fallback={<Outlet />}>
@@ -361,6 +366,9 @@ function App() {
                         <Route path="show/:id" element={<WorkforceRoleGate allowedRoles={PATIENT_READ_ROLES}><PatientShow /></WorkforceRoleGate>} />
                       </Route>
                       <Route path="patient-duplicates" element={<WorkforceRoleGate allowedRoles={PATIENT_MERGE_ROLES}><PatientDuplicatesPage /></WorkforceRoleGate>} />
+                      <Route path="appointments" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"]}><AppointmentsPage /></WorkforceRoleGate>} />
+                      <Route path="queue-board" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"]}><QueueBoardPage /></WorkforceRoleGate>} />
+                      <Route path="charge-master" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "cashier", "billing_officer"]}><ChargeMasterPage /></WorkforceRoleGate>} />
                       <Route path="break-glass-review" element={<WorkforceRoleGate allowedRoles={BREAK_GLASS_REVIEW_READ_ROLES}><BreakGlassReviewPage /></WorkforceRoleGate>} />
                       <Route path="categories">
                         <Route index element={<CategoryList />} />

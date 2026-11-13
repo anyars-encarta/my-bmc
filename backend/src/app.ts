@@ -16,6 +16,7 @@ import userRoutes from "./routes/users.js";
 import v1Routes from "./routes/v1/index.js";
 import hostingRenewalPublicRoutes from "./routes/hostingRenewalPublic.js";
 import deviceRoutes from "./routes/v1/device.js";
+import publicQueueRoutes from "./routes/publicQueue.js";
 import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
 import { problemHandler } from "./middleware/problemHandler.js";
 
@@ -100,6 +101,7 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true }));
 app.use(auditWriteMiddleware);
 app.use("/public/hosting-renewal", hostingRenewalPublicRoutes);
+app.use("/public", publicQueueRoutes);
 
 app.use("/api/v1/device", devicePreAuthenticationRateLimit, deviceRoutes);
 app.use("/api", requireAuth);

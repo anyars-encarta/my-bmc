@@ -333,6 +333,17 @@ CREATE TABLE triage_assessment (
   isolation_required boolean NOT NULL DEFAULT false, pregnant boolean, mobility varchar(15),
   notes text
 );
+
+-- Sprint 8 recovery extension (migration 0025)
+CREATE TABLE appointment_rebook_task (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id uuid NOT NULL REFERENCES appointment(id),
+  closed_slot_id uuid NOT NULL REFERENCES appointment_slot(id),
+  status varchar(12) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','COMPLETED','CANCELLED')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  UNIQUE (appointment_id, closed_slot_id)
+);
 ```
 
 ### 2.2 OPD patient journey
@@ -387,6 +398,9 @@ for (ClinicSessionTemplate t : templates.activeFor(date)) {
 When a roster entry is cancelled/moved (`RosterEntryChanged`), affected **future** slots are
 closed; booked patients get a *re-book task* (`appointment.status` unchanged until the clerk
 reschedules) and an SMS if consented — never silently dropped.
+The application polls the workforce event outbox and also reconciles active roster windows and
+approved leave on a five-minute cadence. Re-book tasks are unique per appointment and closed slot;
+SMS outbox rows are created only when the latest `SMS_CONTACT` consent is granted.
 
 **Atomic booking** (no double-booking under concurrency):
 
@@ -408,6 +422,10 @@ The patient-overlap exclusion constraint prevents the same patient holding two o
 | No-show | `NoShowSweepJob` marks `NO_SHOW` 30 min after `scheduled_end` without check-in; 3 no-shows in 6 months → flag on booking screen (never blocks) |
 | Check-in | Opens the `visit`, applies the payer, captures consultation charge, issues queue ticket |
 | Follow-up booking | Encounter disposition `FOLLOW_UP` + `follow_up_date` offers the next free slot with the same provider |
+
+SMS and email delivery are behind notification ports; the Sprint 8 environment uses fake ports
+while preserving queued/sent/failed status in the notification outbox. The public queue display
+contains ticket number and stage only.
 
 ### 2.5 Encounter / OPD tables (V14)
 

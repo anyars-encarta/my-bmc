@@ -176,6 +176,13 @@
       "when": 1794413560000,
       "tag": "0024_notification_recipient_id_text",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794499200000,
+      "tag": "0025_sprint8_appointment_rebook_tasks",
+      "breakpoints": true
     }
   ]
 }

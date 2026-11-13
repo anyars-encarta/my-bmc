@@ -234,14 +234,19 @@ Sprint 6 jobs retry punch processing and interrupted approvals, auto-close overd
 
 | Method | Path | Roles | Notes |
 |---|---|---|---|
+| GET | `/appointment-references` | RG DR | active clinical units, clinical providers (Employee ID) and consultation services; feeds pickers |
 | GET/POST/PATCH | `/clinic-session-templates` | UM HA | provider optional (pooled clinic) |
 | GET | `/appointment-slots?unitId&providerId&from&to&available=true` | RG DR | derived from rosters |
-| POST | `/appointments` | RG | atomic slot claim; `409 SLOT_FULL` |
-| PATCH | `/appointments/:id` · POST `/:id/cancel` · `/:id/reschedule` · `/:id/check-in` | RG | check-in opens the visit |
+| GET/POST/PATCH | `/appointments` · `/appointments/:id` | RG | atomic slot claim; `409 SLOT_FULL`; overlapping patient bookings return `409` |
+| POST | `/appointments/:id/cancel` · `/:id/reschedule` · `/:id/check-in` · `/:id/complete` | RG | check-in opens the visit and issues a queue ticket |
 | GET | `/visits?status=OPEN&unitId` · POST `/visits` (walk-in/emergency) · POST `/:id/close` | RG DR NU | |
-| GET/POST | `/queue?unitId&stage=` · `/queue/:id/call` · `/recall` · `/skip` · `/complete` | RG NU DR | display board uses SSE `/queue/stream?unitId=` |
+| GET/POST | `/queue?unitId&stage=` · `/queue/:id/call` · `/recall` · `/serve` · `/skip` · `/complete` | RG NU DR | display board uses SSE `/queue/stream?unitId=` |
+| GET | `/appointment-rebook-tasks` · POST `/:id/cancel` | RG | roster changes close future slots and create idempotent rebooking tasks |
 | POST/GET | `/visits/:id/triage` | NU DR | triage category + vitals |
-| GET/POST | `/service-items` · `/price-lists` · `/price-lists/:id/items` | BO AC HA | Sprint 8; price edits are dated (exclusion constraint) |
+| GET/POST/PATCH | `/service-items` · `/price-lists` | BO AC HA | service and price-list CRUD |
+| GET/POST/PATCH | `/price-lists/:id/items` | BO AC HA | effective-dated prices; overlapping periods are rejected |
+| POST | `/price-lists/:id/import` | BO AC HA | CSV import supports `{ dryRun: true }` validation before atomic bulk insert |
+| GET | `/public/queue-units` · `/public/queue?unitCode=` · `/public/queue/stream?unitCode=` | public | ticket number/stage only; no patient identity or record IDs |
 
 ### Encounters, orders & prescribing — Sprint 9
 
