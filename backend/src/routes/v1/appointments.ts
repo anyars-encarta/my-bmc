@@ -372,7 +372,7 @@ router.get("/service-items", requireAnyRole([...CHARGE_READ_ROLES]), async (req,
         eq(serviceItem.active, active),
         q ? or(ilike(serviceItem.name, `%${q}%`), ilike(serviceItem.code, `%${q}%`)) : undefined,
       ))
-      .orderBy(asc(serviceItem.name))
+      .orderBy(asc(serviceItem.name), asc(serviceItem.id))
       .limit(limit).offset((page - 1) * limit);
     res.json({ data: rows.map(({ item, orgUnitName }) => ({ ...item, defaultOrgUnitName: orgUnitName })) });
   } catch (error) {

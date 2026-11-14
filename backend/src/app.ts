@@ -21,6 +21,8 @@ import { attachRequestId, auditWriteMiddleware } from "./lib/platform.js";
 import { problemHandler } from "./middleware/problemHandler.js";
 
 const app = express();
+// Vercel supplies the client IP across its single trusted ingress hop.
+app.set("trust proxy", 1);
 app.use(attachRequestId);
 
 const normalizeOrigin = (value: string) => {

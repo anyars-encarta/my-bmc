@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import {
@@ -114,7 +114,7 @@ export const generateAppointmentSlots = async (now = new Date(), days = appointm
             }).where(eq(appointmentSlot.id, existingSlot.id));
             await closeInvalidAppointmentSlots(now, existingSlot.id);
             for (const window of availableWindows) {
-              await db.insert(appointmentSlot).values({
+              const [replacement] = await db.insert(appointmentSlot).values({
                 templateId: template.id,
                 orgUnitId: template.orgUnitId,
                 providerStaffId: window.staffId,
@@ -123,11 +123,30 @@ export const generateAppointmentSlots = async (now = new Date(), days = appointm
                 endsAt: new Date(endsAt),
                 capacity: template.capacityPerSlot,
                 status: "OPEN",
-              }).onConflictDoNothing();
-              createdOrUpdated += 1;
+              }).onConflictDoUpdate({
+                target: [appointmentSlot.orgUnitId, appointmentSlot.providerStaffId, appointmentSlot.startsAt],
+                set: {
+                  templateId: template.id,
+                  rosterEntryId: window.entry.id,
+                  endsAt: new Date(endsAt),
+                  capacity: template.capacityPerSlot,
+                  status: sql`CASE WHEN ${appointmentSlot.status} = 'BLOCKED' THEN 'BLOCKED' ELSE 'OPEN' END`,
+                },
+              }).returning({ id: appointmentSlot.id });
+              if (replacement) createdOrUpdated += 1;
             }
             continue;
           }
+          const [openProviderSlot] = await db.select({ id: appointmentSlot.id })
+            .from(appointmentSlot)
+            .where(and(
+              eq(appointmentSlot.orgUnitId, template.orgUnitId),
+              eq(appointmentSlot.startsAt, new Date(startsAt)),
+              eq(appointmentSlot.status, "OPEN"),
+              isNotNull(appointmentSlot.providerStaffId),
+            ))
+            .limit(1);
+          if (openProviderSlot) continue;
         }
         const [slot] = await db.insert(appointmentSlot).values({
           templateId: template.id,

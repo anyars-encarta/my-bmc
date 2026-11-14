@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Plus, RefreshCw, UserRound } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -184,12 +184,16 @@ export function AppointmentsPage() {
   const [rescheduleSlots, setRescheduleSlots] = useState<AppointmentSlot[]>([]);
   const [rescheduleSlotsUnitId, setRescheduleSlotsUnitId] = useState("");
   const [rescheduleSlotsLoading, setRescheduleSlotsLoading] = useState(false);
+  const [rescheduleSlotsError, setRescheduleSlotsError] = useState("");
   const [busy, setBusy] = useState(false);
   const scheduleSelectionRef = useRef({ weekStart, unitId, statusFilter });
   scheduleSelectionRef.current = { weekStart, unitId, statusFilter };
   const referencesRef = useRef(references);
   referencesRef.current = references;
   const scheduleRequestId = useRef(0);
+  const rescheduleRequestId = useRef(0);
+  const rescheduleSlotsUnitIdRef = useRef(rescheduleSlotsUnitId);
+  rescheduleSlotsUnitIdRef.current = rescheduleSlotsUnitId;
   const [templateForm, setTemplateForm] = useState({
     editingId: "",
     orgUnitId: "",
@@ -226,6 +230,50 @@ export function AppointmentsPage() {
       value: slot.id,
       label: `${dateLabel(slot.startsAt.slice(0, 10))} · ${timeLabel(slot.startsAt)}–${timeLabel(slot.endsAt)} · ${slot.providerName} · ${slot.capacity - slot.bookedCount} free`,
     })), [rescheduleSlots, rescheduleSlotsUnitId, unitId]);
+
+  const loadRescheduleSlots = useCallback(async (targetUnitId: string) => {
+    const requestId = ++rescheduleRequestId.current;
+    if (!targetUnitId) {
+      rescheduleSlotsUnitIdRef.current = "";
+      setRescheduleSlots([]);
+      setRescheduleSlotsUnitId("");
+      setRescheduleSlotsLoading(false);
+      setRescheduleSlotsError("");
+      setRescheduleSlotIds({});
+      return;
+    }
+
+    const previousUnitId = rescheduleSlotsUnitIdRef.current;
+    setRescheduleSlotsLoading(true);
+    setRescheduleSlotsError("");
+    if (previousUnitId !== targetUnitId) setRescheduleSlotIds({});
+    const from = new Date().toISOString();
+    const to = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+    try {
+      const { data } = await appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", {
+        unitId: targetUnitId,
+        from,
+        to,
+        available: true,
+      }));
+      if (requestId === rescheduleRequestId.current) {
+        setRescheduleSlots(data);
+        rescheduleSlotsUnitIdRef.current = targetUnitId;
+        setRescheduleSlotsUnitId(targetUnitId);
+      }
+    } catch (error) {
+      if (requestId === rescheduleRequestId.current) {
+        if (previousUnitId !== targetUnitId) setRescheduleSlots([]);
+        rescheduleSlotsUnitIdRef.current = targetUnitId;
+        setRescheduleSlotsUnitId(targetUnitId);
+        const message = errorMessage(error, "Reschedule slots could not be loaded.");
+        setRescheduleSlotsError(message);
+        toast.error(message);
+      }
+    } finally {
+      if (requestId === rescheduleRequestId.current) setRescheduleSlotsLoading(false);
+    }
+  }, []);
 
   const loadReferences = async () => {
     const [referenceResult, templateResult] = await Promise.all([
@@ -314,36 +362,8 @@ export function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
-    if (!unitId) {
-      setRescheduleSlots([]);
-      setRescheduleSlotsUnitId("");
-      setRescheduleSlotsLoading(false);
-      return;
-    }
-    let active = true;
-    setRescheduleSlotsUnitId("");
-    setRescheduleSlotsLoading(true);
-    setRescheduleSlotIds({});
-    const from = new Date().toISOString();
-    const to = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
-    appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", {
-      unitId,
-      from,
-      to,
-      available: true,
-    }))
-      .then(({ data }) => {
-        if (active) {
-          setRescheduleSlots(data);
-          setRescheduleSlotsUnitId(unitId);
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) toast.error(errorMessage(error, "Reschedule slots could not be loaded."));
-      })
-      .finally(() => { if (active) setRescheduleSlotsLoading(false); });
-    return () => { active = false; };
-  }, [unitId]);
+    void loadRescheduleSlots(unitId);
+  }, [unitId, loadRescheduleSlots]);
 
   useEffect(() => {
     setSelectedDate(weekStart);
@@ -358,7 +378,7 @@ export function AppointmentsPage() {
   }, [weekStart, unitId, statusFilter, references.units]);
 
   const refresh = async () => {
-    await Promise.all([loadReferences(), loadSchedule()]);
+    await Promise.all([loadReferences(), loadSchedule(), loadRescheduleSlots(unitId)]);
   };
 
   const createAppointment = async () => {
@@ -380,7 +400,7 @@ export function AppointmentsPage() {
       setPatientChoice(null);
       setSelectedSlotId("");
       setReason("");
-      await loadSchedule();
+      await Promise.all([loadSchedule(), loadRescheduleSlots(unitId)]);
     } catch (error) {
       toast.error(errorMessage(error, "Appointment could not be booked."));
     } finally {
@@ -397,7 +417,7 @@ export function AppointmentsPage() {
         body: { reason: cancellationReason.trim() },
       });
       toast.success("Appointment cancelled.");
-      await loadSchedule();
+      await Promise.all([loadSchedule(), loadRescheduleSlots(unitId)]);
     } catch (error) {
       toast.error(errorMessage(error, "Appointment could not be cancelled."));
     }
@@ -434,7 +454,7 @@ export function AppointmentsPage() {
       });
       toast.success("Appointment rescheduled.");
       setRescheduleSlotIds((current) => ({ ...current, [record.id]: "" }));
-      await loadSchedule();
+      await Promise.all([loadSchedule(), loadRescheduleSlots(unitId)]);
     } catch (error) {
       toast.error(errorMessage(error, "Appointment could not be rescheduled."));
     }
@@ -638,6 +658,12 @@ export function AppointmentsPage() {
         </CardHeader>
         <CardContent className="space-y-2">
           {scheduleLoading ? <p className="text-sm text-muted-foreground" role="status">Loading appointments…</p> : null}
+          {rescheduleSlotsError ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 p-3">
+              <p className="text-sm text-destructive">{rescheduleSlotsError}</p>
+              <Button type="button" size="sm" variant="outline" disabled={rescheduleSlotsLoading} onClick={() => void loadRescheduleSlots(unitId)}>Retry destination slots</Button>
+            </div>
+          ) : null}
           {!scheduleLoading && scheduleIsCurrent && dateAppointments.length === 0 ? <p className="text-sm text-muted-foreground">No appointments for this date.</p> : null}
           {dateAppointments.map((record) => (
             <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
@@ -655,7 +681,7 @@ export function AppointmentsPage() {
                     <div className="min-w-52">
                       <SearchableSelect
                         options={rescheduleSlotOptions}
-                        disabled={rescheduleSlotsLoading || rescheduleSlotsUnitId !== unitId}
+                        disabled={rescheduleSlotsLoading}
                         value={rescheduleSlotIds[record.id] ?? ""}
                         onValueChange={(value) => setRescheduleSlotIds((current) => ({ ...current, [record.id]: value }))}
                         placeholder="New slot"

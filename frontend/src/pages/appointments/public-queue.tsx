@@ -43,24 +43,58 @@ export function PublicQueuePage() {
     setQueueLoading(true);
     setError("");
     const query = new URLSearchParams({ unitCode });
-    const stream = new EventSource(`${apiBase}/public/queue/stream?${query.toString()}`);
-    stream.onmessage = (event) => {
-      try {
-        setQueue(JSON.parse(event.data) as PublicQueue);
-        setQueueLoading(false);
-        setError("");
-      } catch {
+    let active = true;
+    let stream: EventSource | null = null;
+    let retryTimer: number | undefined;
+    let retryAttempt = 0;
+    const connect = () => {
+      if (!active) return;
+      const currentStream = new EventSource(`${apiBase}/public/queue/stream?${query.toString()}`);
+      stream = currentStream;
+      currentStream.onmessage = (event) => {
+        if (!active || stream !== currentStream) return;
+        try {
+          setQueue(JSON.parse(event.data) as PublicQueue);
+          setQueueLoading(false);
+          setError("");
+          retryAttempt = 0;
+          if (retryTimer !== undefined) {
+            window.clearTimeout(retryTimer);
+            retryTimer = undefined;
+          }
+        } catch {
+          setQueue(null);
+          setQueueLoading(false);
+          setError("Queue display data could not be read.");
+        }
+      };
+      currentStream.onerror = () => {
+        if (!active || stream !== currentStream) return;
         setQueue(null);
-        setQueueLoading(false);
-        setError("Queue display data could not be read.");
-      }
+        if (currentStream.readyState === EventSource.CLOSED) {
+          currentStream.close();
+          setQueueLoading(true);
+          setError("Live queue connection closed. Reconnecting…");
+          if (retryTimer === undefined) {
+            const delay = Math.min(1_000 * (2 ** retryAttempt), 30_000);
+            retryAttempt = Math.min(retryAttempt + 1, 5);
+            retryTimer = window.setTimeout(() => {
+              retryTimer = undefined;
+              connect();
+            }, delay);
+          }
+        } else {
+          setQueueLoading(false);
+          setError("Live queue is unavailable. Reconnecting…");
+        }
+      };
     };
-    stream.onerror = () => {
-      setQueue(null);
-      setQueueLoading(false);
-      setError("Live queue is unavailable. Reconnecting…");
+    connect();
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      stream?.close();
     };
-    return () => stream.close();
   }, [unitCode]);
 
   const selectedUnitName = units.find((unit) => unit.code === unitCode)?.name;

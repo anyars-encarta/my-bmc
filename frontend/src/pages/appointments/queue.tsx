@@ -130,7 +130,8 @@ export function QueueBoardPage() {
       if (
         selectionRef.current.unitId === requestSelection.unitId &&
         selectionRef.current.stage === requestSelection.stage &&
-        refreshOrder >= latestAppliedRequest.current
+        refreshOrder >= latestAppliedRequest.current &&
+        refreshOrder >= latestActionRefresh.current
       ) {
         setRows(data);
         setRowsKey(requestKey);

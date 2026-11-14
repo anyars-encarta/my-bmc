@@ -37,7 +37,7 @@ const publicQueueAdmissionControl = (req: Request, res: Response, next: NextFunc
   } else {
     bucket.count += 1;
   }
-  if (req.method !== "GET" || req.path !== "/queue/stream") {
+  if (req.method !== "GET" || !/^\/queue\/stream\/?$/i.test(req.path)) {
     next();
     return;
   }
