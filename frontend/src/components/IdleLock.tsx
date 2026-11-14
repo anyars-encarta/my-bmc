@@ -1,4 +1,5 @@
 import { useLogout } from "@refinedev/core";
+import { useLocation } from "react-router";
 import { useEffect, useRef } from "react";
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -6,6 +7,7 @@ const WARNING_TIMEOUT_MS = 60 * 1000;
 
 export const IdleLock = () => {
   const { mutate: logout } = useLogout();
+  const { pathname } = useLocation();
   const idleTimerRef = useRef<number | null>(null);
   const warningTimerRef = useRef<number | null>(null);
 
@@ -18,6 +20,11 @@ export const IdleLock = () => {
         window.clearTimeout(warningTimerRef.current);
       }
     };
+
+    if (pathname === "/queue-display") {
+      clearTimers();
+      return clearTimers;
+    }
 
     const startTimers = () => {
       clearTimers();
@@ -53,7 +60,7 @@ export const IdleLock = () => {
       window.removeEventListener("touchstart", onActivity);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [logout]);
+  }, [logout, pathname]);
 
   return null;
 };

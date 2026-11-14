@@ -5,6 +5,7 @@ import { materializeFixedScheduleWindow } from "./jobs/fixedScheduleMaterializer
 import { seedGhanaPublicHolidays } from "./jobs/ghanaHolidaySeed.js";
 import { startAttendanceJobs } from "./jobs/attendanceJobs.js";
 import { startPatientJobs } from "./jobs/patientJobs.js";
+import { startAppointmentJobs } from "./jobs/appointmentJobs.js";
 
 const PORT = 8000;
 
@@ -28,6 +29,7 @@ const start = async () => {
 
   startAttendanceJobs();
   startPatientJobs();
+  startAppointmentJobs();
 
   setInterval(async () => {
     try {

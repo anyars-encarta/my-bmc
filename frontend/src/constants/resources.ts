@@ -1,12 +1,14 @@
 import {
   BanknoteArrowDown,
   ArrowLeftRight,
+  BadgeDollarSign,
   ClipboardCheck,
   ClipboardList,
   Coins,
   Building2,
   CalendarDays,
   CalendarRange,
+  CalendarCheck,
   Fingerprint,
   GitMerge,
   HeartPulse,
@@ -32,7 +34,7 @@ type AppResource = {
   show?: string;
   canDelete?: boolean;
   allowedRoles?: string[];
-  menuGroup: "Administration" | "Attendance" | "Finance" | "Front Desk" | "Overview" | "Workforce";
+  menuGroup: "Administration" | "Attendance" | "Clinical" | "Finance" | "Front Desk" | "Overview" | "Workforce";
   label: string;
   icon: LucideIcon;
 };
@@ -55,6 +57,30 @@ export const appResources: AppResource[] = [
     menuGroup: "Front Desk",
     label: "Patients",
     icon: HeartPulse,
+  },
+  {
+    name: "appointments",
+    list: "/appointments",
+    allowedRoles: ["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"],
+    menuGroup: "Clinical",
+    label: "Appointments",
+    icon: CalendarCheck,
+  },
+  {
+    name: "queue",
+    list: "/queue-board",
+    allowedRoles: ["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"],
+    menuGroup: "Clinical",
+    label: "Queue Board",
+    icon: CalendarDays,
+  },
+  {
+    name: "charge-master",
+    list: "/charge-master",
+    allowedRoles: ["super_admin", "hospital_admin", "cashier", "billing_officer"],
+    menuGroup: "Finance",
+    label: "Services & Prices",
+    icon: BadgeDollarSign,
   },
   {
     name: "patient-duplicates",

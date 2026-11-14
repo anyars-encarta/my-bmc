@@ -140,6 +140,7 @@ export const notification = pgTable("notification", {
   status: varchar("status", { length: 20 }).default('QUEUED').notNull(),
   attempts: integer("attempts").default(0).notNull(),
   lastError: text("last_error"),
+  claimStartedAt: timestamp("claim_started_at", { withTimezone: true }),
   scheduledFor: timestamp("scheduled_for", { withTimezone: true }).defaultNow().notNull(),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   relatedEntityType: varchar("related_entity_type", { length: 40 }),
@@ -933,6 +934,21 @@ export const queueTicket = pgTable("queue_ticket", {
 
 export type QueueTicket = typeof queueTicket.$inferSelect;
 export type NewQueueTicket = typeof queueTicket.$inferInsert;
+
+export const appointmentRebookTask = pgTable("appointment_rebook_task", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  appointmentId: uuid("appointment_id").notNull(),
+  closedSlotId: uuid("closed_slot_id").notNull(),
+  status: varchar("status", { length: 12 }).default("OPEN").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => ({
+  appointmentSlotUnique: uniqueIndex("appointment_rebook_task_appointment_slot_uq")
+    .on(table.appointmentId, table.closedSlotId),
+}));
+
+export type AppointmentRebookTask = typeof appointmentRebookTask.$inferSelect;
+export type NewAppointmentRebookTask = typeof appointmentRebookTask.$inferInsert;
 
 export const triageAssessment = pgTable("triage_assessment", {
   id: uuid("id").primaryKey().defaultRandom(),
