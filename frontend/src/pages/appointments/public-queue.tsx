@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/ui/searchable-select";
-import { BACKEND_BASE_URL } from "@/constants";
+import { getPublicApiBase } from "@/lib/public-api";
 
 type QueueUnit = { code: string; name: string };
 type PublicQueue = {
@@ -11,13 +11,14 @@ type PublicQueue = {
   tickets: Array<{ ticketNo: string; stage: string; status: string; issuedAt: string }>;
 };
 
-const apiBase = BACKEND_BASE_URL.replace(/\/+$/, "");
+const apiBase = getPublicApiBase();
 
 export function PublicQueuePage() {
   const [units, setUnits] = useState<QueueUnit[]>([]);
   const [unitCode, setUnitCode] = useState("");
   const [queue, setQueue] = useState<PublicQueue | null>(null);
   const [error, setError] = useState("");
+  const [queueLoading, setQueueLoading] = useState(false);
   const options = useMemo<SearchableSelectOption[]>(() =>
     units.map((unit) => ({ value: unit.code, label: unit.name })), [units]);
 
@@ -35,30 +36,51 @@ export function PublicQueuePage() {
   useEffect(() => {
     if (!unitCode) {
       setQueue(null);
+      setQueueLoading(false);
       return;
     }
+    setQueue(null);
+    setQueueLoading(true);
+    setError("");
     const query = new URLSearchParams({ unitCode });
     const stream = new EventSource(`${apiBase}/public/queue/stream?${query.toString()}`);
     stream.onmessage = (event) => {
       try {
         setQueue(JSON.parse(event.data) as PublicQueue);
+        setQueueLoading(false);
         setError("");
       } catch {
+        setQueueLoading(false);
         setError("Queue display data could not be read.");
       }
     };
-    stream.onerror = () => setError("Live queue connection was interrupted. Reconnecting…");
+    stream.onerror = () => {
+      setQueueLoading(false);
+      setError("Live queue is unavailable. Reconnecting…");
+    };
     return () => stream.close();
   }, [unitCode]);
+
+  const selectedUnitName = units.find((unit) => unit.code === unitCode)?.name;
+  const heading = queue?.unitName ?? (queueLoading
+    ? `Loading ${selectedUnitName ?? "queue"}…`
+    : error ? `${selectedUnitName ?? "Queue"} unavailable` : "Queue display");
+  const selectUnit = (code: string) => {
+    setQueue(null);
+    setQueueLoading(Boolean(code));
+    setError("");
+    setUnitCode(code);
+  };
 
   return (
     <main className="min-h-screen bg-background p-4 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div><p className="text-sm font-medium uppercase tracking-wide text-primary">Encarta · Patient queue</p><h1 className="text-3xl font-semibold sm:text-5xl">{queue?.unitName ?? "Queue display"}</h1></div>
-          <div className="w-full max-w-sm space-y-2"><Label>Clinic</Label><SearchableSelect options={options} value={unitCode} onValueChange={setUnitCode} placeholder="Choose a clinic" searchPlaceholder="Search clinics…" /></div>
+          <div><p className="text-sm font-medium uppercase tracking-wide text-primary">Encarta · Patient queue</p><h1 className="text-3xl font-semibold sm:text-5xl">{heading}</h1></div>
+          <div className="w-full max-w-sm space-y-2"><Label>Clinic</Label><SearchableSelect options={options} value={unitCode} onValueChange={selectUnit} placeholder="Choose a clinic" searchPlaceholder="Search clinics…" /></div>
         </div>
         {error ? <p className="rounded-md border border-destructive/40 p-3 text-destructive" role="status">{error}</p> : null}
+        {queueLoading ? <p className="py-16 text-center text-xl text-muted-foreground" role="status">Connecting to the selected clinic queue…</p> : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {(queue?.tickets ?? []).map((ticket) => (
             <Card key={`${ticket.ticketNo}-${ticket.stage}`} className="border-primary/20">

@@ -73,7 +73,7 @@ router.get("/queue/stream", async (req, res, next) => {
       }
     };
     await send();
-    timer = setInterval(() => void send(), 3000);
+    if (active) timer = setInterval(() => void send(), 3000);
   } catch (error) {
     next(error);
   }

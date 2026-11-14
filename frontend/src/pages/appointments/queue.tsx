@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,11 @@ export function QueueBoardPage() {
   const [unitId, setUnitId] = useState("");
   const [stage, setStage] = useState("ALL");
   const [rows, setRows] = useState<QueueRow[]>([]);
+  const [rowsKey, setRowsKey] = useState("");
+  const selectionRef = useRef({ unitId, stage });
+  selectionRef.current = { unitId, stage };
+  const selectionKey = `${unitId}|${stage}`;
+  const visibleRows = rowsKey === selectionKey ? rows : [];
   const options = useMemo<SearchableSelectOption[]>(() =>
     units.map((unit) => ({ value: unit.id, label: `${unit.name} · ${unit.code}` })), [units]);
 
@@ -53,10 +58,22 @@ export function QueueBoardPage() {
   useEffect(() => {
     if (!unitId) return;
     let active = true;
-    const load = () => appointmentRequest<QueueRow[]>(
-      withQuery("queue", { unitId, stage: stage === "ALL" ? "" : stage }),
-    ).then(({ data }) => { if (active) setRows(data); })
-      .catch((error: unknown) => { if (active) toast.error(errorMessage(error, "Queue could not be refreshed.")); });
+    const requestKey = `${unitId}|${stage}`;
+    setRows([]);
+    setRowsKey("");
+    const load = async () => {
+      try {
+        const { data } = await appointmentRequest<QueueRow[]>(
+          withQuery("queue", { unitId, stage: stage === "ALL" ? "" : stage }),
+        );
+        if (active) {
+          setRows(data);
+          setRowsKey(requestKey);
+        }
+      } catch (error) {
+        if (active) toast.error(errorMessage(error, "Queue could not be refreshed."));
+      }
+    };
     void load();
     const timer = window.setInterval(() => void load(), 5000);
     return () => { active = false; window.clearInterval(timer); };
@@ -69,8 +86,16 @@ export function QueueBoardPage() {
         body: { counter: row.ticket.counter },
       });
       toast.success(`Ticket ${row.ticket.ticketNo} updated.`);
-      const { data } = await appointmentRequest<QueueRow[]>(withQuery("queue", { unitId, stage: stage === "ALL" ? "" : stage }));
-      setRows(data);
+      const requestSelection = { unitId, stage };
+      const requestKey = `${requestSelection.unitId}|${requestSelection.stage}`;
+      const { data } = await appointmentRequest<QueueRow[]>(withQuery("queue", {
+        unitId: requestSelection.unitId,
+        stage: requestSelection.stage === "ALL" ? "" : requestSelection.stage,
+      }));
+      if (selectionRef.current.unitId === requestSelection.unitId && selectionRef.current.stage === requestSelection.stage) {
+        setRows(data);
+        setRowsKey(requestKey);
+      }
     } catch (error) {
       toast.error(errorMessage(error, "Queue ticket could not be updated."));
     }
@@ -89,9 +114,9 @@ export function QueueBoardPage() {
             <div className="space-y-2"><Label>Clinic</Label><SearchableSelect options={options} value={unitId} onValueChange={setUnitId} placeholder="Choose clinic" searchPlaceholder="Search clinics…" /></div>
             <div className="space-y-2"><Label>Stage</Label><Select value={stage} onValueChange={setStage}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">All stages</SelectItem>{stages.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
           </div>
-          {rows.length === 0 ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No active tickets in this queue.</p> : null}
+          {visibleRows.length === 0 ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No active tickets in this queue.</p> : null}
           <div className="space-y-2">
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <div key={row.ticket.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
                 <div><p className="font-semibold">{row.ticket.ticketNo} · {row.patientName}</p><p className="text-sm text-muted-foreground">{row.ticket.stage} · {row.ticket.status} · Priority {row.ticket.priority}</p></div>
                 <div className="flex flex-wrap items-center gap-2">

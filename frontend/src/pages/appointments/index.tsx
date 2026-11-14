@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Plus, RefreshCw, UserRound } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -178,8 +178,15 @@ export function AppointmentsPage() {
   const [bookedVia, setBookedVia] = useState("FRONT_DESK");
   const [reason, setReason] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [loadedScheduleKey, setLoadedScheduleKey] = useState("");
   const [rescheduleSlotIds, setRescheduleSlotIds] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const scheduleSelectionRef = useRef({ weekStart, unitId, statusFilter });
+  scheduleSelectionRef.current = { weekStart, unitId, statusFilter };
+  const referencesRef = useRef(references);
+  referencesRef.current = references;
+  const scheduleRequestId = useRef(0);
   const [templateForm, setTemplateForm] = useState({
     editingId: "",
     orgUnitId: "",
@@ -206,11 +213,16 @@ export function AppointmentsPage() {
     }))], [references.providers]);
   const serviceOptions = useMemo<SearchableSelectOption[]>(() =>
     [{ value: "", label: "No consultation service" }, ...references.consultationServices.map((service) => ({ value: service.id, label: `${service.name} · ${service.code}` }))], [references.consultationServices]);
+  const currentScheduleKey = `${weekStart}|${unitId}|${statusFilter}`;
+  const scheduleIsCurrent = Boolean(unitId) && !scheduleLoading && loadedScheduleKey === currentScheduleKey;
+  const visibleSlots = scheduleIsCurrent ? slots : [];
+  const visibleAppointments = scheduleIsCurrent ? appointments : [];
+  const visibleRebookTasks = scheduleIsCurrent ? rebookTasks : [];
   const slotOptions = useMemo<SearchableSelectOption[]>(() =>
-    slots.filter((slot) => slot.available).map((slot) => ({
+    visibleSlots.filter((slot) => slot.available).map((slot) => ({
       value: slot.id,
-      label: `${timeLabel(slot.startsAt)}–${timeLabel(slot.endsAt)} · ${slot.providerName} · ${slot.capacity - slot.bookedCount} free`,
-    })), [slots]);
+      label: `${dateLabel(slot.startsAt.slice(0, 10))} · ${timeLabel(slot.startsAt)}–${timeLabel(slot.endsAt)} · ${slot.providerName} · ${slot.capacity - slot.bookedCount} free`,
+    })), [visibleSlots]);
 
   const loadReferences = async () => {
     const [referenceResult, templateResult] = await Promise.all([
@@ -226,23 +238,59 @@ export function AppointmentsPage() {
     }));
   };
   const loadSchedule = async () => {
-    if (!unitId) return;
-    const from = new Date(`${weekStart}T00:00:00.000Z`).toISOString();
-    const to = new Date(`${shiftDate(weekStart, 7)}T00:00:00.000Z`).toISOString();
-    const [slotResult, appointmentResult, taskResult] = await Promise.all([
-      appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", { unitId, from, to })),
-      appointmentRequest<AppointmentRecord[]>(withQuery("appointments", {
-        from,
-        to,
-        unitId,
-        status: statusFilter === "ALL" ? "" : statusFilter,
-        limit: 200,
-      })),
-      appointmentRequest<RebookTask[]>("appointment-rebook-tasks"),
-    ]);
-    setSlots(slotResult.data);
-    setAppointments(appointmentResult.data);
-    setRebookTasks(taskResult.data.filter((task) => task.unitName === references.units.find((unit) => unit.id === unitId)?.name));
+    const selection = scheduleSelectionRef.current;
+    const requestId = ++scheduleRequestId.current;
+    const selectionKey = `${selection.weekStart}|${selection.unitId}|${selection.statusFilter}`;
+    if (!selection.unitId) {
+      setSlots([]);
+      setAppointments([]);
+      setRebookTasks([]);
+      setLoadedScheduleKey("");
+      setScheduleLoading(false);
+      return;
+    }
+
+    setScheduleLoading(true);
+    setLoadedScheduleKey("");
+    setSlots([]);
+    setAppointments([]);
+    setRebookTasks([]);
+    const isCurrent = () =>
+      scheduleRequestId.current === requestId &&
+      `${scheduleSelectionRef.current.weekStart}|${scheduleSelectionRef.current.unitId}|${scheduleSelectionRef.current.statusFilter}` === selectionKey;
+    try {
+      const from = new Date(`${selection.weekStart}T00:00:00.000Z`).toISOString();
+      const to = new Date(`${shiftDate(selection.weekStart, 7)}T00:00:00.000Z`).toISOString();
+      const appointmentsRequest = async () => {
+        const allAppointments: AppointmentRecord[] = [];
+        const limit = 200;
+        for (let page = 1; ; page += 1) {
+          const result = await appointmentRequest<AppointmentRecord[]>(withQuery("appointments", {
+            from,
+            to,
+            unitId: selection.unitId,
+            status: selection.statusFilter === "ALL" ? "" : selection.statusFilter,
+            page,
+            limit,
+          }));
+          allAppointments.push(...result.data);
+          if (result.data.length < limit) return allAppointments;
+        }
+      };
+      const [slotResult, appointmentRows, taskResult] = await Promise.all([
+        appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", { unitId: selection.unitId, from, to })),
+        appointmentsRequest(),
+        appointmentRequest<RebookTask[]>("appointment-rebook-tasks"),
+      ]);
+      if (!isCurrent()) return;
+      setSlots(slotResult.data);
+      setAppointments(appointmentRows);
+      const unitName = referencesRef.current.units.find((unit) => unit.id === selection.unitId)?.name;
+      setRebookTasks(taskResult.data.filter((task) => task.unitName === unitName));
+      setLoadedScheduleKey(selectionKey);
+    } finally {
+      if (requestId === scheduleRequestId.current) setScheduleLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -266,6 +314,10 @@ export function AppointmentsPage() {
   };
 
   const createAppointment = async () => {
+    if (!scheduleIsCurrent) {
+      toast.error("Wait for the selected clinic schedule to finish loading.");
+      return;
+    }
     if (!patientChoice || !selectedSlotId) {
       toast.error("Choose a patient and an available slot.");
       return;
@@ -305,10 +357,10 @@ export function AppointmentsPage() {
 
   const checkIn = async (record: AppointmentRecord) => {
     try {
-      const { data } = await appointmentRequest<{ visitNo: string; ticketNo: string; stage: string }>(
+      const { data } = await appointmentRequest<{ visit_no: string; ticket_no: string; stage: string }>(
         `appointments/${record.id}/check-in`, { method: "POST" },
       );
-      toast.success(`Checked in. Ticket ${data.ticketNo} · ${data.stage}.`);
+      toast.success(`Checked in. Ticket ${data.ticket_no} · ${data.stage}.`);
       await loadSchedule();
     } catch (error) {
       toast.error(errorMessage(error, "Patient could not be checked in."));
@@ -316,6 +368,10 @@ export function AppointmentsPage() {
   };
 
   const reschedule = async (record: AppointmentRecord) => {
+    if (!scheduleIsCurrent) {
+      toast.error("Wait for the selected clinic schedule to finish loading.");
+      return;
+    }
     const newSlotId = rescheduleSlotIds[record.id];
     if (!newSlotId) {
       toast.error("Choose an available slot to reschedule.");
@@ -398,8 +454,8 @@ export function AppointmentsPage() {
     }
   };
 
-  const dateSlots = slots.filter((slot) => slot.startsAt.slice(0, 10) === selectedDate);
-  const dateAppointments = appointments.filter((record) => record.scheduledStart.slice(0, 10) === selectedDate);
+  const dateSlots = visibleSlots.filter((slot) => slot.startsAt.slice(0, 10) === selectedDate);
+  const dateAppointments = visibleAppointments.filter((record) => record.scheduledStart.slice(0, 10) === selectedDate);
 
   return (
     <div className="space-y-5">
@@ -446,7 +502,7 @@ export function AppointmentsPage() {
               >
                 <span>{dateLabel(day)}</span>
                 <span className="text-xs opacity-75">
-                  {slots.filter((slot) => slot.startsAt.slice(0, 10) === day && slot.available).length} open
+                  {visibleSlots.filter((slot) => slot.startsAt.slice(0, 10) === day && slot.available).length} open
                 </span>
               </Button>
             ))}
@@ -454,7 +510,13 @@ export function AppointmentsPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <h3 className="font-medium">Available slots · {dateLabel(selectedDate)}</h3>
-              {dateSlots.filter((slot) => slot.available).length === 0 ? (
+              {scheduleLoading ? (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground" role="status">Loading the selected clinic schedule…</p>
+              ) : !unitId ? (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Choose a clinic to view bookable slots.</p>
+              ) : !scheduleIsCurrent ? (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Schedule is unavailable. Refresh to try again.</p>
+              ) : dateSlots.filter((slot) => slot.available).length === 0 ? (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                   No bookable slots. Slots appear only when clinic providers are rostered.
                 </p>
@@ -462,6 +524,7 @@ export function AppointmentsPage() {
                 <button
                   type="button"
                   key={slot.id}
+                  disabled={!scheduleIsCurrent}
                   onClick={() => setSelectedSlotId(slot.id)}
                   className={`w-full rounded-md border p-3 text-left ${selectedSlotId === slot.id ? "border-primary bg-primary/5" : "hover:bg-muted"}`}
                 >
@@ -505,7 +568,7 @@ export function AppointmentsPage() {
                 <Label htmlFor="appointment-reason">Reason (optional)</Label>
                 <Input id="appointment-reason" maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} />
               </div>
-              <Button disabled={busy || !selectedSlotId || !patientChoice} onClick={() => void createAppointment()}>
+              <Button disabled={busy || !scheduleIsCurrent || !selectedSlotId || !patientChoice} onClick={() => void createAppointment()}>
                 <Plus aria-hidden="true" className="mr-2 size-4" /> Book appointment
               </Button>
             </div>
@@ -526,7 +589,8 @@ export function AppointmentsPage() {
           </Select>
         </CardHeader>
         <CardContent className="space-y-2">
-          {dateAppointments.length === 0 ? <p className="text-sm text-muted-foreground">No appointments for this date.</p> : null}
+          {scheduleLoading ? <p className="text-sm text-muted-foreground" role="status">Loading appointments…</p> : null}
+          {!scheduleLoading && scheduleIsCurrent && dateAppointments.length === 0 ? <p className="text-sm text-muted-foreground">No appointments for this date.</p> : null}
           {dateAppointments.map((record) => (
             <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
               <div className="min-w-56">
@@ -543,13 +607,14 @@ export function AppointmentsPage() {
                     <div className="min-w-52">
                       <SearchableSelect
                         options={slotOptions}
+                        disabled={!scheduleIsCurrent}
                         value={rescheduleSlotIds[record.id] ?? ""}
                         onValueChange={(value) => setRescheduleSlotIds((current) => ({ ...current, [record.id]: value }))}
                         placeholder="New slot"
                         searchPlaceholder="Search available times…"
                       />
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => void reschedule(record)}>Reschedule</Button>
+                    <Button size="sm" variant="outline" disabled={!scheduleIsCurrent} onClick={() => void reschedule(record)}>Reschedule</Button>
                     <Button size="sm" variant="outline" onClick={() => void cancelAppointment(record)}>Cancel</Button>
                   </>
                 ) : null}
@@ -563,8 +628,8 @@ export function AppointmentsPage() {
       <Card>
         <CardHeader><CardTitle>Rebooking tasks</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          {rebookTasks.length === 0 ? <p className="text-sm text-muted-foreground">No patients need rebooking.</p> : null}
-          {rebookTasks.map((task) => (
+          {visibleRebookTasks.length === 0 ? <p className="text-sm text-muted-foreground">No patients need rebooking.</p> : null}
+          {visibleRebookTasks.map((task) => (
             <div key={task.task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
               <div><p className="font-medium">{task.patientName} · {task.unitName}</p><p className="text-sm text-muted-foreground">Appointment slot changed · {new Date(task.appointment.scheduledStart).toLocaleString()}</p></div>
               <Badge variant="destructive">Needs rebooking</Badge>

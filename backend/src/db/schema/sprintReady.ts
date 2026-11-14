@@ -140,6 +140,7 @@ export const notification = pgTable("notification", {
   status: varchar("status", { length: 20 }).default('QUEUED').notNull(),
   attempts: integer("attempts").default(0).notNull(),
   lastError: text("last_error"),
+  claimStartedAt: timestamp("claim_started_at", { withTimezone: true }),
   scheduledFor: timestamp("scheduled_for", { withTimezone: true }).defaultNow().notNull(),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   relatedEntityType: varchar("related_entity_type", { length: 40 }),

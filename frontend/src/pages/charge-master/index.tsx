@@ -1,5 +1,5 @@
 import { Download, Pencil, Upload } from "lucide-react";
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -48,8 +48,15 @@ type PriceItem = {
   service: { code: string; name: string; category: string };
 };
 type Unit = { id: string; name: string; code: string };
-type ImportResult = { dryRun: boolean; imported: number; validRows: number; errors: Array<{ row: number; message: string }> };
-type ApiData<T> = { data: T };
+type ImportResult = {
+  dryRun: boolean;
+  imported: number;
+  validRows: number;
+  errors: Array<{ row: number; message: string }>;
+  validatedCsv: string;
+  validatedPriceListId: string;
+};
+// type ApiData<T> = { data: T };
 
 const categories = [
   "REGISTRATION", "CONSULTATION", "PROCEDURE", "LAB", "IMAGING",
@@ -101,6 +108,10 @@ export function ChargeMasterPage() {
   const [csv, setCsv] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const selectedPriceListRef = useRef(selectedPriceListId);
+  selectedPriceListRef.current = selectedPriceListId;
+  const csvRef = useRef(csv);
+  csvRef.current = csv;
   const unitOptions = useMemo<SearchableSelectOption[]>(() =>
     units.map((unit) => ({ value: unit.id, label: `${unit.name} · ${unit.code}` })), [units]);
   const serviceOptions = useMemo<SearchableSelectOption[]>(() =>
@@ -125,15 +136,32 @@ export function ChargeMasterPage() {
     setServices([...activeServices.data, ...inactiveServices.data]);
     setPriceLists(lists.data);
     setUnits(refs.data.units);
-    setSelectedPriceListId((current) => current || lists.data.find((item) => item.active)?.id || "");
-  };
-  const loadPriceItems = async () => {
-    if (!selectedPriceListId) {
+    const selectedId = selectedPriceListRef.current || lists.data.find((item) => item.active)?.id || "";
+    if (selectedId !== selectedPriceListRef.current) {
+      selectedPriceListRef.current = selectedId;
+      setSelectedPriceListId(selectedId);
       setPriceItems([]);
+      setImportResult(null);
+    }
+  };
+  const loadPriceItems = async (priceListId = selectedPriceListRef.current) => {
+    if (!priceListId) {
+      if (selectedPriceListRef.current === priceListId) setPriceItems([]);
       return;
     }
-    const result = await appointmentRequest<PriceItem[]>(`price-lists/${selectedPriceListId}/items`);
-    setPriceItems(result.data);
+    const result = await appointmentRequest<PriceItem[]>(`price-lists/${priceListId}/items`);
+    if (selectedPriceListRef.current === priceListId) setPriceItems(result.data);
+  };
+  const selectPriceList = (priceListId: string) => {
+    selectedPriceListRef.current = priceListId;
+    setSelectedPriceListId(priceListId);
+    setPriceItems([]);
+    setImportResult(null);
+  };
+  const updateCsv = (value: string) => {
+    csvRef.current = value;
+    setCsv(value);
+    setImportResult(null);
   };
 
   useEffect(() => {
@@ -178,7 +206,7 @@ export function ChargeMasterPage() {
       });
       toast.success(editingId ? "Price list updated." : "Price list created.");
       setPriceListForm(emptyPriceList);
-      setSelectedPriceListId(data.id);
+      selectPriceList(data.id);
       await loadData();
     } catch (error) {
       toast.error(errorMessage(error, "Price list could not be saved."));
@@ -215,22 +243,42 @@ export function ChargeMasterPage() {
   const fileChanged = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setCsv(await file.text());
-    setImportResult(null);
+    updateCsv(await file.text());
   };
   const importCsv = async (dryRun: boolean) => {
-    if (!selectedPriceListId || !csv.trim()) {
+    const inputCsv = csvRef.current;
+    const inputPriceListId = selectedPriceListRef.current;
+    if (!inputPriceListId || !inputCsv.trim()) {
       toast.error("Choose a price list and select or paste a CSV file.");
+      return;
+    }
+    if (!dryRun && (
+      !importResult ||
+      importResult.validatedCsv !== inputCsv ||
+      importResult.validatedPriceListId !== inputPriceListId ||
+      !importResult.dryRun ||
+      importResult.errors.length > 0
+    )) {
+      toast.error("Run a fresh CSV validation for the selected price list and contents.");
       return;
     }
     setBusy(true);
     setImportResult(null);
     try {
-      const { data } = await appointmentRequest<ImportResult>(`price-lists/${selectedPriceListId}/import`, {
+      const { data } = await appointmentRequest<Omit<ImportResult, "validatedCsv" | "validatedPriceListId">>(`price-lists/${inputPriceListId}/import`, {
         method: "POST",
-        body: { csv, dryRun },
+        body: { csv: inputCsv, dryRun },
       });
-      setImportResult(data);
+      if (dryRun && (csvRef.current !== inputCsv || selectedPriceListRef.current !== inputPriceListId)) {
+        return;
+      }
+      if (csvRef.current === inputCsv && selectedPriceListRef.current === inputPriceListId) {
+        setImportResult({
+          ...data,
+          validatedCsv: inputCsv,
+          validatedPriceListId: inputPriceListId,
+        });
+      }
       if (dryRun) {
         toast.success(`${data.validRows} valid row(s) found. No prices were changed.`);
       } else {
@@ -243,6 +291,12 @@ export function ChargeMasterPage() {
       setBusy(false);
     }
   };
+  const canImport = Boolean(
+    importResult?.dryRun &&
+    importResult.errors.length === 0 &&
+    importResult.validatedCsv === csv &&
+    importResult.validatedPriceListId === selectedPriceListId,
+  );
 
   return (
     <div className="space-y-5">
@@ -258,7 +312,7 @@ export function ChargeMasterPage() {
             <div className="space-y-2"><Label htmlFor="service-code">Service code</Label><Input id="service-code" maxLength={30} value={serviceForm.code} onChange={(event) => setServiceForm({ ...serviceForm, code: event.target.value })} /></div>
             <div className="space-y-2"><Label htmlFor="service-name">Service name</Label><Input id="service-name" maxLength={200} value={serviceForm.name} onChange={(event) => setServiceForm({ ...serviceForm, name: event.target.value })} /></div>
             <div className="space-y-2"><Label>Category</Label><Select value={serviceForm.category} onValueChange={(category) => setServiceForm({ ...serviceForm, category })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map((category) => <SelectItem key={category} value={category}>{category.replaceAll("_", " ")}</SelectItem>)}</SelectContent></Select></div>
-            <div className="space-y-2"><Label>Default clinic (optional)</Label><SearchableSelect options={unitOptions} value={serviceForm.defaultOrgUnitId} onValueChange={(defaultOrgUnitId) => setServiceForm({ ...serviceForm, defaultOrgUnitId })} placeholder="Any clinic" searchPlaceholder="Search clinics…" /></div>
+            <div className="space-y-2"><Label>Default clinic (optional)</Label><SearchableSelect options={unitOptions} value={serviceForm.defaultOrgUnitId} onValueChange={(defaultOrgUnitId) => setServiceForm({ ...serviceForm, defaultOrgUnitId })} placeholder="Any clinic" searchPlaceholder="Search clinics…" /><Button type="button" size="sm" variant="ghost" onClick={() => setServiceForm({ ...serviceForm, defaultOrgUnitId: "" })}>Clear clinic</Button></div>
             <div className="space-y-2"><Label htmlFor="nhis-code">NHIS tariff code</Label><Input id="nhis-code" maxLength={30} value={serviceForm.nhisTariffCode} onChange={(event) => setServiceForm({ ...serviceForm, nhisTariffCode: event.target.value })} /></div>
             <div className="space-y-2"><Label htmlFor="gdrg-code">G-DRG code</Label><Input id="gdrg-code" maxLength={15} value={serviceForm.gdrgCode} onChange={(event) => setServiceForm({ ...serviceForm, gdrgCode: event.target.value })} /></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={serviceForm.isBillable} onChange={(event) => setServiceForm({ ...serviceForm, isBillable: event.target.checked })} /> Billable</label>
@@ -296,7 +350,7 @@ export function ChargeMasterPage() {
             {priceLists.map((list) => (
               <div key={list.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
                 <div><p className="font-medium">{list.name} · {list.code}</p><p className="text-sm text-muted-foreground">{list.payerType} · {list.currency}</p></div>
-                <div className="flex gap-2"><Badge variant={list.isDefault ? "default" : "outline"}>{list.isDefault ? "Default" : list.active ? "Active" : "Inactive"}</Badge><Button size="sm" variant="outline" onClick={() => { setPriceListForm({ editingId: list.id, code: list.code, name: list.name, payerType: list.payerType, currency: list.currency, isDefault: list.isDefault, active: list.active }); setSelectedPriceListId(list.id); }}>Edit</Button></div>
+                <div className="flex gap-2"><Badge variant={list.isDefault ? "default" : "outline"}>{list.isDefault ? "Default" : list.active ? "Active" : "Inactive"}</Badge><Button size="sm" variant="outline" onClick={() => { setPriceListForm({ editingId: list.id, code: list.code, name: list.name, payerType: list.payerType, currency: list.currency, isDefault: list.isDefault, active: list.active }); selectPriceList(list.id); }}>Edit</Button></div>
               </div>
             ))}
           </div>
@@ -306,7 +360,7 @@ export function ChargeMasterPage() {
       <Card>
         <CardHeader><CardTitle>Effective-dated prices & CSV import</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2"><Label>Price list</Label><SearchableSelect options={priceListOptions} value={selectedPriceListId} onValueChange={setSelectedPriceListId} placeholder="Choose price list" searchPlaceholder="Search price lists…" /></div>
+          <div className="space-y-2"><Label>Price list</Label><SearchableSelect options={priceListOptions} value={selectedPriceListId} onValueChange={selectPriceList} placeholder="Choose price list" searchPlaceholder="Search price lists…" /></div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2"><Label>Service</Label><SearchableSelect options={serviceOptions} value={priceForm.serviceItemId} onValueChange={(serviceItemId) => setPriceForm({ ...priceForm, serviceItemId })} placeholder="Choose service" searchPlaceholder="Search services…" /></div>
             <div className="space-y-2"><Label htmlFor="price-amount">Price</Label><Input id="price-amount" type="number" min="0" step="0.01" value={priceForm.price} onChange={(event) => setPriceForm({ ...priceForm, price: event.target.value })} /></div>
@@ -321,8 +375,8 @@ export function ChargeMasterPage() {
           <div className="space-y-3 rounded-md border border-dashed p-4">
             <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-medium">Import price CSV</h3><p className="text-sm text-muted-foreground">Required columns: service_code, price, effective_from, effective_to.</p></div><Button type="button" variant="outline" onClick={downloadCsvTemplate}><Download aria-hidden="true" className="mr-2 size-4" />Download template</Button></div>
             <Input type="file" accept=".csv,text/csv" onChange={(event) => void fileChanged(event)} />
-            <textarea className="min-h-28 w-full rounded-md border bg-transparent p-3 text-sm" aria-label="CSV contents" placeholder="Or paste CSV contents here…" value={csv} onChange={(event) => { setCsv(event.target.value); setImportResult(null); }} />
-            <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void importCsv(true)}><Upload aria-hidden="true" className="mr-2 size-4" />Dry run</Button><Button disabled={busy || !importResult || importResult.errors.length > 0} onClick={() => void importCsv(false)}>Import validated rows</Button></div>
+            <textarea className="min-h-28 w-full rounded-md border bg-transparent p-3 text-sm" aria-label="CSV contents" placeholder="Or paste CSV contents here…" value={csv} onChange={(event) => updateCsv(event.target.value)} />
+            <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void importCsv(true)}><Upload aria-hidden="true" className="mr-2 size-4" />Dry run</Button><Button disabled={busy || !canImport} onClick={() => void importCsv(false)}>Import validated rows</Button></div>
             {importResult ? <div className="space-y-2 rounded-md bg-muted p-3 text-sm"><p>{importResult.dryRun ? `Dry run: ${importResult.validRows} valid row(s).` : `Imported ${importResult.imported} row(s).`}</p>{importResult.errors.map((error, index) => <p key={`${error.row}-${index}`} className="text-destructive">Row {error.row}: {error.message}</p>)}</div> : null}
           </div>
         </CardContent>
