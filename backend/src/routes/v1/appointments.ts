@@ -77,6 +77,12 @@ const requestId = (req: Request, key: string) => {
   return value;
 };
 const roleList = (req: Request) => (req.user?.roles ?? []).filter(isAppRole);
+const hasSqlStateCause = (error: unknown, code: string) => {
+  if (typeof error !== "object" || error === null || !("cause" in error)) return false;
+  const cause = error.cause;
+  return typeof cause === "object" && cause !== null && "code" in cause &&
+    String((cause as { code: unknown }).code) === code;
+};
 
 const scopedUnitIds = async (req: Request) => {
   const roles = roleList(req);
@@ -355,6 +361,8 @@ router.get("/service-items", requireAnyRole([...CHARGE_READ_ROLES]), async (req,
   try {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const active = req.query.active === "false" ? false : true;
+    const page = safePage(req.query.page, 1, 100_000);
+    const limit = safePage(req.query.limit, 100, 500);
     const rows = await db.select({
       item: serviceItem,
       orgUnitName: orgUnit.name,
@@ -365,7 +373,7 @@ router.get("/service-items", requireAnyRole([...CHARGE_READ_ROLES]), async (req,
         q ? or(ilike(serviceItem.name, `%${q}%`), ilike(serviceItem.code, `%${q}%`)) : undefined,
       ))
       .orderBy(asc(serviceItem.name))
-      .limit(safePage(req.query.limit, 100, 500));
+      .limit(limit).offset((page - 1) * limit);
     res.json({ data: rows.map(({ item, orgUnitName }) => ({ ...item, defaultOrgUnitName: orgUnitName })) });
   } catch (error) {
     next(error);
@@ -758,18 +766,25 @@ router.get("/appointments", requireAnyRole([...APPOINTMENT_READ_ROLES]), async (
       registeredUnitId: row.patientRegisteredUnitId,
     })));
     res.json({
-      data: rows.map(({ record, patientFirstName, patientLastName, patientId, patientConfidentiality, patientRegisteredUnitId, providerFirstName, providerLastName, ...details }) => ({
-        id: record.id,
-        patientName: masked.has(patientId) ? "Restricted record" : `${patientFirstName} ${patientLastName}`,
-        providerName: providerFirstName ? `${providerFirstName} ${providerLastName}` : "Clinic team",
-        unitName: details.unitName,
-        providerEmployeeId: details.providerEmployeeId,
-        appointmentType: record.appointmentType,
-        scheduledStart: record.scheduledStart,
-        scheduledEnd: record.scheduledEnd,
-        status: record.status,
-        reason: record.reason,
-      })),
+      data: rows.map(({ record, patientFirstName, patientLastName, patientId, patientConfidentiality, patientRegisteredUnitId, providerFirstName, providerLastName, ...details }) => {
+        const restricted = masked.has(patientId);
+        const safeAppointment = {
+          id: record.id,
+          patientName: restricted ? "Restricted record" : `${patientFirstName} ${patientLastName}`,
+          scheduledStart: record.scheduledStart,
+          scheduledEnd: record.scheduledEnd,
+          status: record.status,
+          unitName: details.unitName,
+        };
+        if (restricted) return safeAppointment;
+        return {
+          ...safeAppointment,
+          providerName: providerFirstName ? `${providerFirstName} ${providerLastName}` : "Clinic team",
+          providerEmployeeId: details.providerEmployeeId,
+          appointmentType: record.appointmentType,
+          reason: record.reason,
+        };
+      }),
     });
   } catch (error) {
     next(error);
@@ -824,13 +839,29 @@ router.post("/appointments", requireAnyRole([...APPOINTMENT_WRITE_ROLES]), async
              ${input.appointmentType}, claimed.starts_at, claimed.ends_at, 'BOOKED',
              ${input.reason}, ${input.bookedVia}, ${req.user?.id ?? "system"}
         FROM claimed
-      RETURNING *
+      RETURNING id,
+                patient_id AS "patientId",
+                slot_id AS "slotId",
+                org_unit_id AS "orgUnitId",
+                provider_staff_id AS "providerStaffId",
+                appointment_type AS "appointmentType",
+                scheduled_start AS "scheduledStart",
+                scheduled_end AS "scheduledEnd",
+                status,
+                reason,
+                booked_via AS "bookedVia",
+                booked_by AS "bookedBy",
+                cancelled_reason AS "cancelledReason",
+                rescheduled_from_id AS "rescheduledFromId",
+                reminder_sent_at AS "reminderSentAt",
+                checked_in_at AS "checkedInAt",
+                visit_id AS "visitId"
     `);
     const created = result.rows[0] as Appointment | undefined;
     if (!created) throw conflict("That appointment slot is no longer available.", "SLOT_FULL");
     res.status(201).json({ data: created });
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && String((error as { code: unknown }).code) === "23P01") {
+    if (hasSqlStateCause(error, "23P01")) {
       next(conflict("The patient already has an overlapping appointment.", "PATIENT_APPOINTMENT_OVERLAP"));
       return;
     }
@@ -867,7 +898,11 @@ router.post("/appointments/:id/cancel", requireAnyRole([...APPOINTMENT_WRITE_ROL
            SET status = 'CANCELLED', cancelled_reason = ${reason}
          WHERE id = ${id}::uuid
            AND status IN ('BOOKED', 'CONFIRMED')
-           AND (scheduled_start >= now() + interval '2 hours' OR ${Boolean(reason && req.user?.id)})
+           AND (scheduled_start >= now() + interval '2 hours' OR ${
+             Boolean(reason && req.user?.id && roleList(req).some((role) =>
+               ["super_admin", "hospital_admin", "unit_manager"].includes(role),
+             ))
+           })
          RETURNING id, slot_id
       ), released AS (
         UPDATE appointment_slot s
@@ -936,11 +971,28 @@ router.post("/appointments/:id/reschedule", requireAnyRole([...APPOINTMENT_WRITE
                c.starts_at, c.ends_at, 'BOOKED', COALESCE(${input.reason}, m.reason),
                m.booked_via, m.booked_by, m.id
           FROM marked m CROSS JOIN claimed c
-        RETURNING *
+        RETURNING id,
+                  patient_id AS "patientId",
+                  slot_id AS "slotId",
+                  org_unit_id AS "orgUnitId",
+                  provider_staff_id AS "providerStaffId",
+                  appointment_type AS "appointmentType",
+                  scheduled_start AS "scheduledStart",
+                  scheduled_end AS "scheduledEnd",
+                  status,
+                  reason,
+                  booked_via AS "bookedVia",
+                  booked_by AS "bookedBy",
+                  cancelled_reason AS "cancelledReason",
+                  rescheduled_from_id AS "rescheduledFromId",
+                  reminder_sent_at AS "reminderSentAt",
+                  checked_in_at AS "checkedInAt",
+                  visit_id AS "visitId"
       ), completed_tasks AS (
         UPDATE appointment_rebook_task
            SET status = 'COMPLETED', completed_at = now()
          WHERE appointment_id = ${id}::uuid AND status = 'OPEN'
+           AND EXISTS (SELECT 1 FROM created)
          RETURNING id
       )
       SELECT * FROM created
@@ -950,7 +1002,7 @@ router.post("/appointments/:id/reschedule", requireAnyRole([...APPOINTMENT_WRITE
     await checkUnitAccess(req, created.orgUnitId);
     res.status(201).json({ data: created });
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && String((error as { code: unknown }).code) === "23P01") {
+    if (hasSqlStateCause(error, "23P01")) {
       next(conflict("The patient already has an overlapping appointment.", "PATIENT_APPOINTMENT_OVERLAP"));
       return;
     }
@@ -967,7 +1019,7 @@ router.post("/appointments/:id/check-in", requireAnyRole([...APPOINTMENT_WRITE_R
     const result = await db.execute(sql`
       WITH checked AS (
         UPDATE appointment
-           SET status = 'CHECKED_IN', checked_in_at = now()
+         SET visit_id = ${visitId}::uuid, status = 'CHECKED_IN', checked_in_at = now()
          WHERE id = ${id}::uuid AND status IN ('BOOKED', 'CONFIRMED')
          RETURNING *
       ), payer_choice AS (
@@ -998,12 +1050,6 @@ router.post("/appointments/:id/check-in", requireAnyRole([...APPOINTMENT_WRITE_R
                c.org_unit_id, c.org_unit_id, c.id, true, 'OPEN'
           FROM payer_choice c
         RETURNING *
-      ), linked AS (
-        UPDATE appointment a
-           SET visit_id = v.id
-          FROM opened v
-         WHERE a.id = v.appointment_id
-         RETURNING a.id
       ), ticket AS (
         INSERT INTO queue_ticket (visit_id, org_unit_id, stage, ticket_no, priority, status)
         SELECT v.id, v.current_unit_id,
@@ -1041,7 +1087,12 @@ router.post("/appointments/:id/complete", requireAnyRole([...APPOINTMENT_WRITE_R
 router.get("/visits", requireAnyRole([...APPOINTMENT_READ_ROLES]), async (req, res, next) => {
   try {
     const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
-    const managedIds = await scopedUnitIds(req);
+    const requestedUnitId = typeof req.query.unitId === "string" ? req.query.unitId : "";
+    if (req.query.unitId !== undefined && !uuid.safeParse(requestedUnitId).success) {
+      throw validationError("Choose a valid clinic.", "APPOINTMENT_UNIT_INVALID");
+    }
+    if (requestedUnitId) await checkUnitAccess(req, requestedUnitId);
+    const managedIds = requestedUnitId ? null : await scopedUnitIds(req);
     const rows = await db.select({
       visit,
       patientName: sql<string>`concat(${patient.firstName}, ' ', ${patient.lastName})`,
@@ -1054,7 +1105,9 @@ router.get("/visits", requireAnyRole([...APPOINTMENT_READ_ROLES]), async (req, r
       .leftJoin(orgUnit, eq(orgUnit.id, visit.currentUnitId))
       .where(and(
         eq(visit.status, status),
-        managedIds === null
+        requestedUnitId
+          ? eq(visit.currentUnitId, requestedUnitId)
+          : managedIds === null
           ? undefined
           : managedIds.length > 0
             ? inArray(visit.currentUnitId, managedIds)
@@ -1104,11 +1157,11 @@ router.post("/visits", requireAnyRole([...APPOINTMENT_WRITE_ROLES]), async (req,
       WITH new_appointment AS (
         INSERT INTO appointment (
           id, patient_id, org_unit_id, appointment_type, scheduled_start, scheduled_end,
-          status, reason, booked_via, booked_by
+          status, reason, booked_via, booked_by, visit_id
         ) VALUES (
           ${appointmentId}::uuid, ${input.patientId}::uuid, ${input.orgUnitId}::uuid, 'WALK_IN',
           now(), now() + interval '15 minutes', 'CHECKED_IN', ${input.reason}, 'FRONT_DESK',
-          ${req.user?.id ?? "system"}
+          ${req.user?.id ?? "system"}, ${visitId}::uuid
         )
         RETURNING *
       ), new_visit AS (
@@ -1122,10 +1175,6 @@ router.post("/visits", requireAnyRole([...APPOINTMENT_WRITE_ROLES]), async (req,
                a.org_unit_id, a.org_unit_id, a.id, false, 'OPEN'
           FROM new_appointment a
         RETURNING *
-      ), linked AS (
-        UPDATE appointment a SET visit_id = v.id
-          FROM new_visit v WHERE a.id = v.appointment_id
-        RETURNING a.id
       ), ticket AS (
         INSERT INTO queue_ticket (visit_id, org_unit_id, stage, ticket_no, priority, status)
         SELECT v.id, v.current_unit_id, CASE WHEN v.visit_type = 'EMERGENCY' THEN 'TRIAGE'
@@ -1247,19 +1296,27 @@ router.get("/queue/stream", requireAnyRole([...APPOINTMENT_READ_ROLES]), async (
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     let active = true;
-    req.on("close", () => { active = false; });
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let sending = false;
+    req.once("close", () => {
+      active = false;
+      if (timer) clearInterval(timer);
+    });
     const send = async () => {
-      if (!active) return;
+      if (!active || sending) return;
+      sending = true;
       try {
-        res.write(`data: ${JSON.stringify(await loadQueue(req, unitId))}\n\n`);
+        const queue = await loadQueue(req, unitId);
+        if (active) res.write(`data: ${JSON.stringify(queue)}\n\n`);
       } catch (error) {
         console.error("Queue event stream update failed.", error);
-        res.write("event: error\ndata: {}\n\n");
+        if (active) res.write("event: error\ndata: {}\n\n");
+      } finally {
+        sending = false;
       }
     };
     await send();
-    const timer = setInterval(() => void send(), 3000);
-    req.on("close", () => clearInterval(timer));
+    if (active) timer = setInterval(() => void send(), 3000);
   } catch (error) {
     next(error);
   }
@@ -1313,7 +1370,14 @@ router.post("/queue/:id/complete", requireAnyRole([...APPOINTMENT_WRITE_ROLES]),
 
 router.get("/appointment-rebook-tasks", requireAnyRole([...APPOINTMENT_READ_ROLES]), async (req, res, next) => {
   try {
-    const managedIds = await scopedUnitIds(req);
+    const requestedUnitId = typeof req.query.unitId === "string" ? req.query.unitId : "";
+    if (req.query.unitId !== undefined && !uuid.safeParse(requestedUnitId).success) {
+      throw validationError("Choose a valid clinic.", "APPOINTMENT_UNIT_INVALID");
+    }
+    if (requestedUnitId) await checkUnitAccess(req, requestedUnitId);
+    const managedIds = requestedUnitId ? null : await scopedUnitIds(req);
+    const page = safePage(req.query.page, 1, 100_000);
+    const limit = safePage(req.query.limit, 50, 200);
     const rows = await db.select({
       task: appointmentRebookTask,
       appointment: appointment,
@@ -1328,23 +1392,37 @@ router.get("/appointment-rebook-tasks", requireAnyRole([...APPOINTMENT_READ_ROLE
       .innerJoin(orgUnit, eq(orgUnit.id, appointment.orgUnitId))
       .where(and(
         eq(appointmentRebookTask.status, "OPEN"),
-        managedIds === null
+        requestedUnitId
+          ? eq(appointment.orgUnitId, requestedUnitId)
+          : managedIds === null
           ? undefined
           : managedIds.length > 0
             ? inArray(appointment.orgUnitId, managedIds)
             : sql`false`,
       ))
       .orderBy(asc(appointmentRebookTask.createdAt))
-      .limit(100);
+      .limit(limit).offset((page - 1) * limit);
     const masked = await maskedPatientIds(req, rows.map((row) => ({
       patientId: row.patientId,
       confidentiality: row.confidentiality,
       registeredUnitId: row.registeredUnitId,
     })));
-    res.json({ data: rows.map(({ patientId, confidentiality, registeredUnitId, ...row }) => ({
-      ...row,
-      patientName: masked.has(patientId) ? "Restricted record" : row.patientName,
-    })) });
+    res.json({ data: rows.map((row) => {
+      const restricted = masked.has(row.patientId);
+      return {
+        task: row.task,
+        appointment: restricted
+          ? {
+            id: row.appointment.id,
+            scheduledStart: row.appointment.scheduledStart,
+            scheduledEnd: row.appointment.scheduledEnd,
+            status: row.appointment.status,
+          }
+          : row.appointment,
+        patientName: restricted ? "Restricted record" : row.patientName,
+        unitName: row.unitName,
+      };
+    }) });
   } catch (error) {
     next(error);
   }

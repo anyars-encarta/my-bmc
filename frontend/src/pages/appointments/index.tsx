@@ -41,14 +41,14 @@ type AppointmentSlot = {
 type AppointmentRecord = {
   id: string;
   patientName: string;
-  appointmentType: string;
+  appointmentType?: string;
   scheduledStart: string;
   scheduledEnd: string;
   status: string;
-  reason: string | null;
+  reason?: string | null;
   unitName: string;
-  providerName: string;
-  providerEmployeeId: string | null;
+  providerName?: string;
+  providerEmployeeId?: string | null;
 };
 type ClinicTemplate = {
   id: string;
@@ -181,6 +181,9 @@ export function AppointmentsPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [loadedScheduleKey, setLoadedScheduleKey] = useState("");
   const [rescheduleSlotIds, setRescheduleSlotIds] = useState<Record<string, string>>({});
+  const [rescheduleSlots, setRescheduleSlots] = useState<AppointmentSlot[]>([]);
+  const [rescheduleSlotsUnitId, setRescheduleSlotsUnitId] = useState("");
+  const [rescheduleSlotsLoading, setRescheduleSlotsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const scheduleSelectionRef = useRef({ weekStart, unitId, statusFilter });
   scheduleSelectionRef.current = { weekStart, unitId, statusFilter };
@@ -218,11 +221,11 @@ export function AppointmentsPage() {
   const visibleSlots = scheduleIsCurrent ? slots : [];
   const visibleAppointments = scheduleIsCurrent ? appointments : [];
   const visibleRebookTasks = scheduleIsCurrent ? rebookTasks : [];
-  const slotOptions = useMemo<SearchableSelectOption[]>(() =>
-    visibleSlots.filter((slot) => slot.available).map((slot) => ({
+  const rescheduleSlotOptions = useMemo<SearchableSelectOption[]>(() =>
+    (rescheduleSlotsUnitId === unitId ? rescheduleSlots : []).filter((slot) => slot.available).map((slot) => ({
       value: slot.id,
       label: `${dateLabel(slot.startsAt.slice(0, 10))} · ${timeLabel(slot.startsAt)}–${timeLabel(slot.endsAt)} · ${slot.providerName} · ${slot.capacity - slot.bookedCount} free`,
-    })), [visibleSlots]);
+    })), [rescheduleSlots, rescheduleSlotsUnitId, unitId]);
 
   const loadReferences = async () => {
     const [referenceResult, templateResult] = await Promise.all([
@@ -277,16 +280,29 @@ export function AppointmentsPage() {
           if (result.data.length < limit) return allAppointments;
         }
       };
-      const [slotResult, appointmentRows, taskResult] = await Promise.all([
+      const tasksRequest = async () => {
+        const allTasks: RebookTask[] = [];
+        const limit = 200;
+        for (let page = 1; ; page += 1) {
+          const result = await appointmentRequest<RebookTask[]>(withQuery("appointment-rebook-tasks", {
+            unitId: selection.unitId,
+            page,
+            limit,
+          }));
+          allTasks.push(...result.data);
+          if (result.data.length < limit) return allTasks;
+        }
+      };
+      const [slotResult, appointmentRows, taskRows] = await Promise.all([
         appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", { unitId: selection.unitId, from, to })),
         appointmentsRequest(),
-        appointmentRequest<RebookTask[]>("appointment-rebook-tasks"),
+        tasksRequest(),
       ]);
       if (!isCurrent()) return;
       setSlots(slotResult.data);
       setAppointments(appointmentRows);
       const unitName = referencesRef.current.units.find((unit) => unit.id === selection.unitId)?.name;
-      setRebookTasks(taskResult.data.filter((task) => task.unitName === unitName));
+      setRebookTasks(taskRows.filter((task) => task.unitName === unitName));
       setLoadedScheduleKey(selectionKey);
     } finally {
       if (requestId === scheduleRequestId.current) setScheduleLoading(false);
@@ -296,6 +312,38 @@ export function AppointmentsPage() {
   useEffect(() => {
     loadReferences().catch((error: unknown) => toast.error(errorMessage(error, "Appointment references could not be loaded.")));
   }, []);
+
+  useEffect(() => {
+    if (!unitId) {
+      setRescheduleSlots([]);
+      setRescheduleSlotsUnitId("");
+      setRescheduleSlotsLoading(false);
+      return;
+    }
+    let active = true;
+    setRescheduleSlotsUnitId("");
+    setRescheduleSlotsLoading(true);
+    setRescheduleSlotIds({});
+    const from = new Date().toISOString();
+    const to = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+    appointmentRequest<AppointmentSlot[]>(withQuery("appointment-slots", {
+      unitId,
+      from,
+      to,
+      available: true,
+    }))
+      .then(({ data }) => {
+        if (active) {
+          setRescheduleSlots(data);
+          setRescheduleSlotsUnitId(unitId);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) toast.error(errorMessage(error, "Reschedule slots could not be loaded."));
+      })
+      .finally(() => { if (active) setRescheduleSlotsLoading(false); });
+    return () => { active = false; };
+  }, [unitId]);
 
   useEffect(() => {
     setSelectedDate(weekStart);
@@ -596,7 +644,7 @@ export function AppointmentsPage() {
               <div className="min-w-56">
                 <p className="font-medium">{timeLabel(record.scheduledStart)} · {record.patientName}</p>
                 <p className="text-sm text-muted-foreground">
-                  {record.providerName}{record.providerEmployeeId ? ` · Employee ID: ${record.providerEmployeeId}` : ""} · {record.appointmentType.replaceAll("_", " ")}
+                  {record.providerName ?? "Clinic team"}{record.providerEmployeeId ? ` · Employee ID: ${record.providerEmployeeId}` : ""} · {(record.appointmentType ?? "Appointment").replaceAll("_", " ")}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -606,15 +654,15 @@ export function AppointmentsPage() {
                     <Button size="sm" onClick={() => void checkIn(record)}>Check in</Button>
                     <div className="min-w-52">
                       <SearchableSelect
-                        options={slotOptions}
-                        disabled={!scheduleIsCurrent}
+                        options={rescheduleSlotOptions}
+                        disabled={rescheduleSlotsLoading || rescheduleSlotsUnitId !== unitId}
                         value={rescheduleSlotIds[record.id] ?? ""}
                         onValueChange={(value) => setRescheduleSlotIds((current) => ({ ...current, [record.id]: value }))}
                         placeholder="New slot"
                         searchPlaceholder="Search available times…"
                       />
                     </div>
-                    <Button size="sm" variant="outline" disabled={!scheduleIsCurrent} onClick={() => void reschedule(record)}>Reschedule</Button>
+                    <Button size="sm" variant="outline" disabled={!rescheduleSlotIds[record.id] || rescheduleSlotsLoading || rescheduleSlotsUnitId !== unitId} onClick={() => void reschedule(record)}>Reschedule</Button>
                     <Button size="sm" variant="outline" onClick={() => void cancelAppointment(record)}>Cancel</Button>
                   </>
                 ) : null}

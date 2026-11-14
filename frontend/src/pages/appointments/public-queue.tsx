@@ -50,11 +50,13 @@ export function PublicQueuePage() {
         setQueueLoading(false);
         setError("");
       } catch {
+        setQueue(null);
         setQueueLoading(false);
         setError("Queue display data could not be read.");
       }
     };
     stream.onerror = () => {
+      setQueue(null);
       setQueueLoading(false);
       setError("Live queue is unavailable. Reconnecting…");
     };

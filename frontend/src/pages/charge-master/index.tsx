@@ -115,9 +115,9 @@ export function ChargeMasterPage() {
   const unitOptions = useMemo<SearchableSelectOption[]>(() =>
     units.map((unit) => ({ value: unit.id, label: `${unit.name} · ${unit.code}` })), [units]);
   const serviceOptions = useMemo<SearchableSelectOption[]>(() =>
-    services.filter((service) => service.active).map((service) => ({
+    services.map((service) => ({
       value: service.id,
-      label: `${service.name} · ${service.code}`,
+      label: `${service.name} · ${service.code}${service.active ? "" : " · Inactive"}`,
       keywords: service.category,
     })), [services]);
   const priceListOptions = useMemo<SearchableSelectOption[]>(() =>
@@ -127,13 +127,23 @@ export function ChargeMasterPage() {
     })), [priceLists]);
 
   const loadData = async () => {
+    const loadServices = async (active: boolean) => {
+      const allServices: ServiceItem[] = [];
+      const limit = 500;
+      for (let page = 1; ; page += 1) {
+        const query = new URLSearchParams({ active: String(active), page: String(page), limit: String(limit) });
+        const result = await appointmentRequest<ServiceItem[]>(`service-items?${query.toString()}`);
+        allServices.push(...result.data);
+        if (result.data.length < limit) return allServices;
+      }
+    };
     const [activeServices, inactiveServices, lists, refs] = await Promise.all([
-      appointmentRequest<ServiceItem[]>("service-items"),
-      appointmentRequest<ServiceItem[]>("service-items?active=false"),
+      loadServices(true),
+      loadServices(false),
       appointmentRequest<PriceList[]>("price-lists"),
       appointmentRequest<{ units: Unit[] }>("appointment-references"),
     ]);
-    setServices([...activeServices.data, ...inactiveServices.data]);
+    setServices([...activeServices, ...inactiveServices]);
     setPriceLists(lists.data);
     setUnits(refs.data.units);
     const selectedId = selectedPriceListRef.current || lists.data.find((item) => item.active)?.id || "";
@@ -153,6 +163,7 @@ export function ChargeMasterPage() {
     if (selectedPriceListRef.current === priceListId) setPriceItems(result.data);
   };
   const selectPriceList = (priceListId: string) => {
+    if (selectedPriceListRef.current === priceListId) return;
     selectedPriceListRef.current = priceListId;
     setSelectedPriceListId(priceListId);
     setPriceItems([]);

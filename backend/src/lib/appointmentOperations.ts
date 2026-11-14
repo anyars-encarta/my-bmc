@@ -96,6 +96,39 @@ export const generateAppointmentSlots = async (now = new Date(), days = appointm
         const selected = availableWindows[0];
         const providerStaffId = template.providerStaffId ?? null;
         const capacity = template.capacityPerSlot * (template.providerStaffId ? 1 : availableWindows.length);
+        if (!providerStaffId) {
+          const [existingSlot] = await db.select({
+            id: appointmentSlot.id,
+            bookedCount: appointmentSlot.bookedCount,
+          }).from(appointmentSlot).where(and(
+            eq(appointmentSlot.orgUnitId, template.orgUnitId),
+            isNull(appointmentSlot.providerStaffId),
+            eq(appointmentSlot.startsAt, new Date(startsAt)),
+          )).limit(1);
+          if (existingSlot && existingSlot.bookedCount > capacity + template.overbookLimit) {
+            await db.update(appointmentSlot).set({
+              templateId: template.id,
+              rosterEntryId: selected?.entry.id ?? null,
+              endsAt: new Date(endsAt),
+              capacity,
+            }).where(eq(appointmentSlot.id, existingSlot.id));
+            await closeInvalidAppointmentSlots(now, existingSlot.id);
+            for (const window of availableWindows) {
+              await db.insert(appointmentSlot).values({
+                templateId: template.id,
+                orgUnitId: template.orgUnitId,
+                providerStaffId: window.staffId,
+                rosterEntryId: window.entry.id,
+                startsAt: new Date(startsAt),
+                endsAt: new Date(endsAt),
+                capacity: template.capacityPerSlot,
+                status: "OPEN",
+              }).onConflictDoNothing();
+              createdOrUpdated += 1;
+            }
+            continue;
+          }
+        }
         const [slot] = await db.insert(appointmentSlot).values({
           templateId: template.id,
           orgUnitId: template.orgUnitId,
@@ -123,14 +156,20 @@ export const generateAppointmentSlots = async (now = new Date(), days = appointm
 };
 
 /** Closes slots no longer covered by an active roster and queues their booked patients for rebooking. */
-export const closeInvalidAppointmentSlots = async (now = new Date()) => {
+export const closeInvalidAppointmentSlots = async (now = new Date(), forceCloseSlotId?: string) => {
+  const forcedSlot = forceCloseSlotId ? sql`s.id = ${forceCloseSlotId}::uuid` : sql`false`;
   const result = await db.execute(sql`
     WITH closed_slots AS (
       UPDATE appointment_slot s
-         SET status = 'CLOSED'
+         SET status = 'CLOSED', capacity = GREATEST(s.capacity, s.booked_count)
        WHERE s.status = 'OPEN'
          AND s.starts_at > ${now}
          AND (
+           ${forcedSlot}
+           OR s.booked_count > s.capacity + COALESCE((
+             SELECT t.overbook_limit FROM clinic_session_template t WHERE t.id = s.template_id
+           ), 0)
+           OR
            s.template_id IS NULL
            OR NOT EXISTS (
              SELECT 1 FROM clinic_session_template t
@@ -145,15 +184,29 @@ export const closeInvalidAppointmentSlots = async (now = new Date()) => {
                 AND s.ends_at::time <= t.end_time
                 AND extract(epoch FROM (s.ends_at - s.starts_at)) / 60 = t.slot_minutes
            )
+           OR EXISTS (
+             SELECT 1 FROM public_holiday h
+              WHERE h.holiday_date = s.starts_at::date
+           )
+           OR NOT EXISTS (
+             SELECT 1 FROM org_unit u
+              WHERE u.id = s.org_unit_id
+                AND u.is_clinical = true
+                AND u.active = true
+           )
            OR NOT EXISTS (
              SELECT 1
                FROM roster_entry r
+               JOIN staff st ON st.id = r.staff_id
+               JOIN job_role jr ON jr.id = st.job_role_id
               WHERE r.id = s.roster_entry_id
                 AND r.status = 'ACTIVE'
                 AND r.org_unit_id = s.org_unit_id
                 AND (s.provider_staff_id IS NULL OR r.staff_id = s.provider_staff_id)
                 AND r.planned_start <= s.starts_at
                 AND r.planned_end >= s.ends_at
+                AND st.status = 'active'
+                AND jr.staff_category = 'CLINICAL'
                 AND NOT EXISTS (
                   SELECT 1 FROM leave_request lr
                    WHERE lr.staff_id = r.staff_id
@@ -239,10 +292,15 @@ export const runNoShowSweep = async (now = new Date()) => {
          AND checked_in_at IS NULL
          AND scheduled_end <= ${new Date(now.getTime() - 30 * 60_000)}
        RETURNING id, slot_id
+    ), missed_by_slot AS (
+      SELECT slot_id, count(*)::int AS missed_count
+        FROM missed
+       WHERE slot_id IS NOT NULL
+       GROUP BY slot_id
     ), released AS (
       UPDATE appointment_slot s
-         SET booked_count = GREATEST(0, s.booked_count - 1)
-        FROM missed m
+         SET booked_count = GREATEST(0, s.booked_count - m.missed_count)
+        FROM missed_by_slot m
        WHERE s.id = m.slot_id
        RETURNING s.id
     )

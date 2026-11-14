@@ -31,6 +31,7 @@ type QueueRow = {
   visitNo: string;
   unitName: string;
 };
+type QueueLoadStatus = "pending" | "refreshing" | "loaded" | "failed";
 const stages = ["CASHIER", "TRIAGE", "CONSULTATION", "LAB", "IMAGING", "PHARMACY"];
 
 export function QueueBoardPage() {
@@ -39,6 +40,10 @@ export function QueueBoardPage() {
   const [stage, setStage] = useState("ALL");
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [rowsKey, setRowsKey] = useState("");
+  const [loadState, setLoadState] = useState<{ key: string; status: QueueLoadStatus }>({ key: "", status: "pending" });
+  const requestOrder = useRef(0);
+  const latestActionRefresh = useRef(0);
+  const latestAppliedRequest = useRef(0);
   const selectionRef = useRef({ unitId, stage });
   selectionRef.current = { unitId, stage };
   const selectionKey = `${unitId}|${stage}`;
@@ -61,17 +66,39 @@ export function QueueBoardPage() {
     const requestKey = `${unitId}|${stage}`;
     setRows([]);
     setRowsKey("");
+    setLoadState({ key: requestKey, status: "pending" });
     const load = async () => {
+      const currentRequestOrder = ++requestOrder.current;
+      setLoadState((current) => current.key === requestKey
+        ? { key: requestKey, status: current.status === "loaded" || current.status === "refreshing" ? "refreshing" : "pending" }
+        : current);
       try {
         const { data } = await appointmentRequest<QueueRow[]>(
           withQuery("queue", { unitId, stage: stage === "ALL" ? "" : stage }),
         );
-        if (active) {
+        if (
+          active &&
+          selectionRef.current.unitId === unitId &&
+          selectionRef.current.stage === stage &&
+          currentRequestOrder >= latestActionRefresh.current &&
+          currentRequestOrder >= latestAppliedRequest.current
+        ) {
           setRows(data);
           setRowsKey(requestKey);
+          setLoadState({ key: requestKey, status: "loaded" });
+          latestAppliedRequest.current = currentRequestOrder;
         }
       } catch (error) {
-        if (active) toast.error(errorMessage(error, "Queue could not be refreshed."));
+        if (
+          active &&
+          selectionRef.current.unitId === unitId &&
+          selectionRef.current.stage === stage &&
+          currentRequestOrder >= latestActionRefresh.current &&
+          currentRequestOrder >= latestAppliedRequest.current
+        ) {
+          setLoadState({ key: requestKey, status: "failed" });
+          toast.error(errorMessage(error, "Queue could not be refreshed."));
+        }
       }
     };
     void load();
@@ -85,19 +112,40 @@ export function QueueBoardPage() {
         method: "POST",
         body: { counter: row.ticket.counter },
       });
-      toast.success(`Ticket ${row.ticket.ticketNo} updated.`);
-      const requestSelection = { unitId, stage };
-      const requestKey = `${requestSelection.unitId}|${requestSelection.stage}`;
+    } catch (error) {
+      toast.error(errorMessage(error, "Queue ticket could not be updated."));
+      return;
+    }
+    toast.success(`Ticket ${row.ticket.ticketNo} updated.`);
+    const requestSelection = { unitId, stage };
+    const requestKey = `${requestSelection.unitId}|${requestSelection.stage}`;
+    const refreshOrder = ++requestOrder.current;
+    latestActionRefresh.current = refreshOrder;
+    setLoadState({ key: requestKey, status: "refreshing" });
+    try {
       const { data } = await appointmentRequest<QueueRow[]>(withQuery("queue", {
         unitId: requestSelection.unitId,
         stage: requestSelection.stage === "ALL" ? "" : requestSelection.stage,
       }));
-      if (selectionRef.current.unitId === requestSelection.unitId && selectionRef.current.stage === requestSelection.stage) {
+      if (
+        selectionRef.current.unitId === requestSelection.unitId &&
+        selectionRef.current.stage === requestSelection.stage &&
+        refreshOrder >= latestAppliedRequest.current
+      ) {
         setRows(data);
         setRowsKey(requestKey);
+        setLoadState({ key: requestKey, status: "loaded" });
+        latestAppliedRequest.current = refreshOrder;
       }
     } catch (error) {
-      toast.error(errorMessage(error, "Queue ticket could not be updated."));
+      if (
+        selectionRef.current.unitId === requestSelection.unitId &&
+        selectionRef.current.stage === requestSelection.stage &&
+        refreshOrder >= latestActionRefresh.current
+      ) {
+        setLoadState({ key: requestKey, status: "failed" });
+      }
+      toast.error(errorMessage(error, "Queue could not be refreshed after the action."));
     }
   };
 
@@ -114,7 +162,18 @@ export function QueueBoardPage() {
             <div className="space-y-2"><Label>Clinic</Label><SearchableSelect options={options} value={unitId} onValueChange={setUnitId} placeholder="Choose clinic" searchPlaceholder="Search clinics…" /></div>
             <div className="space-y-2"><Label>Stage</Label><Select value={stage} onValueChange={setStage}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">All stages</SelectItem>{stages.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
           </div>
-          {visibleRows.length === 0 ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No active tickets in this queue.</p> : null}
+          {visibleRows.length === 0 && (loadState.key !== selectionKey || loadState.status === "pending" || loadState.status === "refreshing")
+            ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Loading queue…</p>
+            : null}
+          {visibleRows.length === 0 && loadState.key === selectionKey && loadState.status === "failed"
+            ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-destructive">Queue could not be loaded. Try again shortly.</p>
+            : null}
+          {visibleRows.length > 0 && loadState.key === selectionKey && loadState.status === "failed"
+            ? <p className="text-sm text-destructive">Queue refresh failed. Previously loaded tickets are still shown.</p>
+            : null}
+          {visibleRows.length === 0 && loadState.key === selectionKey && loadState.status === "loaded"
+            ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No active tickets in this queue.</p>
+            : null}
           <div className="space-y-2">
             {visibleRows.map((row) => (
               <div key={row.ticket.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
