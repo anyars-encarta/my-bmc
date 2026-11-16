@@ -135,8 +135,12 @@ const loadEncounter = async (req: Request, encounterId: string) => {
 const assertOpenEncounter = (record: { status: string }) => {
   if (record.status !== "OPEN") throw conflict("This encounter is signed and cannot be changed.", "ENCOUNTER_SIGNED");
 };
+type AuditAction =
+  | "CREATE" | "UPDATE" | "DELETE" | "STATUS_CHANGE" | "READ_RESTRICTED"
+  | "BREAK_GLASS" | "LOGIN" | "LOGOUT" | "EXPORT" | "PRINT" | "OVERRIDE"
+  | "APPROVE" | "REJECT" | "DEVICE_ACTION";
 const writeAudit = (req: Request, values: {
-  action: string;
+  action: AuditAction;
   entityType: string;
   entityId: string | null;
   patientId: string;
@@ -496,7 +500,7 @@ router.get("/visits/:id/triage", requireAnyRole(NURSES), async (req, res, next) 
     const rows = await db.select().from(triageAssessment).where(eq(triageAssessment.visitId, visitId))
       .orderBy(desc(triageAssessment.assessedAt));
     await writeAudit(req, {
-      action: "READ", entityType: "triage_assessment", entityId: null,
+      action: "READ_RESTRICTED", entityType: "triage_assessment", entityId: null,
       patientId: visitRow.patientId, orgUnitId: visitRow.currentUnitId,
     });
     res.json({ data: rows });
@@ -547,7 +551,7 @@ router.get("/outpatient-tasks", requireAnyRole(NURSES), async (req, res, next) =
     }
     if (visible.length) {
       await db.insert(auditLog).values(visible.map((row) => ({
-        action: "READ",
+        action: "READ_RESTRICTED",
         entityType: "outpatient_task",
         entityId: row.task.id,
         patientId: row.task.patientId,
@@ -636,7 +640,7 @@ router.get("/visits/:id/encounters", requireAnyRole(CLINICAL_READ), async (req, 
     const rows = await db.select().from(encounter).where(eq(encounter.visitId, visitId))
       .orderBy(desc(encounter.startedAt));
     await writeAudit(req, {
-      action: "READ", entityType: "encounter", entityId: null,
+      action: "READ_RESTRICTED", entityType: "encounter", entityId: null,
       patientId: visitRow.patientId, orgUnitId: visitRow.currentUnitId,
     });
     res.json({ data: rows.map((row) => ({ ...row, patientId: visitRow.patientId })) });
@@ -657,7 +661,7 @@ router.get("/encounters/:id", requireAnyRole(CLINICAL_READ), async (req, res, ne
       ? await db.select().from(prescriptionItem).where(inArray(prescriptionItem.prescriptionId, prescriptions.map((row) => row.id)))
       : [];
     await writeAudit(req, {
-      action: "READ", entityType: "encounter", entityId: id,
+      action: "READ_RESTRICTED", entityType: "encounter", entityId: id,
       patientId: record.patientId, orgUnitId: record.orgUnitId,
     });
     res.json({ data: { ...record, notes, diagnoses, vitals, orders, prescriptions: prescriptions.map((row) => ({
@@ -1415,7 +1419,7 @@ router.get("/referrals/:id", requireAnyRole(CLINICAL_READ), async (req, res, nex
     if (!record) throw notFound("Referral not found.", "REFERRAL_NOT_FOUND");
     await requireChart(req, record.patientId, null);
     await writeAudit(req, {
-      action: "READ", entityType: "referral", entityId: id,
+      action: "READ_RESTRICTED", entityType: "referral", entityId: id,
       patientId: record.patientId, orgUnitId: null,
     });
     res.json({ data: record });
@@ -1535,7 +1539,7 @@ router.get("/medical-certificates/:id", requireAnyRole(CLINICAL_READ), async (re
     if (!record) throw notFound("Medical certificate not found.", "CERTIFICATE_NOT_FOUND");
     await requireChart(req, record.patientId, null);
     await writeAudit(req, {
-      action: "READ", entityType: "medical_certificate", entityId: id,
+      action: "READ_RESTRICTED", entityType: "medical_certificate", entityId: id,
       patientId: record.patientId, orgUnitId: null,
     });
     res.json({ data: record });
