@@ -197,6 +197,13 @@
       "when": 1794650000000,
       "tag": "0027_notification_sending_status",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794736800000,
+      "tag": "0028_sprint9_ews_tasks",
+      "breakpoints": true
     }
   ]
 }

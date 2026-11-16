@@ -16,6 +16,7 @@ import {
   Layers3,
   Settings2,
   ShieldAlert,
+  Stethoscope,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -73,6 +74,14 @@ export const appResources: AppResource[] = [
     menuGroup: "Clinical",
     label: "Queue Board",
     icon: CalendarDays,
+  },
+  {
+    name: "clinical-encounters",
+    list: "/clinical",
+    allowedRoles: ["super_admin", "hospital_admin", "doctor", "nurse", "midwife", "pharmacist", "lab_scientist", "radiographer"],
+    menuGroup: "Clinical",
+    label: "OPD Encounters",
+    icon: Stethoscope,
   },
   {
     name: "charge-master",

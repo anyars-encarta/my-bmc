@@ -252,15 +252,19 @@ Sprint 6 jobs retry punch processing and interrupted approvals, auto-close overd
 
 | Method | Path | Roles | Notes |
 |---|---|---|---|
-| POST | `/visits/:id/encounters` · GET `/encounters/:id` | DR NU | |
-| POST/PATCH | `/encounters/:id/notes` · POST `/notes/:nid/sign` · `/amend` | DR (NU for nursing notes) | signing needs licence; `423 ENCOUNTER_SIGNED` on edit after sign |
-| POST/GET | `/encounters/:id/vitals` · `/patients/:id/vitals?from` | NU DR | EWS computed |
-| POST/DELETE | `/encounters/:id/diagnoses` | DR | ICD-10 required |
-| POST | `/encounters/:id/orders` · POST `/orders/:id/cancel` | DR | safety checks run; `422 ORDER_SAFETY_HARD_STOP` + override payload |
-| POST | `/encounters/:id/prescriptions` · `/prescriptions/:id/issue` · `/cancel` | DR | alerts & overrides recorded |
-| POST | `/encounters/:id/disposition` | DR | ADMITTED → bed request; REFERRED_OUT → referral |
-| POST/GET | `/referrals` · `/medical-certificates` | DR | certificate PDF with verification code |
-| GET | `/icd10?q=` · `/drugs?q=` | DR | typeahead |
+| POST | `/visits/:id/encounters` · GET `/visits/:id/encounters` · GET `/encounters/:id` | DR NU | |
+| POST/PATCH | `/encounters/:id/notes` · POST `/notes/:nid/sign` · `/amend` · POST `/encounters/:id/sign` | DR (NU for nursing notes) | signing needs a current verified licence; `ENCOUNTER_NO_DIAGNOSIS`; edits after sign return `ENCOUNTER_SIGNED`; amendments preserve prior versions |
+| POST/GET | `/visits/:id/triage` · `/encounters/:id/vitals` · `/patients/:id/vitals` | NU DR | EWS from currently effective approved policy; HIGH creates a nursing task and in-app alert |
+| GET/POST/PATCH | `/ews-policies` · `/ews-policies/:id` | clinical read / HA | versioned governance-approved parameter rules |
+| GET/POST | `/outpatient-tasks` · `/outpatient-tasks/:id/acknowledge` · `/resolve` | NU DR | high-band EWS worklist |
+| POST/DELETE | `/encounters/:id/diagnoses` · `/encounters/:id/diagnoses/:diagnosisId` | DR | active ICD-10 code required; deletion is soft |
+| POST/PATCH | `/encounters/:id/orders` · `/orders/:id/status` · POST `/orders/:id/cancel` | DR + performing department | safety checks; `422 ORDER_SAFETY_HARD_STOP` requires coded reason overrides; cancellation only before work starts |
+| GET/POST/PATCH | `/drugs` · `/drugs/:id` · `/drugs/import` | PH HA | EML/NHIS import supports dry-run and duplicate reporting |
+| GET/POST/PATCH | `/drug-interactions` · `/drug-interactions/:id` | PH HA | major and contraindicated interactions are hard stops |
+| POST/GET | `/encounters/:id/prescriptions` · `/prescriptions/:id` · POST `/prescriptions/:id/issue` · `/cancel` | DR / PH | safety alerts and override reasons are audited; expiry job changes elapsed prescriptions to `EXPIRED` |
+| POST | `/encounters/:id/disposition` | DR | ADMITTED creates a bed request; REFERRED_OUT requires an outgoing referral; FOLLOW_UP requires a date |
+| POST/GET | `/encounters/:id/referrals` · `/referrals/:id` · `/encounters/:id/medical-certificates` · `/medical-certificates/:id` | DR | print view includes certificate verification code |
+| GET/POST | `/icd10?q=` · `/icd10/import` · `/drugs?q=` | DR / HA | ICD-10 import upserts by code; formulary import skips duplicates; use only licensed ICD-10 source data |
 
 ### Laboratory — Sprint 11
 

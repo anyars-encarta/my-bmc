@@ -122,7 +122,7 @@ erDiagram
 | patient | `patient`, `patient_identifier`, `patient_contact`, `patient_allergy`, `patient_condition`, `patient_merge_log`, `patient_merge_task`, `patient_duplicate_candidate` | V10, V11 |
 | billing (catalogue) | `service_item`, `price_list`, `price_list_item` | V12 |
 | appointment | `clinic_session_template`, `appointment_slot`, `appointment`, `visit`, `queue_ticket`, `triage_assessment` | V13 |
-| encounter | `encounter`, `clinical_note`, `vital_sign`, `diagnosis`, `clinical_order`, `referral`, `icd10_code`, `medical_certificate` | V14 |
+| encounter | `encounter`, `clinical_note`, `vital_sign`, `diagnosis`, `clinical_order`, `referral`, `icd10_code`, `medical_certificate`, `ews_policy`, `outpatient_task` | V14 + Sprint 9 |
 | pharmacy (prescribing) | `drug`, `drug_interaction`, `prescription`, `prescription_item` | V15 |
 | billing | `bill`, `bill_line`, `patient_payment`, `cashier_session`, `cashier_ledger`, `patient_deposit`, `refund`, `waiver_request`, `credit_note`, `receipt` | V16 |
 | laboratory | `lab_test`, `lab_panel`, `lab_panel_item`, `lab_reference_range`, `lab_order`, `lab_order_item`, `specimen`, `lab_result`, `critical_result_notification` | V17 |
@@ -407,7 +407,7 @@ payment_recipients, facility_setup`).
 | V11 | `patient_merge` | 7 | Merge log, duplicate candidates |
 | V12 | `charge_master` | 8 | `service_item`, `price_list`, `price_list_item` |
 | V13 | `appointment_visit` | 8 | Clinic sessions, slots, appointments, visits, queue, triage |
-| V14 | `encounter` | 9 | Encounters, notes, vitals, diagnoses, `clinical_order`, referrals, `icd10_code` |
+| V14 | `encounter` | 9 | Encounters, notes, vitals, diagnoses, `clinical_order`, referrals, `icd10_code`, EWS policies and outpatient escalation tasks |
 | V15 | `prescribing` | 9 | `drug`, interactions, prescriptions |
 | V16 | `billing_core` | 10 | Bills, payments, cashier sessions/ledger, deposits, refunds, waivers, receipts |
 | V17 | `laboratory` | 11 | Lab catalogue, orders, specimens, results |

@@ -967,6 +967,50 @@ export const triageAssessment = pgTable("triage_assessment", {
 export type TriageAssessment = typeof triageAssessment.$inferSelect;
 export type NewTriageAssessment = typeof triageAssessment.$inferInsert;
 
+export const ewsPolicy = pgTable("ews_policy", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 30 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  version: integer("version").notNull(),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to"),
+  rules: jsonb("rules").notNull(),
+  active: boolean("active").default(true).notNull(),
+  approvedBy: text("approved_by").notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  codeVersionUnique: uniqueIndex("ews_policy_code_version_uq").on(table.code, table.version),
+  activeDateIndex: index("ews_policy_active_date_ix").on(table.effectiveFrom, table.effectiveTo)
+    .where(sql`${table.active} = true`),
+}));
+
+export type EwsPolicy = typeof ewsPolicy.$inferSelect;
+export type NewEwsPolicy = typeof ewsPolicy.$inferInsert;
+
+export const outpatientTask = pgTable("outpatient_task", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patientId: uuid("patient_id").notNull(),
+  visitId: uuid("visit_id").notNull(),
+  vitalSignId: uuid("vital_sign_id").notNull(),
+  orgUnitId: uuid("org_unit_id").notNull(),
+  taskType: varchar("task_type", { length: 20 }).notNull(),
+  description: varchar("description", { length: 300 }).notNull(),
+  priority: varchar("priority", { length: 9 }).default("URGENT").notNull(),
+  status: varchar("status", { length: 12 }).default("OPEN").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  acknowledgedByStaffId: uuid("acknowledged_by_staff_id"),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedByStaffId: uuid("resolved_by_staff_id"),
+}, (table) => ({
+  openIndex: index("outpatient_task_open_ix").on(table.orgUnitId, table.priority, table.createdAt)
+    .where(sql`${table.status} IN ('OPEN', 'ACKNOWLEDGED')`),
+}));
+
+export type OutpatientTask = typeof outpatientTask.$inferSelect;
+export type NewOutpatientTask = typeof outpatientTask.$inferInsert;
+
 export const icd10Code = pgTable("icd10_code", {
   code: varchar("code", { length: 10 }).primaryKey(),
   title: varchar("title", { length: 300 }).notNull(),
@@ -1149,7 +1193,10 @@ export const drug = pgTable("drug", {
   doseUnit: varchar("dose_unit", { length: 15 }),
   pregnancyCategory: varchar("pregnancy_category", { length: 2 }),
   active: boolean("active").default(true).notNull(),
-});
+}, (table) => ({
+  identityUnique: uniqueIndex("drug_identity_uq")
+    .on(sql`lower(${table.genericName})`, table.form, sql`coalesce(${table.strengthText}, '')`),
+}));
 
 export type Drug = typeof drug.$inferSelect;
 export type NewDrug = typeof drug.$inferInsert;

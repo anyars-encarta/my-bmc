@@ -541,6 +541,35 @@ CREATE TABLE medical_certificate (
 );
 ```
 
+Sprint 9 adds the versioned early-warning configuration and outpatient escalation worklist:
+
+```sql
+CREATE TABLE ews_policy (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code varchar(30) NOT NULL, name varchar(100) NOT NULL, version int NOT NULL,
+  effective_from date NOT NULL, effective_to date, rules jsonb NOT NULL,
+  active boolean NOT NULL DEFAULT true, approved_by text NOT NULL,
+  approved_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ews_policy_dates_ck CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CONSTRAINT ews_policy_code_version_uq UNIQUE (code, version)
+);
+
+CREATE TABLE outpatient_task (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL REFERENCES patient(id), visit_id uuid NOT NULL REFERENCES visit(id),
+  vital_sign_id uuid NOT NULL UNIQUE REFERENCES vital_sign(id),
+  org_unit_id uuid NOT NULL REFERENCES org_unit(id),
+  task_type varchar(20) NOT NULL CHECK (task_type IN ('EWS_HIGH')),
+  description varchar(300) NOT NULL,
+  priority varchar(9) NOT NULL DEFAULT 'URGENT' CHECK (priority IN ('ROUTINE','URGENT','EMERGENCY')),
+  status varchar(12) NOT NULL DEFAULT 'OPEN'
+    CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED','CANCELLED')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  acknowledged_by_staff_id uuid REFERENCES staff(id), acknowledged_at timestamptz,
+  resolved_at timestamptz, resolved_by_staff_id uuid REFERENCES staff(id)
+);
+```
+
 ### 2.6 Encounter rules (service layer)
 1. **Sign** requires: licensed clinical author (ADR-004a), at least one *active* diagnosis (except `LEFT_WITHOUT_BEING_SEEN`), a disposition on the *last* encounter of the visit.
 2. **Amend**: `POST /encounters/{id}/notes/{noteId}/amend` creates version *n+1* with `amends_id`; previous rows stay visible in history; `ADDENDUM` notes append without editing.
