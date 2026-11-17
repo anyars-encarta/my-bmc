@@ -427,6 +427,12 @@ SMS and email delivery are behind notification ports; the Sprint 8 environment u
 while preserving queued/sent/failed status in the notification outbox. The public queue display
 contains ticket number and stage only.
 
+The OPD diagnosis search uses the WHO ICD-11 MMS API. Configure `ICD_API_CLIENT_ID`,
+`ICD_API_CLIENT_SECRET`, and `ICD_API_RELEASE_VERSION`; `ICD_API_LANGUAGE` defaults to `en`,
+and `ICD_API_TIMEOUT_MS` defaults to `8000` and is capped at `30000` ms. Diagnosis records
+retain their coding system (`ICD-10` or `ICD-11`); ICD-11 selections are checked against WHO
+search results when saved. Apply migration `0029_icd11_diagnosis_code_system.sql` before deploying.
+
 ### 2.5 Encounter / OPD tables (V14)
 
 ```sql

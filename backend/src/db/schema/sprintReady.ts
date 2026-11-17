@@ -1098,6 +1098,7 @@ export const diagnosis = pgTable("diagnosis", {
   encounterId: uuid("encounter_id").notNull(),
   patientId: uuid("patient_id").notNull(),
   icd10Code: varchar("icd10_code", { length: 10 }).notNull(),
+  codeSystem: varchar("code_system", { length: 10 }).default('ICD-10').notNull(),
   description: varchar("description", { length: 300 }).notNull(),
   diagnosisType: varchar("diagnosis_type", { length: 12 }).notNull(),
   certainty: varchar("certainty", { length: 12 }).default('PROVISIONAL').notNull(),

@@ -77,7 +77,7 @@ type EncounterRecord = {
   followUpDate: string | null;
   chiefComplaint: string | null;
   notes: Array<{ id: string; noteType: string; body: string; version: number; status: string; amendsId: string | null }>;
-  diagnoses: Array<{ id: string; icd10Code: string; description: string; diagnosisType: string; certainty: string; status: string }>;
+  diagnoses: Array<{ id: string; icd10Code: string; codeSystem: string; description: string; diagnosisType: string; certainty: string; status: string }>;
   vitals: Array<{ id: string; recordedAt: string; ewsScore: number | null; ewsBand: string | null; pulseBpm: number | null; temperatureC: string | null; spo2: number | null }>;
   orders: Array<{ id: string; orderType: string; status: string; priority: string; clinicalIndication: string | null; paymentRequired: boolean; paymentClearedAt: string | null }>;
   prescriptions: Array<{ id: string; rxNo: string; status: string; validUntil: string | null; items: Array<{ id: string; drugId: string; dose: string; doseUnit: string; frequencyCode: string; route: string; quantityPrescribed: string }> }>;
@@ -376,10 +376,10 @@ export function ClinicalPage() {
   }, [visitId, loadEncounter]);
 
   const findIcdCodes = useCallback(async (term: string): Promise<SearchOption[]> => {
-    const result = await clinicalRequest<Array<{ code: string; title: string; chapter: string | null }>>(
-      withQuery("icd10", { q: term, limit: 20 }),
+    const result = await clinicalRequest<Array<{ code: string; description: string; codeSystem: "ICD-11" }>>(
+      withQuery("icd11/search", { q: term, limit: 20 }),
     );
-    return result.data.map((row) => ({ id: row.code, label: `${row.code} · ${row.title}`, description: row.chapter ?? undefined }));
+    return result.data.map((row) => ({ id: row.code, label: `${row.code} · ${row.description}`, description: row.codeSystem }));
   }, []);
   const findDrugs = useCallback(async (term: string): Promise<SearchOption[]> => {
     const result = await clinicalRequest<Array<{ id: string; genericName: string; brandName: string | null; strengthText: string | null; form: string }>>(
@@ -488,7 +488,7 @@ export function ClinicalPage() {
     if (!encounterId || !diagnosisChoice) return;
     await clinicalRequest(`encounters/${encounterId}/diagnoses`, {
       method: "POST",
-      body: { icd10Code: diagnosisChoice.id, diagnosisType, certainty: "PROVISIONAL", isNewCase: true },
+      body: { icd10Code: diagnosisChoice.id, codeSystem: "ICD-11", diagnosisType, certainty: "PROVISIONAL", isNewCase: true },
     });
     setDiagnosisChoice(null);
   }, "Diagnosis added.");
@@ -867,7 +867,7 @@ export function ClinicalPage() {
                   <Button disabled={busy || !diagnosisChoice} onClick={() => void addDiagnosis()}>Add diagnosis</Button>
                 </div>
                 <ul className="space-y-1 text-sm">{encounterData.diagnoses.filter((row) => row.status === "ACTIVE").map((row) =>
-                  <li key={row.id}><Badge variant="outline">{row.diagnosisType}</Badge> {row.icd10Code} · {row.description}</li>)}</ul>
+                  <li key={row.id}><Badge variant="outline">{row.diagnosisType}</Badge> <Badge variant="secondary">{row.codeSystem}</Badge> {row.icd10Code} · {row.description}</li>)}</ul>
               </CardContent></Card>
 
               <Card><CardHeader><CardTitle>Vitals</CardTitle></CardHeader><CardContent className="space-y-4">

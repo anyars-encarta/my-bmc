@@ -31,8 +31,9 @@ import {
   visit,
   vitalSign,
 } from "../../db/schema/index.js";
-import { conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { calculateEws, evaluateDrugSafety, ewsRulesSchema } from "../../lib/clinicalSafety.js";
+import { findIcd11Code, searchIcd11 } from "../../lib/icd11.js";
 import { searchLabInvestigations } from "../../lib/lab-investigations.js";
 import { assertChartAccess, patientActor } from "../../lib/patientAccess.js";
 import { requireAnyRole } from "../../lib/platform.js";
@@ -325,6 +326,7 @@ const noteSchema = z.object({
 });
 const diagnosisSchema = z.object({
   icd10Code: z.string().trim().min(1).max(10),
+  codeSystem: z.enum(["ICD-10", "ICD-11"]).default("ICD-10"),
   diagnosisType: z.enum(["PRIMARY", "SECONDARY", "DIFFERENTIAL"]).default("SECONDARY"),
   certainty: z.enum(["PROVISIONAL", "CONFIRMED", "RULED_OUT"]).default("PROVISIONAL"),
   isNewCase: z.boolean().default(true),
@@ -382,6 +384,28 @@ router.get("/lab-investigations", requireAnyRole(CLINICAL_READ), async (req, res
     const q = String(req.query.q ?? "").trim();
     if (q.length < 2) throw validationError("Enter at least 2 characters to search.", "SEARCH_TOO_SHORT");
     res.json({ data: searchLabInvestigations(q, listLimit(req.query.limit, 20)) });
+  } catch (error) { next(error); }
+});
+
+const icd11SearchQuerySchema = z.object({
+  q: z.string().trim().min(2).max(128),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+  language: z.string().trim().min(2).max(12).optional(),
+});
+
+router.get("/icd11/search", requireAnyRole(CLINICAL_READ), async (req, res, next) => {
+  try {
+    const parsed = icd11SearchQuerySchema.safeParse({
+      q: req.query.q,
+      limit: req.query.limit,
+      language: req.query.language,
+    });
+    if (!parsed.success) {
+      throw badRequest("Invalid ICD-11 search parameters.", "ICD11_QUERY_INVALID", parsed.error.flatten());
+    }
+    res.json({
+      data: await searchIcd11(parsed.data.q, parsed.data.limit ?? 8, parsed.data.language),
+    });
   } catch (error) { next(error); }
 });
 
@@ -837,14 +861,28 @@ router.post("/encounters/:id/diagnoses", requireAnyRole(DOCTORS), async (req, re
     const record = await loadEncounter(req, encounterId);
     assertOpenEncounter(record);
     const payload = parseBody(diagnosisSchema, req.body);
-    const [code] = await db.select().from(icd10Code)
-      .where(and(eq(icd10Code.code, payload.icd10Code), eq(icd10Code.active, true))).limit(1);
-    if (!code) throw validationError("Select an active ICD-10 diagnosis.", "ICD10_CODE_INVALID");
+    let resolvedCode: { code: string; description: string } | null;
+    if (payload.codeSystem === "ICD-11") {
+      const code = await findIcd11Code(payload.icd10Code);
+      resolvedCode = code ? { code: code.code, description: code.description } : null;
+    } else {
+      const [code] = await db.select().from(icd10Code)
+        .where(and(eq(icd10Code.code, payload.icd10Code), eq(icd10Code.active, true))).limit(1);
+      resolvedCode = code ? { code: code.code, description: code.title } : null;
+    }
+    if (!resolvedCode) {
+      const codeSystem = payload.codeSystem;
+      throw validationError(
+        codeSystem === "ICD-11" ? "Select a valid WHO ICD-11 diagnosis." : "Select an active ICD-10 diagnosis.",
+        codeSystem === "ICD-11" ? "ICD11_CODE_INVALID" : "ICD10_CODE_INVALID",
+      );
+    }
     const [created] = await db.insert(diagnosis).values({
       encounterId,
       patientId: record.patientId,
-      icd10Code: code.code,
-      description: code.title,
+      icd10Code: resolvedCode.code,
+      codeSystem: payload.codeSystem,
+      description: resolvedCode.description,
       diagnosisType: payload.diagnosisType,
       certainty: payload.certainty,
       isNewCase: payload.isNewCase,
@@ -854,7 +892,7 @@ router.post("/encounters/:id/diagnoses", requireAnyRole(DOCTORS), async (req, re
     await writeAudit(req, {
       action: "CREATE", entityType: "diagnosis", entityId: created?.id ?? null,
       patientId: record.patientId, orgUnitId: record.orgUnitId,
-      after: { icd10Code: code.code, diagnosisType: payload.diagnosisType },
+      after: { code: resolvedCode.code, codeSystem: payload.codeSystem, diagnosisType: payload.diagnosisType },
     });
     res.status(201).json({ data: created });
   } catch (error) { next(error); }

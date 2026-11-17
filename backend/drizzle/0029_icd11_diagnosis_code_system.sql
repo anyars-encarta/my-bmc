@@ -1,0 +1,2 @@
+ALTER TABLE diagnosis
+  ADD COLUMN IF NOT EXISTS code_system varchar(10) NOT NULL DEFAULT 'ICD-10';
