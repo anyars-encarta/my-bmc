@@ -199,7 +199,7 @@ function SafetyOverrideDialog({
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const complete = alerts.length > 0 && alerts.every((alert) => (reasons[alert.code] ?? "").trim().length >= 3);
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="safety-dialog-title">
+    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="safety-dialog-title">
       <Card className="w-full max-w-xl">
         <CardHeader>
           <CardTitle id="safety-dialog-title" className="flex items-center gap-2 text-destructive">
