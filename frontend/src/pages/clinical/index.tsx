@@ -24,6 +24,34 @@ type VisitRow = {
 };
 type Unit = { id: string; code: string; name: string };
 type EwsPolicy = { id: string; code: string; name: string; version: number; active: boolean; effectiveFrom: string };
+type TriageRow = {
+  id: string;
+  assessedAt: string;
+  triageCategory: string;
+  chiefComplaint: string;
+  isolationRequired: boolean;
+  pregnant: boolean | null;
+  mobility: string | null;
+  notes: string | null;
+  vitals: {
+    recordedAt: string;
+    temperatureC: string | null;
+    pulseBpm: number | null;
+    respRate: number | null;
+    systolic: number | null;
+    diastolic: number | null;
+    spo2: number | null;
+    weightKg: string | null;
+    heightCm: string | null;
+    painScore: number | null;
+    bloodGlucoseMmol: string | null;
+    gcs: number | null;
+    avpu: string | null;
+    muacCm: string | null;
+    ewsScore: number | null;
+    ewsBand: string | null;
+  } | null;
+};
 type EncounterRecord = {
   id: string;
   visitId: string;
@@ -214,6 +242,8 @@ export function ClinicalPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [policies, setPolicies] = useState<EwsPolicy[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [triageHistory, setTriageHistory] = useState<TriageRow[]>([]);
+  const [triageLoading, setTriageLoading] = useState(false);
   const [visitId, setVisitId] = useState("");
   const [encounterId, setEncounterId] = useState("");
   const [encounterData, setEncounterData] = useState<EncounterRecord | null>(null);
@@ -291,7 +321,25 @@ export function ClinicalPage() {
     } catch (error) { toast.error(errorMessage(error, "Encounter could not be loaded.")); }
   }, []);
 
+  const loadTriage = useCallback(async (id: string) => {
+    if (!id) {
+      setTriageHistory([]);
+      setTriageLoading(false);
+      return;
+    }
+    setTriageLoading(true);
+    try {
+      const result = await clinicalRequest<TriageRow[]>(`visits/${id}/triage`);
+      if (id === visitId) setTriageHistory(result.data);
+    } catch (error) {
+      if (id === visitId) toast.error(errorMessage(error, "Triage history could not be loaded."));
+    } finally {
+      if (id === visitId) setTriageLoading(false);
+    }
+  }, [visitId]);
+
   useEffect(() => { void loadBase(); }, [loadBase]);
+  useEffect(() => { void loadTriage(visitId); }, [loadTriage, visitId]);
   useEffect(() => {
     if (!visitId) {
       setEncounterId("");
@@ -362,7 +410,12 @@ export function ClinicalPage() {
       if (encounterId) await loadEncounter(encounterId);
     } catch (error) {
       if (rethrow) throw error;
-      toast.error(errorMessage(error, "The clinical action could not be completed."));
+      const fieldErrors = error instanceof RegistryError
+        ? Object.entries(error.fieldErrors).flatMap(([field, messages]) =>
+          messages.map((message) => `${field}: ${message}`))
+        : [];
+      const message = errorMessage(error, "The clinical action could not be completed.");
+      toast.error(fieldErrors.length ? `${message} ${fieldErrors.join("; ")}` : message);
     }
     finally { setBusy(false); }
   };
@@ -397,6 +450,7 @@ export function ClinicalPage() {
       `Vitals recorded · EWS ${result.data.ews.score} (${result.data.ews.band})${result.data.taskId ? " · nurse task raised" : ""}`,
     );
     setVitals(EMPTY_VITALS);
+    await loadTriage(visitId);
   });
 
   const createSoapNote = () => withBusy(async () => {
@@ -519,7 +573,12 @@ export function ClinicalPage() {
   }, action === "acknowledge" ? "Nursing task acknowledged." : "Nursing task resolved.");
 
   const savePolicy = () => withBusy(async () => {
-    const rules = JSON.parse(policyForm.rules) as unknown;
+    let rules: unknown;
+    try {
+      rules = JSON.parse(policyForm.rules) as unknown;
+    } catch {
+      throw new Error("Policy rules must be valid JSON.");
+    }
     await clinicalRequest("ews-policies", {
       method: "POST",
       body: { ...policyForm, version: Number(policyForm.version), effectiveTo: null, active: true, rules },
@@ -685,23 +744,71 @@ export function ClinicalPage() {
               {policies.length === 0 ? <p className="text-sm text-destructive">No EWS policy is configured. An administrator must load a clinically approved policy before saving vitals.</p> : null}
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="size-5" />High early-warning tasks</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {tasks.length === 0 ? <p className="text-sm text-muted-foreground">No open tasks.</p> : tasks.map((row) => (
-                <div key={row.task.id} className="space-y-2 rounded-md border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <strong>{row.patientName}</strong><Badge variant="destructive">{row.task.priority}</Badge>
+          <div className="space-y-6">
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="size-5" />High early-warning tasks</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {tasks.length === 0 ? <p className="text-sm text-muted-foreground">No open tasks.</p> : tasks.map((row) => (
+                  <div key={row.task.id} className="space-y-2 rounded-md border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <strong>{row.patientName}</strong><Badge variant="destructive">{row.task.priority}</Badge>
+                    </div>
+                    <p className="text-sm">{row.task.description}</p><p className="text-xs text-muted-foreground">{row.unitName} · {new Date(row.task.createdAt).toLocaleString()}</p>
+                    <div className="flex gap-2">
+                      {row.task.status === "OPEN" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void updateTask(row.task.id, "acknowledge")}>Acknowledge</Button> : null}
+                      <Button size="sm" disabled={busy} onClick={() => void updateTask(row.task.id, "resolve")}>Resolve</Button>
+                    </div>
                   </div>
-                  <p className="text-sm">{row.task.description}</p><p className="text-xs text-muted-foreground">{row.unitName} · {new Date(row.task.createdAt).toLocaleString()}</p>
-                  <div className="flex gap-2">
-                    {row.task.status === "OPEN" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void updateTask(row.task.id, "acknowledge")}>Acknowledge</Button> : null}
-                    <Button size="sm" disabled={busy} onClick={() => void updateTask(row.task.id, "resolve")}>Resolve</Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Recent triage assessments & vitals</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {triageLoading ? <p className="text-sm text-muted-foreground">Loading triage history…</p> : null}
+                {!triageLoading && triageHistory.length === 0 ? <p className="text-sm text-muted-foreground">No triage assessments recorded for this visit.</p> : null}
+                {triageHistory.map((row) => {
+                  const observations: Array<[string, string | number | null]> = [
+                    ["Temperature", row.vitals?.temperatureC == null ? null : `${row.vitals.temperatureC} °C`],
+                    ["Pulse", row.vitals?.pulseBpm == null ? null : `${row.vitals.pulseBpm} /min`],
+                    ["Respiratory rate", row.vitals?.respRate == null ? null : `${row.vitals.respRate} /min`],
+                    ["Blood pressure", row.vitals?.systolic == null || row.vitals?.diastolic == null ? null : `${row.vitals.systolic}/${row.vitals.diastolic} mmHg`],
+                    ["SpO₂", row.vitals?.spo2 == null ? null : `${row.vitals.spo2}%`],
+                    ["Weight", row.vitals?.weightKg == null ? null : `${row.vitals.weightKg} kg`],
+                    ["Height", row.vitals?.heightCm == null ? null : `${row.vitals.heightCm} cm`],
+                    ["Pain score", row.vitals?.painScore ?? null],
+                    ["Blood glucose", row.vitals?.bloodGlucoseMmol == null ? null : `${row.vitals.bloodGlucoseMmol} mmol/L`],
+                    ["GCS", row.vitals?.gcs ?? null],
+                    ["AVPU", row.vitals?.avpu ?? null],
+                    ["MUAC", row.vitals?.muacCm == null ? null : `${row.vitals.muacCm} cm`],
+                  ];
+                  return (
+                    <div key={row.id} className="space-y-2 rounded-md border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong>{new Date(row.assessedAt).toLocaleString()}</strong>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary">{row.triageCategory}</Badge>
+                          {row.vitals?.ewsBand ? <Badge variant={row.vitals.ewsBand === "HIGH" ? "destructive" : "outline"}>EWS {row.vitals.ewsScore} · {row.vitals.ewsBand}</Badge> : null}
+                        </div>
+                      </div>
+                      <p className="text-sm">{row.chiefComplaint}</p>
+                      <div className="grid gap-1 text-sm sm:grid-cols-2">
+                        {observations.filter(([, value]) => value !== null).map(([label, value]) => (
+                          <p key={label}><span className="text-muted-foreground">{label}:</span> {value}</p>
+                        ))}
+                      </div>
+                      {row.notes ? <p className="text-sm text-muted-foreground">{row.notes}</p> : null}
+                      <p className="text-xs text-muted-foreground">
+                        {row.mobility ? `Mobility: ${row.mobility.replaceAll("_", " ")}` : ""}
+                        {row.pregnant === null ? "" : `${row.mobility ? " · " : ""}Pregnancy: ${row.pregnant ? "Yes" : "No"}`}
+                        {row.isolationRequired ? " · Isolation required" : ""}
+                      </p>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       ) : null}
 
@@ -852,6 +959,7 @@ export function ClinicalPage() {
         <div className="grid gap-6 xl:grid-cols-2">
           <Card><CardHeader><CardTitle>Versioned EWS policy configuration</CardTitle></CardHeader><CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">Clinical governance must approve the scoring chart before activation. Configure ranges as JSON; no default clinical thresholds are assumed.</p>
+            <p className="text-sm text-muted-foreground">Rules must use <code>parameters</code> (a map of observed field names to arrays of scoring rules) and <code>bands</code> with integer <code>mediumMin</code> and <code>highMin</code> values. Each scoring rule needs integer <code>points</code> and either a numeric <code>min</code>/<code>max</code> range or a categorical <code>value</code>. Use the exact observation keys: temperatureC, pulseBpm, respRate, systolic, diastolic, spo2, weightKg, heightCm, painScore, bloodGlucoseMmol, gcs, avpu, muacCm. Enter only ranges approved by clinical governance; highMin must exceed mediumMin.</p>
             <Input value={policyForm.code} onChange={(event) => setPolicyForm({ ...policyForm, code: event.target.value })} placeholder="Policy code" />
             <Input value={policyForm.name} onChange={(event) => setPolicyForm({ ...policyForm, name: event.target.value })} placeholder="Policy name" />
             <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><Label>Version</Label><Input type="number" min="1" value={policyForm.version} onChange={(event) => setPolicyForm({ ...policyForm, version: event.target.value })} /></div><div className="space-y-1"><Label>Effective from</Label><Input type="date" value={policyForm.effectiveFrom} onChange={(event) => setPolicyForm({ ...policyForm, effectiveFrom: event.target.value })} /></div></div>

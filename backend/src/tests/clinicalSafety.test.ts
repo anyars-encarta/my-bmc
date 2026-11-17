@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { calculateEws, evaluateDrugSafety } from "../lib/clinicalSafety.js";
+import { calculateEws, evaluateDrugSafety, ewsRulesSchema } from "../lib/clinicalSafety.js";
 
 describe("clinical safety helpers", () => {
   test("computes configured EWS scores and bands from present observations", () => {
@@ -18,6 +18,18 @@ describe("clinical safety helpers", () => {
     );
     assert.equal(result.score, 3);
     assert.equal(result.band, "HIGH");
+  });
+
+  test("reports invalid scoring rules at their parameter path", () => {
+    const result = ewsRulesSchema.safeParse({
+      parameters: { pulseBpm: [{ min: 100 }] },
+      bands: { mediumMin: 2, highMin: 3 },
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.deepEqual(result.error.issues[0]?.path, ["parameters", "pulseBpm", 0, "points"]);
+    }
   });
 
   test("flags severe allergy and major interaction as hard stops", () => {

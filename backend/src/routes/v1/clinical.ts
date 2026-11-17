@@ -443,7 +443,13 @@ const ewsPolicySchema = z.object({
   }
   const parsedRules = ewsRulesSchema.safeParse(value.rules);
   if (!parsedRules.success) {
-    context.addIssue({ code: "custom", path: ["rules"], message: "Provide valid, governance-approved scoring ranges." });
+    for (const issue of parsedRules.error.issues) {
+      context.addIssue({
+        code: "custom",
+        path: ["rules", ...issue.path],
+        message: issue.message,
+      });
+    }
   }
 });
 router.get("/ews-policies", requireAnyRole(CLINICAL_READ), async (_req, res, next) => {
@@ -497,13 +503,18 @@ router.get("/visits/:id/triage", requireAnyRole(NURSES), async (req, res, next) 
   try {
     const visitId = requestId(req, "id");
     const visitRow = await loadVisit(req, visitId);
-    const rows = await db.select().from(triageAssessment).where(eq(triageAssessment.visitId, visitId))
+    const rows = await db.select({
+      assessment: triageAssessment,
+      vital: vitalSign,
+    }).from(triageAssessment)
+      .leftJoin(vitalSign, eq(triageAssessment.vitalSignId, vitalSign.id))
+      .where(eq(triageAssessment.visitId, visitId))
       .orderBy(desc(triageAssessment.assessedAt));
     await writeAudit(req, {
       action: "READ_RESTRICTED", entityType: "triage_assessment", entityId: null,
       patientId: visitRow.patientId, orgUnitId: visitRow.currentUnitId,
     });
-    res.json({ data: rows });
+    res.json({ data: rows.map(({ assessment, vital }) => ({ ...assessment, vitals: vital })) });
   } catch (error) { next(error); }
 });
 router.post("/visits/:id/triage", requireAnyRole(NURSES), async (req, res, next) => {
