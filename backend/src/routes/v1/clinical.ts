@@ -33,6 +33,7 @@ import {
 } from "../../db/schema/index.js";
 import { conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { calculateEws, evaluateDrugSafety, ewsRulesSchema } from "../../lib/clinicalSafety.js";
+import { searchLabInvestigations } from "../../lib/lab-investigations.js";
 import { assertChartAccess, patientActor } from "../../lib/patientAccess.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
@@ -373,6 +374,14 @@ router.get("/icd10", requireAnyRole(CLINICAL_READ), async (req, res, next) => {
       or(ilike(icd10Code.code, `%${q}%`), ilike(icd10Code.title, `%${q}%`)),
     )).orderBy(asc(icd10Code.code)).limit(listLimit(req.query.limit));
     res.json({ data: rows });
+  } catch (error) { next(error); }
+});
+
+router.get("/lab-investigations", requireAnyRole(CLINICAL_READ), async (req, res, next) => {
+  try {
+    const q = String(req.query.q ?? "").trim();
+    if (q.length < 2) throw validationError("Enter at least 2 characters to search.", "SEARCH_TOO_SHORT");
+    res.json({ data: searchLabInvestigations(q, listLimit(req.query.limit, 20)) });
   } catch (error) { next(error); }
 });
 
@@ -930,7 +939,11 @@ router.post("/encounters/:id/orders", requireAnyRole(DOCTORS), async (req, res, 
       eq(clinicalOrder.encounterId, encounterId),
       eq(clinicalOrder.orderType, payload.orderType),
       eq(clinicalOrder.status, "ORDERED"),
-      payload.serviceItemId ? eq(clinicalOrder.serviceItemId, payload.serviceItemId) : isNull(clinicalOrder.serviceItemId),
+      payload.serviceItemId
+        ? eq(clinicalOrder.serviceItemId, payload.serviceItemId)
+        : payload.clinicalIndication
+          ? eq(clinicalOrder.clinicalIndication, payload.clinicalIndication)
+          : isNull(clinicalOrder.serviceItemId),
     )).limit(1);
     const alerts = duplicate.length ? [{
       code: "DUPLICATE_ACTIVE_ORDER",

@@ -79,7 +79,7 @@ type EncounterRecord = {
   notes: Array<{ id: string; noteType: string; body: string; version: number; status: string; amendsId: string | null }>;
   diagnoses: Array<{ id: string; icd10Code: string; description: string; diagnosisType: string; certainty: string; status: string }>;
   vitals: Array<{ id: string; recordedAt: string; ewsScore: number | null; ewsBand: string | null; pulseBpm: number | null; temperatureC: string | null; spo2: number | null }>;
-  orders: Array<{ id: string; orderType: string; status: string; priority: string; paymentRequired: boolean; paymentClearedAt: string | null }>;
+  orders: Array<{ id: string; orderType: string; status: string; priority: string; clinicalIndication: string | null; paymentRequired: boolean; paymentClearedAt: string | null }>;
   prescriptions: Array<{ id: string; rxNo: string; status: string; validUntil: string | null; items: Array<{ id: string; drugId: string; dose: string; doseUnit: string; frequencyCode: string; route: string; quantityPrescribed: string }> }>;
 };
 type SearchOption = { id: string; label: string; description?: string };
@@ -279,7 +279,7 @@ export function ClinicalPage() {
   const [diagnosisType, setDiagnosisType] = useState("PRIMARY");
   const [orderType, setOrderType] = useState("LAB");
   const [orderPriority, setOrderPriority] = useState("ROUTINE");
-  const [serviceChoice, setServiceChoice] = useState<SearchOption | null>(null);
+  const [investigationChoice, setInvestigationChoice] = useState<SearchOption | null>(null);
   const [orderNotes, setOrderNotes] = useState("");
   const [drugChoice, setDrugChoice] = useState<SearchOption | null>(null);
   const [rx, setRx] = useState({ dose: "", doseUnit: "mg", frequencyCode: "BD", route: "ORAL", durationDays: "5", quantity: "10", validUntil: "", instructions: "" });
@@ -391,14 +391,14 @@ export function ClinicalPage() {
       description: [row.brandName, row.form].filter(Boolean).join(" · "),
     }));
   }, []);
-  const findServices = useCallback(async (term: string): Promise<SearchOption[]> => {
-    const result = await clinicalRequest<Array<{ id: string; code: string; name: string; category: string }>>(
-      withQuery("service-items", { q: term, limit: 30 }),
+  const findInvestigations = useCallback(async (term: string): Promise<SearchOption[]> => {
+    const result = await clinicalRequest<Array<{ id: string; name: string; category: string; aliases: string[] }>>(
+      withQuery("lab-investigations", { q: term, limit: 30 }),
     );
     return result.data.map((row) => ({
       id: row.id,
-      label: `${row.name} · ${row.code}`,
-      description: row.category.replaceAll("_", " "),
+      label: row.name,
+      description: row.category,
     }));
   }, []);
 
@@ -509,14 +509,14 @@ export function ClinicalPage() {
       body: {
         orderType,
         priority: orderPriority,
-        serviceItemId: serviceChoice?.id ?? null,
-        clinicalIndication: orderNotes || null,
+        serviceItemId: null,
+        clinicalIndication: investigationChoice?.label ?? null,
         notes: orderNotes || null,
         overrides,
       },
     });
     setOrderNotes("");
-    setServiceChoice(null);
+    setInvestigationChoice(null);
   }, "Clinical order placed.", true);
   const createPrescription = (overrides: SafetyOverride[]) => withBusy(async () => {
     if (!encounterId || !drugChoice) return;
@@ -913,11 +913,11 @@ export function ClinicalPage() {
                   <div className="space-y-2"><Label>Order type</Label><Select value={orderType} onValueChange={setOrderType}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["LAB", "IMAGING", "PROCEDURE", "NURSING", "CONSULT_REQUEST", "DIET"].map((item) => <SelectItem key={item} value={item}>{item.replaceAll("_", " ")}</SelectItem>)}</SelectContent></Select></div>
                   <div className="space-y-2"><Label>Priority</Label><Select value={orderPriority} onValueChange={setOrderPriority}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["ROUTINE", "URGENT", "STAT"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div>
                 </div>
-                <AsyncClinicalPicker value={serviceChoice} onChange={setServiceChoice} placeholder="Search service or test (optional)" searchPlaceholder="Search service catalogue" search={findServices} />
+                <AsyncClinicalPicker value={investigationChoice} onChange={setInvestigationChoice} placeholder="Search investigations or procedures (optional)" searchPlaceholder="Search lab investigations" search={findInvestigations} />
                 <Textarea value={orderNotes} onChange={(event) => setOrderNotes(event.target.value)} rows={2} placeholder="Clinical indication / notes" />
                 <Button disabled={busy} onClick={() => void runWithSafety(createOrder).catch((error: unknown) => toast.error(errorMessage(error, "Order could not be placed.")))}>Place order</Button>
                 <ul className="space-y-1 text-sm">{encounterData.orders.map((order) => <li key={order.id}>
-                  {order.orderType} · {order.priority} · {order.status}
+                  {order.orderType}{order.clinicalIndication ? ` · ${order.clinicalIndication}` : ""} · {order.priority} · {order.status}
                   {order.paymentRequired && !order.paymentClearedAt ? <Badge variant="destructive" className="ml-2">Awaiting payment</Badge> : null}
                 </li>)}</ul>
               </CardContent></Card>
