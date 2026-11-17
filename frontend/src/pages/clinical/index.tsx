@@ -273,7 +273,7 @@ export function ClinicalPage() {
     notes: "",
   });
   const [vitals, setVitals] = useState(EMPTY_VITALS);
-  const [soap, setSoap] = useState("");
+  const [soap, setSoap] = useState({ subjective: "", objective: "", assessment: "", plan: "" });
   const [encounterType, setEncounterType] = useState("CONSULTATION");
   const [diagnosisChoice, setDiagnosisChoice] = useState<SearchOption | null>(null);
   const [diagnosisType, setDiagnosisType] = useState("PRIMARY");
@@ -472,8 +472,17 @@ export function ClinicalPage() {
 
   const createSoapNote = () => withBusy(async () => {
     if (!encounterId) return;
-    await clinicalRequest(`encounters/${encounterId}/notes`, { method: "POST", body: { noteType: "SOAP", body: soap } });
-    setSoap("");
+    const body = ([
+      ["Subjective", soap.subjective],
+      ["Objective", soap.objective],
+      ["Assessment", soap.assessment],
+      ["Plan", soap.plan],
+    ] as const)
+      .filter(([, value]) => value.trim())
+      .map(([heading, value]) => `${heading}\n${value.trim()}`)
+      .join("\n\n");
+    await clinicalRequest(`encounters/${encounterId}/notes`, { method: "POST", body: { noteType: "SOAP", body } });
+    setSoap({ subjective: "", objective: "", assessment: "", plan: "" });
   }, "SOAP note saved as a draft.");
   const addDiagnosis = () => withBusy(async () => {
     if (!encounterId || !diagnosisChoice) return;
@@ -837,8 +846,19 @@ export function ClinicalPage() {
 
             {encounterData.status === "OPEN" ? <div className="grid gap-6 xl:grid-cols-2">
               <Card><CardHeader><CardTitle>SOAP note</CardTitle></CardHeader><CardContent className="space-y-4">
-                <Textarea aria-label="SOAP note" value={soap} onChange={(event) => setSoap(event.target.value)} rows={8} placeholder={"Subjective\n\nObjective\n\nAssessment\n\nPlan"} />
-                <Button disabled={busy || !soap.trim()} onClick={() => void createSoapNote()}>Save draft note</Button>
+                <div className="space-y-2"><Label htmlFor="soap-subjective">Subjective</Label>
+                  <Textarea id="soap-subjective" value={soap.subjective} onChange={(event) => setSoap({ ...soap, subjective: event.target.value })} rows={3} />
+                </div>
+                <div className="space-y-2"><Label htmlFor="soap-objective">Objective</Label>
+                  <Textarea id="soap-objective" value={soap.objective} onChange={(event) => setSoap({ ...soap, objective: event.target.value })} rows={3} />
+                </div>
+                <div className="space-y-2"><Label htmlFor="soap-assessment">Assessment</Label>
+                  <Textarea id="soap-assessment" value={soap.assessment} onChange={(event) => setSoap({ ...soap, assessment: event.target.value })} rows={3} />
+                </div>
+                <div className="space-y-2"><Label htmlFor="soap-plan">Plan</Label>
+                  <Textarea id="soap-plan" value={soap.plan} onChange={(event) => setSoap({ ...soap, plan: event.target.value })} rows={3} />
+                </div>
+                <Button disabled={busy || !Object.values(soap).some((value) => value.trim())} onClick={() => void createSoapNote()}>Save draft note</Button>
               </CardContent></Card>
 
               <Card><CardHeader><CardTitle>Diagnosis · ICD-11</CardTitle></CardHeader><CardContent className="space-y-4">
