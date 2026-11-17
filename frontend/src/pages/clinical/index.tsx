@@ -52,6 +52,23 @@ type TriageRow = {
     ewsBand: string | null;
   } | null;
 };
+const formatTriageObservations = (vitals: TriageRow["vitals"]): Array<[string, string | number]> => {
+  if (!vitals) return [];
+  return [
+    ["Temperature", vitals.temperatureC == null ? null : `${vitals.temperatureC} °C`],
+    ["Pulse", vitals.pulseBpm == null ? null : `${vitals.pulseBpm} /min`],
+    ["Respiratory rate", vitals.respRate == null ? null : `${vitals.respRate} /min`],
+    ["Blood pressure", vitals.systolic == null || vitals.diastolic == null ? null : `${vitals.systolic}/${vitals.diastolic} mmHg`],
+    ["SpO₂", vitals.spo2 == null ? null : `${vitals.spo2}%`],
+    ["Weight", vitals.weightKg == null ? null : `${vitals.weightKg} kg`],
+    ["Height", vitals.heightCm == null ? null : `${vitals.heightCm} cm`],
+    ["Pain score", vitals.painScore],
+    ["Blood glucose", vitals.bloodGlucoseMmol == null ? null : `${vitals.bloodGlucoseMmol} mmol/L`],
+    ["GCS", vitals.gcs],
+    ["AVPU", vitals.avpu],
+    ["MUAC", vitals.muacCm == null ? null : `${vitals.muacCm} cm`],
+  ].filter((entry): entry is [string, string | number] => entry[1] !== null);
+};
 type EncounterRecord = {
   id: string;
   visitId: string;
@@ -768,20 +785,7 @@ export function ClinicalPage() {
                 {triageLoading ? <p className="text-sm text-muted-foreground">Loading triage history…</p> : null}
                 {!triageLoading && triageHistory.length === 0 ? <p className="text-sm text-muted-foreground">No triage assessments recorded for this visit.</p> : null}
                 {triageHistory.map((row) => {
-                  const observations: Array<[string, string | number | null]> = [
-                    ["Temperature", row.vitals?.temperatureC == null ? null : `${row.vitals.temperatureC} °C`],
-                    ["Pulse", row.vitals?.pulseBpm == null ? null : `${row.vitals.pulseBpm} /min`],
-                    ["Respiratory rate", row.vitals?.respRate == null ? null : `${row.vitals.respRate} /min`],
-                    ["Blood pressure", row.vitals?.systolic == null || row.vitals?.diastolic == null ? null : `${row.vitals.systolic}/${row.vitals.diastolic} mmHg`],
-                    ["SpO₂", row.vitals?.spo2 == null ? null : `${row.vitals.spo2}%`],
-                    ["Weight", row.vitals?.weightKg == null ? null : `${row.vitals.weightKg} kg`],
-                    ["Height", row.vitals?.heightCm == null ? null : `${row.vitals.heightCm} cm`],
-                    ["Pain score", row.vitals?.painScore ?? null],
-                    ["Blood glucose", row.vitals?.bloodGlucoseMmol == null ? null : `${row.vitals.bloodGlucoseMmol} mmol/L`],
-                    ["GCS", row.vitals?.gcs ?? null],
-                    ["AVPU", row.vitals?.avpu ?? null],
-                    ["MUAC", row.vitals?.muacCm == null ? null : `${row.vitals.muacCm} cm`],
-                  ];
+                  const observations = formatTriageObservations(row.vitals);
                   return (
                     <div key={row.id} className="space-y-2 rounded-md border p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -793,7 +797,7 @@ export function ClinicalPage() {
                       </div>
                       <p className="text-sm">{row.chiefComplaint}</p>
                       <div className="grid gap-1 text-sm sm:grid-cols-2">
-                        {observations.filter(([, value]) => value !== null).map(([label, value]) => (
+                        {observations.map(([label, value]) => (
                           <p key={label}><span className="text-muted-foreground">{label}:</span> {value}</p>
                         ))}
                       </div>
@@ -837,7 +841,7 @@ export function ClinicalPage() {
                 <Button disabled={busy || !soap.trim()} onClick={() => void createSoapNote()}>Save draft note</Button>
               </CardContent></Card>
 
-              <Card><CardHeader><CardTitle>Diagnosis · ICD-10</CardTitle></CardHeader><CardContent className="space-y-4">
+              <Card><CardHeader><CardTitle>Diagnosis · ICD-11</CardTitle></CardHeader><CardContent className="space-y-4">
                 <AsyncClinicalPicker value={diagnosisChoice} onChange={setDiagnosisChoice} placeholder="Search diagnosis" searchPlaceholder="Search code or diagnosis" search={findIcdCodes} />
                 <div className="flex gap-3"><Select value={diagnosisType} onValueChange={setDiagnosisType}><SelectTrigger className="max-w-48"><SelectValue /></SelectTrigger><SelectContent>{["PRIMARY", "SECONDARY", "DIFFERENTIAL"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select>
                   <Button disabled={busy || !diagnosisChoice} onClick={() => void addDiagnosis()}>Add diagnosis</Button>
@@ -847,6 +851,27 @@ export function ClinicalPage() {
               </CardContent></Card>
 
               <Card><CardHeader><CardTitle>Vitals</CardTitle></CardHeader><CardContent className="space-y-4">
+                <div className="space-y-2 border-b pb-4">
+                  <h3 className="font-medium">Vitals recorded during triage</h3>
+                  {triageLoading ? <p className="text-sm text-muted-foreground">Loading triage vitals…</p> : null}
+                  {!triageLoading && triageHistory.length === 0 ? <p className="text-sm text-muted-foreground">No triage vitals recorded for this visit.</p> : null}
+                  {triageHistory.slice(0, 3).map((row) => (
+                    <div key={row.id} className="space-y-2 rounded-md border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <span>{new Date(row.assessedAt).toLocaleString()}</span>
+                        <div className="flex gap-2">
+                          <Badge variant="secondary">{row.triageCategory}</Badge>
+                          {row.vitals?.ewsBand ? <Badge variant={row.vitals.ewsBand === "HIGH" ? "destructive" : "outline"}>EWS {row.vitals.ewsScore} · {row.vitals.ewsBand}</Badge> : null}
+                        </div>
+                      </div>
+                      <div className="grid gap-1 text-sm sm:grid-cols-2">
+                        {formatTriageObservations(row.vitals).map(([label, value]) => (
+                          <p key={label}><span className="text-muted-foreground">{label}:</span> {value}</p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {([
                     ["temperatureC", "Temperature °C"], ["pulseBpm", "Pulse / min"], ["respRate", "Respiratory rate"],
