@@ -433,6 +433,11 @@ and `ICD_API_TIMEOUT_MS` defaults to `8000` and is capped at `30000` ms. Diagnos
 retain their coding system (`ICD-10` or `ICD-11`); ICD-11 selections are checked against WHO
 search results when saved. Apply migration `0029_icd11_diagnosis_code_system.sql` before deploying.
 
+The OPD prescription picker searches the OpenFDA NDC API. `OPEN_FDA_API_KEY` is optional;
+`OPEN_FDA_API_TIMEOUT_MS` defaults to `8000` and is bounded to `3000`–`15000` ms. Results are
+selectable only when their name, dosage form, and strength match an active local drug record,
+so existing allergy and interaction checks continue to use the curated prescribing catalog.
+
 ### 2.5 Encounter / OPD tables (V14)
 
 ```sql

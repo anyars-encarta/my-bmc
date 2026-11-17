@@ -82,7 +82,7 @@ type EncounterRecord = {
   orders: Array<{ id: string; orderType: string; status: string; priority: string; clinicalIndication: string | null; paymentRequired: boolean; paymentClearedAt: string | null }>;
   prescriptions: Array<{ id: string; rxNo: string; status: string; validUntil: string | null; items: Array<{ id: string; drugId: string; dose: string; doseUnit: string; frequencyCode: string; route: string; quantityPrescribed: string }> }>;
 };
-type SearchOption = { id: string; label: string; description?: string };
+type SearchOption = { id: string; label: string; description?: string; route?: string | null };
 type SafetyAlert = { code: string; message: string };
 type SafetyOverride = { code: string; reason: string };
 type SafetyRequest = (overrides: SafetyOverride[]) => Promise<void>;
@@ -382,13 +382,22 @@ export function ClinicalPage() {
     return result.data.map((row) => ({ id: row.code, label: `${row.code} · ${row.description}`, description: row.codeSystem }));
   }, []);
   const findDrugs = useCallback(async (term: string): Promise<SearchOption[]> => {
-    const result = await clinicalRequest<Array<{ id: string; genericName: string; brandName: string | null; strengthText: string | null; form: string }>>(
-      withQuery("drugs", { q: term, limit: 20 }),
+    const result = await clinicalRequest<Array<{
+      id: string;
+      name: string;
+      genericName: string | null;
+      dosageForm: string | null;
+      labelerName: string | null;
+      route: string | null;
+      dose: string | null;
+    }>>(
+      withQuery("medications/search", { q: term, limit: 20 }),
     );
     return result.data.map((row) => ({
       id: row.id,
-      label: `${row.genericName}${row.strengthText ? ` · ${row.strengthText}` : ""}`,
-      description: [row.brandName, row.form].filter(Boolean).join(" · "),
+      label: `${row.name}${row.dose ? ` · ${row.dose}` : ""}`,
+      description: [row.genericName, row.dosageForm, row.route, row.labelerName].filter(Boolean).join(" · "),
+      route: row.route,
     }));
   }, []);
   const findInvestigations = useCallback(async (term: string): Promise<SearchOption[]> => {
@@ -923,18 +932,22 @@ export function ClinicalPage() {
               </CardContent></Card>
 
               <Card><CardHeader><CardTitle>Prescription</CardTitle></CardHeader><CardContent className="space-y-4">
-                <AsyncClinicalPicker value={drugChoice} onChange={setDrugChoice} placeholder="Search formulary" searchPlaceholder="Search generic, brand or strength" search={findDrugs} />
+                <AsyncClinicalPicker value={drugChoice} onChange={(choice) => {
+                  setDrugChoice(choice);
+                  setRx((current) => ({ ...current, route: choice?.route ?? "" }));
+                }} placeholder="Search FDA medications" searchPlaceholder="Search generic, brand or strength" search={findDrugs} />
+                <p className="text-sm text-muted-foreground">Only OpenFDA products matching an active local drug record are selectable.</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1"><Label>Dose</Label><Input type="number" step="any" value={rx.dose} onChange={(event) => setRx({ ...rx, dose: event.target.value })} /></div>
                   <div className="space-y-1"><Label>Dose unit</Label><Input value={rx.doseUnit} onChange={(event) => setRx({ ...rx, doseUnit: event.target.value })} /></div>
                   <div className="space-y-1"><Label>Frequency</Label><Select value={rx.frequencyCode} onValueChange={(frequencyCode) => setRx({ ...rx, frequencyCode })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{medicationFrequencies.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div>
-                  <div className="space-y-1"><Label>Route</Label><Input value={rx.route} onChange={(event) => setRx({ ...rx, route: event.target.value })} /></div>
+                  <div className="space-y-1"><Label>Route</Label><Input value={rx.route} onChange={(event) => setRx({ ...rx, route: event.target.value })} placeholder="Enter route" /></div>
                   <div className="space-y-1"><Label>Duration (days)</Label><Input type="number" min="1" value={rx.durationDays} onChange={(event) => setRx({ ...rx, durationDays: event.target.value })} /></div>
                   <div className="space-y-1"><Label>Quantity</Label><Input type="number" min="0.001" step="any" value={rx.quantity} onChange={(event) => setRx({ ...rx, quantity: event.target.value })} /></div>
                   <div className="space-y-1"><Label>Prescription expiry</Label><Input type="date" value={rx.validUntil} onChange={(event) => setRx({ ...rx, validUntil: event.target.value })} /></div>
                 </div>
                 <Input aria-label="Prescription instructions" value={rx.instructions} onChange={(event) => setRx({ ...rx, instructions: event.target.value })} placeholder="Patient instructions / PRN reason" />
-                <Button disabled={busy || !drugChoice || !rx.dose || !rx.quantity || !rx.validUntil} onClick={() => void runWithSafety(createPrescription).catch((error: unknown) => toast.error(errorMessage(error, "Prescription could not be saved.")))}>Create prescription draft</Button>
+                <Button disabled={busy || !drugChoice || !rx.dose || !rx.doseUnit || !rx.route || !rx.quantity || !rx.validUntil} onClick={() => void runWithSafety(createPrescription).catch((error: unknown) => toast.error(errorMessage(error, "Prescription could not be saved.")))}>Create prescription draft</Button>
                 <div className="space-y-2">{encounterData.prescriptions.map((record) => <div key={record.id} className="rounded border p-3 text-sm">
                   <div className="flex justify-between gap-2"><strong>{record.status}</strong><span>{record.validUntil ?? "No expiry date"}</span></div>
                   <p>{record.items.length} medication item(s)</p>

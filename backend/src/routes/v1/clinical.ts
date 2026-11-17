@@ -35,6 +35,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from "../.
 import { calculateEws, evaluateDrugSafety, ewsRulesSchema } from "../../lib/clinicalSafety.js";
 import { findIcd11Code, searchIcd11 } from "../../lib/icd11.js";
 import { searchLabInvestigations } from "../../lib/lab-investigations.js";
+import { searchOpenFdaMedications } from "../../lib/open-fda.js";
 import { assertChartAccess, patientActor } from "../../lib/patientAccess.js";
 import { requireAnyRole } from "../../lib/platform.js";
 
@@ -1100,6 +1101,106 @@ router.get("/drugs", requireAnyRole(PHARMACY_READ), async (req, res, next) => {
     res.json({ data: rows });
   } catch (error) { next(error); }
 });
+
+const openFdaSearchSchema = z.object({
+  q: z.string().trim().min(2).max(128),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+
+const normalizeDrugText = (value: string | null | undefined) =>
+  (value ?? "").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+
+const normalizeDrugStrength = (value: string | null | undefined) =>
+  (value ?? "").trim().toLocaleLowerCase().replace(/\s*\/\s*1\b/g, "").replace(/[^a-z0-9.]/g, "");
+
+const mapOpenFdaForm = (dosageForm: string | null) => {
+  const form = (dosageForm ?? "").toLocaleUpperCase();
+  if (form.includes("TABLET")) return "TABLET";
+  if (form.includes("CAPSULE")) return "CAPSULE";
+  if (form.includes("SYRUP")) return "SYRUP";
+  if (form.includes("SUSPENSION")) return "SUSPENSION";
+  if (/INTRAVENOUS.*(SOLUTION|FLUID)|(SOLUTION|FLUID).*INTRAVENOUS/.test(form)) return "IV_FLUID";
+  if (form.includes("INJECTION") || form.includes("INJECTABLE")) return "INJECTION";
+  if (form.includes("CREAM")) return "CREAM";
+  if (form.includes("OINTMENT")) return "OINTMENT";
+  if (form.includes("DROP")) return "DROPS";
+  if (form.includes("INHALER") || form.includes("AEROSOL") || form.includes("INHALATION")) return "INHALER";
+  if (form.includes("SUPPOSITORY")) return "SUPPOSITORY";
+  return null;
+};
+
+const normalizeDrugRoute = (value: string | null | undefined) => {
+  const route = (value ?? "").toLocaleUpperCase();
+  if (/\bORAL\b|\bBY MOUTH\b|\bPO\b/.test(route)) return "ORAL";
+  if (/\bIV\b|INTRAVENOUS/.test(route)) return "IV";
+  if (/\bIM\b|INTRAMUSCULAR/.test(route)) return "IM";
+  if (/SUBCUT|SUB-Q|\bSC\b/.test(route)) return "SC";
+  if (/TOPICAL|CUTANEOUS/.test(route)) return "TOPICAL";
+  if (/INHALATION|RESPIRATORY/.test(route)) return "INHALATION";
+  if (/OPHTHALMIC/.test(route)) return "OPHTHALMIC";
+  if (/OTIC/.test(route)) return "OTIC";
+  return route.trim();
+};
+
+router.get("/medications/search", requireAnyRole(CLINICAL_READ), async (req, res, next) => {
+  try {
+    const parsed = openFdaSearchSchema.safeParse({ q: req.query.q, limit: req.query.limit });
+    if (!parsed.success) {
+      throw badRequest("Invalid medication search parameters.", "OPEN_FDA_QUERY_INVALID", parsed.error.flatten());
+    }
+
+    const results = await searchOpenFdaMedications(parsed.data.q, parsed.data.limit ?? 8);
+    const genericNames = Array.from(new Set(results
+      .map((item) => normalizeDrugText(item.genericName))
+      .filter(Boolean)));
+    const brandNames = Array.from(new Set(results
+      .map((item) => normalizeDrugText(item.name))
+      .filter(Boolean)));
+    const nameConditions = [];
+    if (genericNames.length) nameConditions.push(inArray(sql<string>`lower(${drug.genericName})`, genericNames));
+    if (brandNames.length) nameConditions.push(inArray(sql<string>`lower(${drug.brandName})`, brandNames));
+
+    const localDrugs = nameConditions.length
+      ? await db.select({
+        id: drug.id,
+        genericName: drug.genericName,
+        brandName: drug.brandName,
+        form: drug.form,
+        strengthText: drug.strengthText,
+        defaultRoute: drug.defaultRoute,
+      }).from(drug).where(and(eq(drug.active, true), or(...nameConditions)))
+      : [];
+
+    const usedDrugIds = new Set<string>();
+    const matched = results.flatMap((item) => {
+      const form = mapOpenFdaForm(item.dosageForm);
+      if (!form) return [];
+      const match = localDrugs.find((candidate) => {
+        const nameMatches = normalizeDrugText(candidate.genericName) === normalizeDrugText(item.genericName) ||
+          normalizeDrugText(candidate.brandName) === normalizeDrugText(item.name);
+        const route = normalizeDrugRoute(item.route);
+        const localRoute = normalizeDrugRoute(candidate.defaultRoute);
+        return nameMatches && candidate.form === form &&
+          normalizeDrugStrength(candidate.strengthText) === normalizeDrugStrength(item.dose) &&
+          (!route || !localRoute || route === localRoute);
+      });
+      if (!match || usedDrugIds.has(match.id)) return [];
+      usedDrugIds.add(match.id);
+      return [{
+        id: match.id,
+        name: item.name,
+        genericName: item.genericName ?? match.genericName,
+        productNdc: item.productNdc,
+        dosageForm: item.dosageForm,
+        labelerName: item.labelerName,
+        route: match.defaultRoute ?? item.route,
+        dose: item.dose,
+      }];
+    });
+    res.json({ data: matched.slice(0, parsed.data.limit ?? 8) });
+  } catch (error) { next(error); }
+});
+
 router.post("/drugs", requireAnyRole(ADMIN), async (req, res, next) => {
   try {
     const payload = parseBody(drugSchema, req.body);
