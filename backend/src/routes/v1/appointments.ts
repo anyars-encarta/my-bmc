@@ -9,6 +9,7 @@ import {
   appointmentRebookTask,
   appointmentSlot,
   clinicSessionTemplate,
+  encounter,
   orgUnit,
   patient,
   patientIdentifier,
@@ -1197,10 +1198,36 @@ router.post("/visits/:id/close", requireAnyRole([...APPOINTMENT_WRITE_ROLES]), a
   try {
     const id = requestId(req, "id");
     await ensureVisitAccess(req, id);
-    const [updated] = await db.update(visit).set({ status: "CLOSED", closedAt: new Date() })
-      .where(and(eq(visit.id, id), eq(visit.status, "OPEN"))).returning({ status: visit.status });
-    if (!updated) throw conflict("Visit is not open.", "VISIT_NOT_OPEN");
-    res.json({ data: updated });
+    const [unsignedEncounter] = await db.select({ id: encounter.id }).from(encounter)
+      .where(and(eq(encounter.visitId, id), sql`${encounter.status} <> 'SIGNED'`)).limit(1);
+    if (unsignedEncounter) throw conflict("Sign all encounters before closing this visit.", "VISIT_ENCOUNTER_UNSIGNED");
+    const closed = await db.execute(sql<{ id: string }>`
+      WITH closed_visit AS (
+        UPDATE visit SET status = 'CLOSED', closed_at = now()
+        WHERE id = ${id}::uuid AND status = 'OPEN'
+          AND NOT EXISTS (
+            SELECT 1 FROM encounter
+            WHERE encounter.visit_id = visit.id AND encounter.status <> 'SIGNED'
+          )
+        RETURNING id, patient_id, current_unit_id
+      ),
+      status_audit AS (
+        INSERT INTO audit_log (
+          actor_user_id, actor_roles, action, entity_type, entity_id, patient_id, org_unit_id,
+          request_id, ip, user_agent, reason, before, after
+        )
+        SELECT ${req.user?.id ?? null}, ${req.user?.roles ?? []}, 'STATUS_CHANGE', 'visit',
+          id::text, patient_id, current_unit_id, ${req.requestId ?? null},
+          ${req.ip?.replace(/^::ffff:/, "") ?? null}::inet, ${req.get("user-agent") ?? null},
+          'Visit closed after all encounters were signed.',
+          jsonb_build_object('status', 'OPEN'), jsonb_build_object('status', 'CLOSED')
+        FROM closed_visit
+        RETURNING entity_id
+      )
+      SELECT id FROM closed_visit
+    `);
+    if (!closed.rows[0]) throw conflict("Visit is not open or still has an unsigned encounter.", "VISIT_NOT_OPEN");
+    res.json({ data: { status: "CLOSED" } });
   } catch (error) {
     next(error);
   }

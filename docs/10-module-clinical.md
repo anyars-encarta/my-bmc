@@ -584,7 +584,7 @@ CREATE TABLE outpatient_task (
 ```
 
 ### 2.6 Encounter rules (service layer)
-1. **Sign** requires: licensed clinical author (ADR-004a), at least one *active* diagnosis (except `LEFT_WITHOUT_BEING_SEEN`), a disposition on the *last* encounter of the visit.
+1. **Sign** requires: licensed clinical author (ADR-004a), at least one *active* diagnosis (except `LEFT_WITHOUT_BEING_SEEN`), a disposition on the *last* encounter of the visit. Discharged visits remain OPEN until all encounters are signed; the closing status change is audited.
 2. **Amend**: `POST /notes/{noteId}/amend` creates a signed version *n+1* with `amends_id` and the current verified licence; previous rows stay visible in history; `ADDENDUM` notes append without editing.
 3. **Ordering safety** (`OrderSafetyService`, synchronous): allergy match (patient allergies × drug/ingredient), duplicate active order, drug-drug interaction (severity ≥ `MAJOR` is a *hard stop with reason*), pregnancy/age/weight dose checks (Sprint 15 for dosing). Each override → `audit_log(action='OVERRIDE')`.
 4. **Early-warning score** is computed on vital-sign save from the facility's configured chart (`ews_policy` table seeded with the approved MEWS/NEWS2 parameters — *clinical governance signs off the numbers*); every supplied numeric observation must match a configured band or the save is rejected; `HIGH` creates a `NursingTask` + in-app alert to the charge nurse/doctor.

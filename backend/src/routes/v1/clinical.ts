@@ -853,7 +853,8 @@ const signEncounter = async (req: Request, encounterId: string) => {
   }
   const last = await db.select({ id: encounter.id }).from(encounter)
     .where(eq(encounter.visitId, record.visitId)).orderBy(desc(encounter.startedAt)).limit(1);
-  if (last[0]?.id === record.id && !record.disposition) {
+  const isLastEncounter = last[0]?.id === record.id;
+  if (isLastEncounter && !record.disposition) {
     throw validationError("Set the visit disposition before signing the last encounter.", "ENCOUNTER_DISPOSITION_REQUIRED");
   }
   const signer = await actorStaff(req);
@@ -863,12 +864,41 @@ const signEncounter = async (req: Request, encounterId: string) => {
       UPDATE encounter SET status = 'SIGNED', signed_at = now(),
         signed_by_staff_id = ${signer.id}::uuid, ended_at = now()
       WHERE id = ${encounterId}::uuid AND status = 'OPEN'
-      RETURNING id
+      RETURNING id, visit_id, disposition
     ),
     signed_notes AS (
       UPDATE clinical_note SET status = 'SIGNED', signed_at = now(), signer_licence_no = ${licence.licenceNo}
       WHERE encounter_id IN (SELECT id FROM signed_encounter) AND status = 'DRAFT'
       RETURNING id
+    ),
+    closed_visit AS (
+      UPDATE visit SET status = 'CLOSED', closed_at = now()
+      WHERE status = 'OPEN'
+        AND id IN (
+          SELECT signed_encounter.visit_id FROM signed_encounter
+          INNER JOIN visit AS target_visit ON target_visit.id = signed_encounter.visit_id
+          WHERE target_visit.disposition IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN')
+            AND NOT EXISTS (
+              SELECT 1 FROM encounter AS unsigned_encounter
+              WHERE unsigned_encounter.visit_id = signed_encounter.visit_id
+                AND unsigned_encounter.status <> 'SIGNED'
+                AND unsigned_encounter.id <> signed_encounter.id
+            )
+        )
+      RETURNING id, patient_id, current_unit_id
+    ),
+    visit_status_audit AS (
+      INSERT INTO audit_log (
+        actor_user_id, actor_roles, action, entity_type, entity_id, patient_id, org_unit_id,
+        request_id, ip, user_agent, reason, before, after
+      )
+      SELECT ${req.user?.id ?? null}, ${req.user?.roles ?? []}, 'STATUS_CHANGE', 'visit',
+        id::text, patient_id, current_unit_id, ${req.requestId ?? null},
+        ${req.ip?.replace(/^::ffff:/, "") ?? null}::inet, ${req.get("user-agent") ?? null},
+        'Visit closed after its last encounter was signed.',
+        jsonb_build_object('status', 'OPEN'), jsonb_build_object('status', 'CLOSED')
+      FROM closed_visit
+      RETURNING entity_id
     )
     SELECT id FROM signed_encounter
   `);
@@ -1138,20 +1168,47 @@ router.post("/orders/:id/payment-clearance", requireAnyRole(["super_admin", "hos
     if (!current) throw notFound("Order not found.", "ORDER_NOT_FOUND");
     if (!current.paymentRequired) throw conflict("This order does not require payment clearance.", "ORDER_PAYMENT_NOT_REQUIRED");
     if (current.paymentClearedAt) {
-      res.json({ data: current });
+      const [clearanceAudit] = await db.select({ id: auditLog.id }).from(auditLog).where(and(
+        eq(auditLog.action, "OVERRIDE"),
+        eq(auditLog.entityType, "clinical_order"),
+        eq(auditLog.entityId, id),
+        sql`${auditLog.after} ? 'paymentClearedAt'`,
+      )).limit(1);
+      if (!clearanceAudit) {
+        throw conflict("Payment clearance is missing its audit record and needs reconciliation.", "ORDER_PAYMENT_AUDIT_MISSING");
+      }
+      res.json({ data: { id: current.id, paymentCleared: true, paymentClearedAt: current.paymentClearedAt } });
       return;
     }
-    const [updated] = await db.update(clinicalOrder).set({
-      paymentClearedAt: new Date(),
-    }).where(and(eq(clinicalOrder.id, id), eq(clinicalOrder.paymentRequired, true), isNull(clinicalOrder.paymentClearedAt)))
-      .returning();
-    if (!updated) throw conflict("Payment clearance changed while it was being recorded.", "ORDER_PAYMENT_STATE_CONFLICT");
-    await writeAudit(req, {
-      action: "OVERRIDE", entityType: "clinical_order", entityId: id,
-      patientId: current.patientId, reason: payload.reason,
-      before: { paymentClearedAt: null }, after: { paymentClearedAt: updated.paymentClearedAt },
-    });
-    res.json({ data: updated });
+    await db.execute(sql`
+      WITH cleared_order AS (
+        UPDATE clinical_order SET payment_cleared_at = now()
+        WHERE id = ${id}::uuid AND payment_required = true AND payment_cleared_at IS NULL
+        RETURNING id, patient_id, payment_cleared_at
+      ),
+      clearance_audit AS (
+        INSERT INTO audit_log (
+          actor_user_id, actor_roles, action, entity_type, entity_id, patient_id,
+          request_id, ip, user_agent, reason, before, after
+        )
+        SELECT ${req.user?.id ?? null}, ${req.user?.roles ?? []}, 'OVERRIDE', 'clinical_order',
+          cleared_order.id::text, cleared_order.patient_id, ${req.requestId ?? null},
+          ${req.ip?.replace(/^::ffff:/, "") ?? null}::inet, ${req.get("user-agent") ?? null},
+          ${payload.reason}, jsonb_build_object('paymentClearedAt', null),
+          jsonb_build_object('paymentClearedAt', cleared_order.payment_cleared_at)
+        FROM cleared_order
+        RETURNING entity_id
+      )
+      SELECT cleared_order.id
+      FROM cleared_order
+      INNER JOIN clearance_audit ON clearance_audit.entity_id = cleared_order.id::text
+    `);
+    const [updated] = await db.select({
+      id: clinicalOrder.id,
+      paymentClearedAt: clinicalOrder.paymentClearedAt,
+    }).from(clinicalOrder).where(and(eq(clinicalOrder.id, id), eq(clinicalOrder.paymentRequired, true)));
+    if (!updated?.paymentClearedAt) throw conflict("Payment clearance changed while it was being recorded.", "ORDER_PAYMENT_STATE_CONFLICT");
+    res.json({ data: { ...updated, paymentCleared: true } });
   } catch (error) { next(error); }
 });
 router.patch("/orders/:id/status", requireAnyRole([...DOCTORS, "lab_scientist", "radiographer", "pharmacist"]), async (req, res, next) => {
@@ -1420,9 +1477,17 @@ router.patch("/drug-interactions/:id", requireAnyRole(ADMIN), async (req, res, n
     const [current] = await db.select().from(drugInteraction).where(eq(drugInteraction.id, id)).limit(1);
     if (!current) throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
     const patch = parseBody(interactionPatchSchema, req.body);
-    const payload = parseBody(interactionSchema, { ...current, ...patch });
-    const [updated] = await db.update(drugInteraction).set(payload).where(eq(drugInteraction.id, id)).returning();
-    if (!updated) throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
+    parseBody(interactionSchema, { ...current, ...patch });
+    const pairChanged = patch.genericA !== undefined || patch.genericB !== undefined;
+    const conditions = [eq(drugInteraction.id, id)];
+    if (pairChanged) {
+      conditions.push(eq(drugInteraction.genericA, current.genericA), eq(drugInteraction.genericB, current.genericB));
+    }
+    const [updated] = await db.update(drugInteraction).set(patch).where(and(...conditions)).returning();
+    if (!updated) {
+      if (pairChanged) throw conflict("The interaction pair changed while it was being updated.", "DRUG_INTERACTION_CHANGED");
+      throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
+    }
     res.json({ data: updated });
   } catch (error) { next(error); }
 });
@@ -1616,13 +1681,16 @@ router.post("/prescriptions/:id/issue", requireAnyRole(DOCTORS), async (req, res
       ? await db.select().from(clinicalOrder).where(eq(clinicalOrder.id, current.orderId)).limit(1)
       : [];
     if (current.orderId && !relatedOrder) throw conflict("The medication order is unavailable.", "ORDER_NOT_FOUND");
+    if (relatedOrder && !["ORDERED", "IN_PROGRESS"].includes(relatedOrder.status)) {
+      throw conflict("The medication order is no longer ready to issue.", "ORDER_STATE_CONFLICT");
+    }
     if (relatedOrder?.paymentRequired && !relatedOrder.paymentClearedAt) {
       throw conflict("Payment must be cleared before this prescription can be issued.", "ORDER_PAYMENT_REQUIRED");
     }
     await db.execute(sql`
       WITH progressed_order AS (
         UPDATE clinical_order SET status = 'IN_PROGRESS'
-        WHERE id = ${current.orderId}::uuid AND status = 'ORDERED'
+        WHERE id = ${current.orderId}::uuid AND status IN ('ORDERED', 'IN_PROGRESS')
           AND (payment_required = false OR payment_cleared_at IS NOT NULL)
         RETURNING id
       ),
@@ -1662,18 +1730,38 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
         throw conflict("The medication order can no longer be cancelled.", "ORDER_STATE_CONFLICT");
       }
     }
-    await db.execute(sql`
-      WITH cancelled_order AS (
-        UPDATE clinical_order SET status = 'CANCELLED',
+    const cancellation = await db.execute(sql<{ id: string }>`
+      WITH locked_prescription AS MATERIALIZED (
+        SELECT id, order_id, status FROM prescription
+        WHERE id = ${id}::uuid
+        FOR UPDATE
+      ),
+      locked_order AS MATERIALIZED (
+        SELECT orders.id, orders.status
+        FROM clinical_order AS orders
+        INNER JOIN locked_prescription AS rx ON rx.order_id = orders.id
+        FOR UPDATE OF orders
+      ),
+      eligible_prescription AS MATERIALIZED (
+        SELECT rx.id, rx.order_id
+        FROM locked_prescription AS rx
+        LEFT JOIN locked_order AS orders ON orders.id = rx.order_id
+        WHERE rx.status IN ('DRAFT', 'ISSUED', 'PARTIALLY_DISPENSED')
+          AND (rx.order_id IS NULL OR orders.status IN ('ORDERED', 'IN_PROGRESS'))
+      ),
+      cancelled_order AS (
+        UPDATE clinical_order AS orders SET status = 'CANCELLED',
           cancelled_by = ${req.user?.id ?? null}, cancelled_reason = ${payload.reason}
-        WHERE id = ${current.orderId}::uuid AND status IN ('ORDERED', 'IN_PROGRESS')
-        RETURNING id
+        FROM eligible_prescription AS eligible
+        WHERE eligible.order_id = orders.id AND orders.status IN ('ORDERED', 'IN_PROGRESS')
+        RETURNING orders.id
       ),
       cancelled_prescription AS (
-        UPDATE prescription SET status = 'CANCELLED'
-        WHERE id = ${id}::uuid AND status IN ('DRAFT', 'ISSUED', 'PARTIALLY_DISPENSED')
-          AND (order_id IS NULL OR order_id IN (SELECT id FROM cancelled_order))
-        RETURNING id
+        UPDATE prescription AS rx SET status = 'CANCELLED'
+        FROM eligible_prescription AS eligible
+        WHERE rx.id = eligible.id
+          AND (rx.order_id IS NULL OR rx.order_id IN (SELECT id FROM cancelled_order))
+        RETURNING rx.id
       ),
       cancelled_items AS (
         UPDATE prescription_item SET status = 'CANCELLED', stopped_reason = ${payload.reason}
@@ -1682,6 +1770,9 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
       )
       SELECT id FROM cancelled_prescription
     `);
+    if (!cancellation.rows[0]) {
+      throw conflict("The prescription or linked order changed before cancellation.", "PRESCRIPTION_STATE_CONFLICT");
+    }
     const [updated] = await db.select().from(prescription).where(eq(prescription.id, id)).limit(1);
     if (!updated || updated.status !== "CANCELLED") throw conflict("The prescription has already changed.", "PRESCRIPTION_STATE_CONFLICT");
     await writeAudit(req, {
@@ -1813,9 +1904,7 @@ router.post("/encounters/:id/disposition", requireAnyRole(DOCTORS), async (req, 
       )
       UPDATE visit SET
         disposition = ${payload.disposition},
-        referral_id = CASE WHEN ${payload.disposition} = 'REFERRED_OUT' THEN ${payload.referralId}::uuid ELSE referral_id END,
-        status = CASE WHEN ${payload.disposition} IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN') THEN 'CLOSED' ELSE status END,
-        closed_at = CASE WHEN ${payload.disposition} IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN') THEN now() ELSE closed_at END
+        referral_id = CASE WHEN ${payload.disposition} = 'REFERRED_OUT' THEN ${payload.referralId}::uuid ELSE referral_id END
       WHERE id IN (SELECT visit_id FROM updated_encounter)
     `);
     const [updated] = await db.select().from(encounter).where(eq(encounter.id, encounterId)).limit(1);

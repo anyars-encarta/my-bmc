@@ -329,8 +329,8 @@ export function ClinicalPage() {
     }
   }, []);
 
-  const loadEncounter = useCallback(async (id: string, expectedVisitId = activeVisitIdRef.current) => {
-    if (expectedVisitId !== activeVisitIdRef.current) return;
+  const loadEncounter = useCallback(async (id: string, originatingVisitId: string) => {
+    if (originatingVisitId !== activeVisitIdRef.current) return;
     const requestId = ++encounterRequestRef.current;
     if (!id) {
       setEncounterId("");
@@ -340,12 +340,14 @@ export function ClinicalPage() {
     try {
       const result = await clinicalRequest<EncounterRecord>(`encounters/${id}`);
       if (requestId !== encounterRequestRef.current ||
-        expectedVisitId !== activeVisitIdRef.current ||
-        result.data.visitId !== expectedVisitId) return;
+        originatingVisitId !== activeVisitIdRef.current ||
+        result.data.visitId !== originatingVisitId) return;
       setEncounterId(id);
       setEncounterData(result.data);
     } catch (error) {
-      if (requestId === encounterRequestRef.current) toast.error(errorMessage(error, "Encounter could not be loaded."));
+      if (requestId === encounterRequestRef.current && originatingVisitId === activeVisitIdRef.current) {
+        toast.error(errorMessage(error, "Encounter could not be loaded."));
+      }
     }
   }, []);
 
@@ -497,12 +499,13 @@ export function ClinicalPage() {
 
   const startEncounter = () => withBusy(async () => {
     if (!visitId) return;
-    const result = await clinicalRequest<{ id: string }>(`visits/${visitId}/encounters`, {
+    const originatingVisitId = visitId;
+    const result = await clinicalRequest<{ id: string }>(`visits/${originatingVisitId}/encounters`, {
       method: "POST",
       body: { encounterType, chiefComplaint: triage.complaint || null },
     });
-    await loadEncounter(result.data.id);
-    setTab("workbench");
+    await loadEncounter(result.data.id, originatingVisitId);
+    if (originatingVisitId === activeVisitIdRef.current) setTab("workbench");
   }, "Encounter opened.");
 
   const saveTriage = () => withBusy(async () => {
@@ -1091,7 +1094,7 @@ export function ClinicalPage() {
           void action(overrides).then(async () => {
             toast.success("Clinical action recorded with audited safety override.");
             await loadBase();
-            if (encounterId) await loadEncounter(encounterId);
+            if (encounterId) await loadEncounter(encounterId, visitId);
           }).catch((error: unknown) => toast.error(errorMessage(error, "The overridden action could not be completed.")))
             .finally(() => setBusy(false));
         }} /> : null}
