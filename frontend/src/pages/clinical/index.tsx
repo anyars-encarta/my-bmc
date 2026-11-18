@@ -1,5 +1,5 @@
 import { AlertTriangle, ClipboardPlus, FileText, HeartPulse, Pill, Printer, RefreshCw, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -296,6 +296,10 @@ export function ClinicalPage() {
   const [drugSource, setDrugSource] = useState("EML");
   const [preparedImport, setPreparedImport] = useState<PreparedImport | null>(null);
   const [interactions, setInteractions] = useState({ genericA: "", genericB: "", severity: "MODERATE", effect: "", management: "", source: "" });
+  const encounterRequestRef = useRef(0);
+  const triageRequestRef = useRef(0);
+  const activeVisitIdRef = useRef(visitId);
+  activeVisitIdRef.current = visitId;
 
   const selectedVisit = useMemo(() => visits.find((row) => row.visit.id === visitId) ?? null, [visits, visitId]);
   const visitOptions = useMemo<SearchableSelectOption[]>(() => visits.map((row) => ({
@@ -312,7 +316,7 @@ export function ClinicalPage() {
       const [visitResult, refs, taskResult] = await Promise.all([
         clinicalRequest<VisitRow[]>("visits?status=OPEN"),
         clinicalRequest<{ units: Unit[]; ewsPolicies: EwsPolicy[] }>("clinical/references"),
-        clinicalRequest<TaskRow[]>("outpatient-tasks?status=OPEN"),
+        clinicalRequest<TaskRow[]>("outpatient-tasks?status=OPEN%2CACKNOWLEDGED"),
       ]);
       const rows = visitResult.data;
       setVisits(rows);
@@ -325,7 +329,9 @@ export function ClinicalPage() {
     }
   }, []);
 
-  const loadEncounter = useCallback(async (id: string) => {
+  const loadEncounter = useCallback(async (id: string, expectedVisitId = activeVisitIdRef.current) => {
+    if (expectedVisitId !== activeVisitIdRef.current) return;
+    const requestId = ++encounterRequestRef.current;
     if (!id) {
       setEncounterId("");
       setEncounterData(null);
@@ -333,12 +339,19 @@ export function ClinicalPage() {
     }
     try {
       const result = await clinicalRequest<EncounterRecord>(`encounters/${id}`);
+      if (requestId !== encounterRequestRef.current ||
+        expectedVisitId !== activeVisitIdRef.current ||
+        result.data.visitId !== expectedVisitId) return;
       setEncounterId(id);
       setEncounterData(result.data);
-    } catch (error) { toast.error(errorMessage(error, "Encounter could not be loaded.")); }
+    } catch (error) {
+      if (requestId === encounterRequestRef.current) toast.error(errorMessage(error, "Encounter could not be loaded."));
+    }
   }, []);
 
   const loadTriage = useCallback(async (id: string) => {
+    if (id && id !== activeVisitIdRef.current) return;
+    const requestId = ++triageRequestRef.current;
     if (!id) {
       setTriageHistory([]);
       setTriageLoading(false);
@@ -347,15 +360,49 @@ export function ClinicalPage() {
     setTriageLoading(true);
     try {
       const result = await clinicalRequest<TriageRow[]>(`visits/${id}/triage`);
-      if (id === visitId) setTriageHistory(result.data);
+      if (requestId === triageRequestRef.current && id === activeVisitIdRef.current) {
+        setTriageHistory(result.data);
+      }
     } catch (error) {
-      if (id === visitId) toast.error(errorMessage(error, "Triage history could not be loaded."));
+      if (requestId === triageRequestRef.current && id === activeVisitIdRef.current) {
+        toast.error(errorMessage(error, "Triage history could not be loaded."));
+      }
     } finally {
-      if (id === visitId) setTriageLoading(false);
+      if (requestId === triageRequestRef.current && id === activeVisitIdRef.current) {
+        setTriageLoading(false);
+      }
     }
-  }, [visitId]);
+  }, []);
 
   useEffect(() => { void loadBase(); }, [loadBase]);
+  useEffect(() => {
+    encounterRequestRef.current += 1;
+    triageRequestRef.current += 1;
+    setEncounterId("");
+    setEncounterData(null);
+    setTriageHistory([]);
+    setTriageLoading(false);
+    setTriage({ category: "GREEN", complaint: "", isolationRequired: false, pregnant: "unknown", mobility: "INDEPENDENT", notes: "" });
+    setVitals(EMPTY_VITALS);
+    setSoap({ subjective: "", objective: "", assessment: "", plan: "" });
+    setEncounterType("CONSULTATION");
+    setDiagnosisChoice(null);
+    setDiagnosisType("PRIMARY");
+    setOrderType("LAB");
+    setOrderPriority("ROUTINE");
+    setInvestigationChoice(null);
+    setOrderNotes("");
+    setDrugChoice(null);
+    setRx({ dose: "", doseUnit: "mg", frequencyCode: "BD", route: "ORAL", durationDays: "5", quantity: "10", validUntil: "", instructions: "" });
+    setDisposition("DISCHARGED_HOME");
+    setFollowUpDate("");
+    setRequestedUnitId("");
+    setClinicalSummary("");
+    setReferral({ facilityName: "", specialty: "", urgency: "ROUTINE", reason: "" });
+    setCertificate({ certType: "ATTENDANCE", fromDate: new Date().toISOString().slice(0, 10), toDate: "", remarks: "" });
+    setSafetyAlerts([]);
+    setSafetyRequest(null);
+  }, [visitId]);
   useEffect(() => { void loadTriage(visitId); }, [loadTriage, visitId]);
   useEffect(() => {
     if (!visitId) {
@@ -368,7 +415,7 @@ export function ClinicalPage() {
       .then(({ data }) => {
         if (!active) return;
         const current = data.find((row) => row.status === "OPEN") ?? data[0];
-        if (current) void loadEncounter(current.id);
+        if (current) void loadEncounter(current.id, visitId);
         else { setEncounterId(""); setEncounterData(null); }
       })
       .catch((error: unknown) => { if (active) toast.error(errorMessage(error, "Visit encounters could not be loaded.")); });
@@ -433,7 +480,7 @@ export function ClinicalPage() {
       await operation();
       if (success) toast.success(success);
       await loadBase();
-      if (encounterId) await loadEncounter(encounterId);
+      if (encounterId) await loadEncounter(encounterId, visitId);
     } catch (error) {
       if (rethrow) throw error;
       const fieldErrors = error instanceof RegistryError
@@ -783,7 +830,7 @@ export function ClinicalPage() {
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="size-5" />High early-warning tasks</CardTitle></CardHeader>
               <CardContent className="space-y-3">
-                {tasks.length === 0 ? <p className="text-sm text-muted-foreground">No open tasks.</p> : tasks.map((row) => (
+                {tasks.length === 0 ? <p className="text-sm text-muted-foreground">No active tasks.</p> : tasks.map((row) => (
                   <div key={row.task.id} className="space-y-2 rounded-md border p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong>{row.patientName}</strong><Badge variant="destructive">{row.task.priority}</Badge>

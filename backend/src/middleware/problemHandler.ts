@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 
 import { ApiError } from "../lib/errors.js";
+import { databaseErrorInfo } from "../lib/databaseErrors.js";
 
 const SQLSTATE_ERROR_MAP: Record<string, { status: number; code: string; message: string }> = {
   "23505": { status: 409, code: "CONFLICT", message: "A duplicate value violates a unique constraint." },
@@ -16,12 +17,12 @@ const toApiError = (error: unknown) => {
     return error;
   }
 
-  if (error && typeof error === "object" && "code" in error) {
-    const code = String((error as { code?: string }).code ?? "");
-    const mapped = SQLSTATE_ERROR_MAP[code];
+  const databaseError = databaseErrorInfo(error);
+  if (databaseError) {
+    const mapped = SQLSTATE_ERROR_MAP[databaseError.sqlState];
     if (mapped) {
       return new ApiError(mapped.status, mapped.code, mapped.message, {
-        details: { sqlState: code },
+        details: { sqlState: databaseError.sqlState },
       });
     }
   }

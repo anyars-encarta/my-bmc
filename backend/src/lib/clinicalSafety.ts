@@ -53,7 +53,16 @@ export const calculateEws = (observations: EwsObservations, rawRules: unknown) =
           (band.min === undefined || observed >= band.min) &&
           (band.max === undefined || observed <= band.max),
     );
-    if (matched.length === 0) continue;
+    if (matched.length === 0) {
+      if (typeof observed === "number") {
+        throw validationError(
+          `The active EWS policy has no matching numeric band for ${parameter}.`,
+          "EWS_OBSERVATION_UNSCORED",
+          { parameter, observed },
+        );
+      }
+      continue;
+    }
     const points = Math.max(...matched.map((band) => band.points));
     score += points;
     details.push({ parameter, points });

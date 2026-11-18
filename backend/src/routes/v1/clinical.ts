@@ -31,13 +31,15 @@ import {
   visit,
   vitalSign,
 } from "../../db/schema/index.js";
-import { badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
+import { ApiError, badRequest, conflict, forbidden, notFound, validationError } from "../../lib/errors.js";
 import { calculateEws, evaluateDrugSafety, ewsRulesSchema } from "../../lib/clinicalSafety.js";
 import { findIcd11Code, searchIcd11 } from "../../lib/icd11.js";
 import { searchLabInvestigations } from "../../lib/lab-investigations.js";
 import { searchOpenFdaMedications } from "../../lib/open-fda.js";
 import { assertChartAccess, patientActor } from "../../lib/patientAccess.js";
+import { parsePresent } from "../../lib/patientHttp.js";
 import { requireAnyRole } from "../../lib/platform.js";
+import { resolveManagedUnitIds } from "../../lib/unitAccess.js";
 
 const router = Router();
 
@@ -325,6 +327,17 @@ const noteSchema = z.object({
   body: z.string().trim().min(1).max(20_000),
   sensitivity: z.enum(["NORMAL", "SENSITIVE"]).default("NORMAL"),
 });
+const notePatchSchema = z.object({
+  noteType: z.enum(["HISTORY", "EXAMINATION", "SOAP", "PROGRESS", "PROCEDURE", "CONSULT_RESPONSE", "DISCHARGE", "ADDENDUM"]).optional(),
+  body: z.string().trim().min(1).max(20_000).optional(),
+  sensitivity: z.enum(["NORMAL", "SENSITIVE"]).optional(),
+}).refine((value) => Object.values(value).some((entry) => entry !== undefined), {
+  message: "Provide at least one note field to update.",
+});
+const noteAmendmentSchema = z.object({
+  body: z.string().trim().min(1).max(20_000),
+  sensitivity: z.enum(["NORMAL", "SENSITIVE"]).optional(),
+});
 const diagnosisSchema = z.object({
   icd10Code: z.string().trim().min(1).max(10),
   codeSystem: z.enum(["ICD-10", "ICD-11"]).default("ICD-10"),
@@ -577,7 +590,23 @@ router.post("/visits/:id/triage", requireAnyRole(NURSES), async (req, res, next)
 
 router.get("/outpatient-tasks", requireAnyRole(NURSES), async (req, res, next) => {
   try {
-    const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
+    const parsedStatuses = z.array(z.enum(["OPEN", "ACKNOWLEDGED", "RESOLVED"]))
+      .min(1).safeParse(typeof req.query.status === "string" && req.query.status !== "ALL"
+        ? req.query.status.split(",")
+        : ["OPEN"]);
+    const status = typeof req.query.status === "string" && req.query.status === "ALL"
+      ? "ALL"
+      : parsedStatuses.success ? parsedStatuses.data : null;
+    if (!status) throw validationError("Task status filter is invalid.", "TASK_STATUS_INVALID");
+    const roles = req.user?.roles ?? [];
+    const managedUnitIds = req.user?.id && roles.some((role) =>
+      role === "unit_manager" || role === "roster_officer")
+      ? await resolveManagedUnitIds(req.user.id, roles)
+      : null;
+    if (managedUnitIds !== null && managedUnitIds.length === 0) {
+      res.json({ data: [] });
+      return;
+    }
     const rows = await db.select({
       task: outpatientTask,
       patientName: sql<string>`concat(${patient.firstName}, ' ', ${patient.lastName})`,
@@ -586,16 +615,23 @@ router.get("/outpatient-tasks", requireAnyRole(NURSES), async (req, res, next) =
     }).from(outpatientTask)
       .innerJoin(patient, eq(patient.id, outpatientTask.patientId))
       .innerJoin(orgUnit, eq(orgUnit.id, outpatientTask.orgUnitId))
-      .where(status === "ALL" ? undefined : eq(outpatientTask.status, status))
-      .orderBy(desc(outpatientTask.priority), asc(outpatientTask.createdAt))
-      .limit(listLimit(req.query.limit, 50));
+      .where(and(
+        status === "ALL" ? undefined : inArray(outpatientTask.status, status),
+        managedUnitIds === null ? undefined : inArray(outpatientTask.orgUnitId, managedUnitIds),
+      ))
+      .orderBy(desc(outpatientTask.priority), asc(outpatientTask.createdAt));
     const visible = [];
     for (const row of rows) {
-      await requireChart(req, row.task.patientId, row.task.orgUnitId);
-      visible.push(row);
+      try {
+        await requireChart(req, row.task.patientId, null);
+        visible.push(row);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 403) throw error;
+      }
     }
-    if (visible.length) {
-      await db.insert(auditLog).values(visible.map((row) => ({
+    const result = visible.slice(0, listLimit(req.query.limit, 50));
+    if (result.length) {
+      await db.insert(auditLog).values(result.map((row) => ({
         action: "READ_RESTRICTED",
         entityType: "outpatient_task",
         entityId: row.task.id,
@@ -608,7 +644,7 @@ router.get("/outpatient-tasks", requireAnyRole(NURSES), async (req, res, next) =
         userAgent: req.get("user-agent") ?? null,
       })));
     }
-    res.json({ data: visible });
+    res.json({ data: result });
   } catch (error) { next(error); }
 });
 router.post("/outpatient-tasks/:id/acknowledge", requireAnyRole(NURSES), async (req, res, next) => {
@@ -752,9 +788,14 @@ router.patch("/notes/:id", requireAnyRole(CLINICAL_WRITE), async (req, res, next
     const record = await loadEncounter(req, current.encounterId);
     assertOpenEncounter(record);
     if (current.status !== "DRAFT") throw conflict("Only draft notes can be edited.", "ENCOUNTER_SIGNED");
-    const payload = parseBody(noteSchema.partial(), req.body);
+    const payload = parseBody(notePatchSchema, req.body);
     const author = await actorStaff(req);
     if (current.authoredByStaffId !== author.id) throw forbidden("Only the note author can edit this draft.", "NOTE_AUTHOR_REQUIRED");
+    const privilegedNoteAuthor = (req.user?.roles ?? []).some((role) =>
+      ["super_admin", "hospital_admin", "doctor", "midwife"].includes(role));
+    if (!privilegedNoteAuthor && payload.noteType && payload.noteType !== "PROGRESS") {
+      throw forbidden("Nursing notes must use the progress note type.", "NURSING_NOTE_TYPE_REQUIRED");
+    }
     const [updated] = await db.update(clinicalNote).set(payload)
       .where(and(eq(clinicalNote.id, id), eq(clinicalNote.status, "DRAFT"))).returning();
     if (!updated) throw conflict("The note was signed while it was being edited.", "ENCOUNTER_SIGNED");
@@ -773,9 +814,7 @@ router.post("/notes/:id/amend", requireAnyRole(DOCTORS), async (req, res, next) 
     if (!current) throw notFound("Note not found.", "NOTE_NOT_FOUND");
     const record = await loadEncounter(req, current.encounterId);
     if (current.status !== "SIGNED") throw conflict("Only a signed note can be amended.", "NOTE_NOT_SIGNED");
-    const payload = parseBody(noteSchema.pick({ body: true, sensitivity: true }).extend({
-      body: z.string().trim().min(1).max(20_000),
-    }), req.body);
+    const payload = parseBody(noteAmendmentSchema, req.body);
     const author = await actorStaff(req);
     const licence = await ensureLicence(author.id);
     const latest = await db.select({ version: clinicalNote.version }).from(clinicalNote)
@@ -790,6 +829,8 @@ router.post("/notes/:id/amend", requireAnyRole(DOCTORS), async (req, res, next) 
       version: (latest[0]?.version ?? current.version) + 1,
       amendsId: current.id,
       authoredByStaffId: author.id,
+      status: "SIGNED",
+      signedAt: new Date(),
       signerLicenceNo: licence.licenceNo,
     }).returning();
     await writeAudit(req, {
@@ -943,9 +984,31 @@ router.get("/patients/:id/vitals", requireAnyRole(CLINICAL_READ), async (req, re
   try {
     const patientId = requestId(req, "id");
     await requireChart(req, patientId, null);
-    const rows = await db.select().from(vitalSign).where(eq(vitalSign.patientId, patientId))
-      .orderBy(desc(vitalSign.recordedAt)).limit(listLimit(req.query.limit, 100));
-    res.json({ data: rows });
+    const roles = req.user?.roles ?? [];
+    const managedUnitIds = req.user?.id && roles.some((role) =>
+      role === "unit_manager" || role === "roster_officer")
+      ? await resolveManagedUnitIds(req.user.id, roles)
+      : null;
+    const rows = await db.select({
+      vital: vitalSign,
+      orgUnitId: sql<string | null>`coalesce(${encounter.orgUnitId}, ${visit.currentUnitId}, ${admission.currentUnitId})`,
+    }).from(vitalSign)
+      .leftJoin(encounter, eq(encounter.id, vitalSign.encounterId))
+      .leftJoin(visit, eq(visit.id, vitalSign.visitId))
+      .leftJoin(admission, eq(admission.id, vitalSign.admissionId))
+      .where(eq(vitalSign.patientId, patientId))
+      .orderBy(desc(vitalSign.recordedAt));
+    const visible = [];
+    for (const row of rows) {
+      if (managedUnitIds !== null && (!row.orgUnitId || !managedUnitIds.includes(row.orgUnitId))) continue;
+      try {
+        await requireChart(req, patientId, row.orgUnitId);
+        visible.push(row.vital);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 403) throw error;
+      }
+    }
+    res.json({ data: visible.slice(0, listLimit(req.query.limit, 100)) });
   } catch (error) { next(error); }
 });
 
@@ -1029,16 +1092,64 @@ router.post("/orders/:id/cancel", requireAnyRole(DOCTORS), async (req, res, next
     if (current.status !== "ORDERED") {
       throw conflict("Only an order that has not started can be cancelled. Request cancellation from the performing department.", "ORDER_CANCELLATION_REQUEST_REQUIRED");
     }
-    const [updated] = await db.update(clinicalOrder).set({
-      status: "CANCELLED",
-      cancelledBy: req.user?.id ?? null,
-      cancelledReason: payload.reason,
-    }).where(and(eq(clinicalOrder.id, orderId), eq(clinicalOrder.status, "ORDERED"))).returning();
-    if (!updated) throw conflict("The order has already changed.", "ORDER_STATE_CONFLICT");
+    const issuedMedication = current.orderType === "MEDICATION"
+      ? await db.select({ id: prescription.id }).from(prescription).where(and(
+        eq(prescription.orderId, orderId),
+        inArray(prescription.status, ["ISSUED", "PARTIALLY_DISPENSED"]),
+      )).limit(1)
+      : [];
+    if (issuedMedication.length) {
+      throw conflict("Cancel an issued medication through the pharmacy workflow.", "PRESCRIPTION_CANCELLATION_REQUIRED");
+    }
+    await db.execute(sql`
+      WITH cancelled_order AS (
+        UPDATE clinical_order SET status = 'CANCELLED',
+          cancelled_by = ${req.user?.id ?? null}, cancelled_reason = ${payload.reason}
+        WHERE id = ${orderId}::uuid AND status = 'ORDERED'
+        RETURNING id
+      ),
+      cancelled_prescriptions AS (
+        UPDATE prescription SET status = 'CANCELLED'
+        WHERE order_id IN (SELECT id FROM cancelled_order) AND status = 'DRAFT'
+        RETURNING id
+      ),
+      cancelled_items AS (
+        UPDATE prescription_item SET status = 'CANCELLED', stopped_reason = ${payload.reason}
+        WHERE prescription_id IN (SELECT id FROM cancelled_prescriptions) AND status = 'ACTIVE'
+        RETURNING id
+      )
+      SELECT id FROM cancelled_order
+    `);
+    const [updated] = await db.select().from(clinicalOrder).where(eq(clinicalOrder.id, orderId)).limit(1);
+    if (!updated || updated.status !== "CANCELLED") throw conflict("The order has already changed.", "ORDER_STATE_CONFLICT");
     await writeAudit(req, {
       action: "STATUS_CHANGE", entityType: "clinical_order", entityId: orderId,
       patientId: current.patientId, orgUnitId: record.orgUnitId, reason: payload.reason,
       before: { status: current.status }, after: { status: "CANCELLED" },
+    });
+    res.json({ data: updated });
+  } catch (error) { next(error); }
+});
+router.post("/orders/:id/payment-clearance", requireAnyRole(["super_admin", "hospital_admin", "cashier", "billing_officer"]), async (req, res, next) => {
+  try {
+    const id = requestId(req, "id");
+    const payload = parseBody(z.object({ reason: z.string().trim().min(3).max(300) }), req.body);
+    const [current] = await db.select().from(clinicalOrder).where(eq(clinicalOrder.id, id)).limit(1);
+    if (!current) throw notFound("Order not found.", "ORDER_NOT_FOUND");
+    if (!current.paymentRequired) throw conflict("This order does not require payment clearance.", "ORDER_PAYMENT_NOT_REQUIRED");
+    if (current.paymentClearedAt) {
+      res.json({ data: current });
+      return;
+    }
+    const [updated] = await db.update(clinicalOrder).set({
+      paymentClearedAt: new Date(),
+    }).where(and(eq(clinicalOrder.id, id), eq(clinicalOrder.paymentRequired, true), isNull(clinicalOrder.paymentClearedAt)))
+      .returning();
+    if (!updated) throw conflict("Payment clearance changed while it was being recorded.", "ORDER_PAYMENT_STATE_CONFLICT");
+    await writeAudit(req, {
+      action: "OVERRIDE", entityType: "clinical_order", entityId: id,
+      patientId: current.patientId, reason: payload.reason,
+      before: { paymentClearedAt: null }, after: { paymentClearedAt: updated.paymentClearedAt },
     });
     res.json({ data: updated });
   } catch (error) { next(error); }
@@ -1057,6 +1168,9 @@ router.patch("/orders/:id/status", requireAnyRole([...DOCTORS, "lab_scientist", 
       ? ["IN_PROGRESS", "REJECTED"]
       : current.status === "IN_PROGRESS" ? ["COMPLETED", "REJECTED"] : [];
     if (!allowed.includes(payload.status)) throw conflict("This order transition is not allowed.", "ORDER_STATE_CONFLICT");
+    if (current.paymentRequired && !current.paymentClearedAt && ["IN_PROGRESS", "COMPLETED"].includes(payload.status)) {
+      throw conflict("Payment must be cleared before this order can proceed.", "ORDER_PAYMENT_REQUIRED");
+    }
     const [updated] = await db.update(clinicalOrder).set({ status: payload.status })
       .where(and(eq(clinicalOrder.id, id), eq(clinicalOrder.status, current.status))).returning();
     if (!updated) throw conflict("The order has already changed.", "ORDER_STATE_CONFLICT");
@@ -1211,7 +1325,8 @@ router.post("/drugs", requireAnyRole(ADMIN), async (req, res, next) => {
 router.patch("/drugs/:id", requireAnyRole(ADMIN), async (req, res, next) => {
   try {
     const id = requestId(req, "id");
-    const payload = parseBody(drugSchema.partial(), req.body);
+    const payload = parsePresent(drugSchema.shape, req.body);
+    if (Object.keys(payload).length === 0) throw validationError("Provide at least one drug field to update.", "PATCH_EMPTY");
     const [updated] = await db.update(drug).set(payload).where(eq(drug.id, id)).returning();
     if (!updated) throw notFound("Drug not found.", "DRUG_NOT_FOUND");
     res.json({ data: updated });
@@ -1244,7 +1359,7 @@ router.post("/drugs/import", requireAnyRole(ADMIN), async (req, res, next) => {
     const newRows = uniqueRows.filter((row) =>
       !existingKeys.has(`${row.genericName.toLowerCase()}|${row.form}|${row.strengthText ?? ""}`));
     let imported = 0;
-    if (!payload.dryRun) {
+    if (!payload.dryRun && newRows.length > 0) {
       const inserted = await db.insert(drug).values(newRows.map((row) => ({
         ...drugSchema.parse({
           ...row,
@@ -1265,8 +1380,8 @@ router.post("/drugs/import", requireAnyRole(ADMIN), async (req, res, next) => {
 });
 
 const interactionSchema = z.object({
-  genericA: z.string().trim().min(1).max(200),
-  genericB: z.string().trim().min(1).max(200),
+  genericA: z.string().trim().min(1).max(200).transform((value) => value.toLocaleLowerCase()),
+  genericB: z.string().trim().min(1).max(200).transform((value) => value.toLocaleLowerCase()),
   severity: z.enum(["MINOR", "MODERATE", "MAJOR", "CONTRAINDICATED"]),
   effect: optionalText(500),
   management: optionalText(500),
@@ -1274,6 +1389,16 @@ const interactionSchema = z.object({
 }).refine((value) => value.genericA.localeCompare(value.genericB) < 0, {
   message: "Generic A must sort before Generic B.",
   path: ["genericA"],
+});
+const interactionPatchSchema = z.object({
+  genericA: z.string().trim().min(1).max(200).transform((value) => value.toLocaleLowerCase()).optional(),
+  genericB: z.string().trim().min(1).max(200).transform((value) => value.toLocaleLowerCase()).optional(),
+  severity: z.enum(["MINOR", "MODERATE", "MAJOR", "CONTRAINDICATED"]).optional(),
+  effect: optionalText(500).optional(),
+  management: optionalText(500).optional(),
+  source: optionalText(100).optional(),
+}).refine((value) => Object.values(value).some((entry) => entry !== undefined), {
+  message: "Provide at least one interaction field to update.",
 });
 router.get("/drug-interactions", requireAnyRole(PHARMACY_READ), async (req, res, next) => {
   try {
@@ -1292,7 +1417,10 @@ router.post("/drug-interactions", requireAnyRole(ADMIN), async (req, res, next) 
 router.patch("/drug-interactions/:id", requireAnyRole(ADMIN), async (req, res, next) => {
   try {
     const id = requestId(req, "id");
-    const payload = parseBody(interactionSchema.partial(), req.body);
+    const [current] = await db.select().from(drugInteraction).where(eq(drugInteraction.id, id)).limit(1);
+    if (!current) throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
+    const patch = parseBody(interactionPatchSchema, req.body);
+    const payload = parseBody(interactionSchema, { ...current, ...patch });
     const [updated] = await db.update(drugInteraction).set(payload).where(eq(drugInteraction.id, id)).returning();
     if (!updated) throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
     res.json({ data: updated });
@@ -1358,16 +1486,18 @@ router.post("/encounters/:id/prescriptions", requireAnyRole(DOCTORS), async (req
       const itemDrug = drugRows.find((candidate) => candidate.id === prescribed.drugId);
       if (!itemDrug) continue;
       const interactingGenerics = Array.from(new Set([
-        ...activeMedicationRows.map((item) => item.genericName),
+        ...activeMedicationRows.map((item) => item.genericName.toLocaleLowerCase()),
         ...payload.items
           .filter((other) => other.drugId !== itemDrug.id)
-          .map((other) => drugRows.find((candidate) => candidate.id === other.drugId)?.genericName)
+          .map((other) => drugRows.find((candidate) => candidate.id === other.drugId)?.genericName.toLocaleLowerCase())
           .filter((name): name is string => Boolean(name)),
       ]));
       const interactions = interactingGenerics.length
         ? await db.select().from(drugInteraction).where(or(
-          and(eq(drugInteraction.genericA, itemDrug.genericName), inArray(drugInteraction.genericB, interactingGenerics)),
-          and(eq(drugInteraction.genericB, itemDrug.genericName), inArray(drugInteraction.genericA, interactingGenerics)),
+          and(eq(sql<string>`lower(${drugInteraction.genericA})`, itemDrug.genericName.toLocaleLowerCase()),
+            inArray(sql<string>`lower(${drugInteraction.genericB})`, interactingGenerics)),
+          and(eq(sql<string>`lower(${drugInteraction.genericB})`, itemDrug.genericName.toLocaleLowerCase()),
+            inArray(sql<string>`lower(${drugInteraction.genericA})`, interactingGenerics)),
         ))
         : [];
       alerts.push(...evaluateDrugSafety({
@@ -1376,7 +1506,7 @@ router.post("/encounters/:id/prescriptions", requireAnyRole(DOCTORS), async (req
         activeDrugs: interactingGenerics,
         interactions,
       }));
-      if (activeMedicationRows.some((active) => active.genericName.toLowerCase() === itemDrug.genericName.toLowerCase())) {
+      if (activeMedicationRows.some((active) => active.genericName.toLocaleLowerCase() === itemDrug.genericName.toLocaleLowerCase())) {
         alerts.push({
           code: `DUPLICATE_MEDICATION_${itemDrug.id}`,
           severity: "STOP",
@@ -1482,12 +1612,32 @@ router.post("/prescriptions/:id/issue", requireAnyRole(DOCTORS), async (req, res
     const items = await db.select({ id: prescriptionItem.id }).from(prescriptionItem)
       .where(and(eq(prescriptionItem.prescriptionId, id), eq(prescriptionItem.status, "ACTIVE"))).limit(1);
     if (!items.length) throw validationError("Add at least one active medication before issuing.", "PRESCRIPTION_EMPTY");
-    const [updated] = await db.update(prescription).set({
-      status: "ISSUED",
-      issuedAt: new Date(),
-      prescriberLicenceNo: licence.licenceNo,
-    }).where(and(eq(prescription.id, id), eq(prescription.status, "DRAFT"))).returning();
+    const [relatedOrder] = current.orderId
+      ? await db.select().from(clinicalOrder).where(eq(clinicalOrder.id, current.orderId)).limit(1)
+      : [];
+    if (current.orderId && !relatedOrder) throw conflict("The medication order is unavailable.", "ORDER_NOT_FOUND");
+    if (relatedOrder?.paymentRequired && !relatedOrder.paymentClearedAt) {
+      throw conflict("Payment must be cleared before this prescription can be issued.", "ORDER_PAYMENT_REQUIRED");
+    }
+    await db.execute(sql`
+      WITH progressed_order AS (
+        UPDATE clinical_order SET status = 'IN_PROGRESS'
+        WHERE id = ${current.orderId}::uuid AND status = 'ORDERED'
+          AND (payment_required = false OR payment_cleared_at IS NOT NULL)
+        RETURNING id
+      ),
+      issued_prescription AS (
+        UPDATE prescription SET status = 'ISSUED', issued_at = now(),
+          prescriber_licence_no = ${licence.licenceNo}
+        WHERE id = ${id}::uuid AND status = 'DRAFT'
+          AND (order_id IS NULL OR order_id IN (SELECT id FROM progressed_order))
+        RETURNING id
+      )
+      SELECT id FROM issued_prescription
+    `);
+    const [updated] = await db.select().from(prescription).where(eq(prescription.id, id)).limit(1);
     if (!updated) throw conflict("The prescription has already changed.", "PRESCRIPTION_STATE_CONFLICT");
+    if (updated.status !== "ISSUED") throw conflict("The prescription order is no longer ready to issue.", "PRESCRIPTION_STATE_CONFLICT");
     await writeAudit(req, {
       action: "APPROVE", entityType: "prescription", entityId: id,
       patientId: current.patientId, orgUnitId: record.orgUnitId,
@@ -1506,10 +1656,23 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
     if (!["DRAFT", "ISSUED", "PARTIALLY_DISPENSED"].includes(current.status)) {
       throw conflict("This prescription cannot be cancelled.", "PRESCRIPTION_STATE_CONFLICT");
     }
+    if (current.orderId) {
+      const [relatedOrder] = await db.select().from(clinicalOrder).where(eq(clinicalOrder.id, current.orderId)).limit(1);
+      if (!relatedOrder || !["ORDERED", "IN_PROGRESS"].includes(relatedOrder.status)) {
+        throw conflict("The medication order can no longer be cancelled.", "ORDER_STATE_CONFLICT");
+      }
+    }
     await db.execute(sql`
-      WITH cancelled_prescription AS (
+      WITH cancelled_order AS (
+        UPDATE clinical_order SET status = 'CANCELLED',
+          cancelled_by = ${req.user?.id ?? null}, cancelled_reason = ${payload.reason}
+        WHERE id = ${current.orderId}::uuid AND status IN ('ORDERED', 'IN_PROGRESS')
+        RETURNING id
+      ),
+      cancelled_prescription AS (
         UPDATE prescription SET status = 'CANCELLED'
         WHERE id = ${id}::uuid AND status IN ('DRAFT', 'ISSUED', 'PARTIALLY_DISPENSED')
+          AND (order_id IS NULL OR order_id IN (SELECT id FROM cancelled_order))
         RETURNING id
       ),
       cancelled_items AS (
@@ -1580,10 +1743,14 @@ router.get("/referrals/:id", requireAnyRole(CLINICAL_READ), async (req, res, nex
     const id = requestId(req, "id");
     const [record] = await db.select().from(referral).where(eq(referral.id, id)).limit(1);
     if (!record) throw notFound("Referral not found.", "REFERRAL_NOT_FOUND");
-    await requireChart(req, record.patientId, null);
+    const visitRow = record.visitId ? await loadVisit(req, record.visitId) : null;
+    if (visitRow && visitRow.patientId !== record.patientId) {
+      throw notFound("Referral not found.", "REFERRAL_NOT_FOUND");
+    }
+    if (!visitRow) await requireChart(req, record.patientId, null);
     await writeAudit(req, {
       action: "READ_RESTRICTED", entityType: "referral", entityId: id,
-      patientId: record.patientId, orgUnitId: null,
+      patientId: record.patientId, orgUnitId: visitRow?.currentUnitId ?? null,
     });
     res.json({ data: record });
   } catch (error) { next(error); }
@@ -1700,10 +1867,13 @@ router.get("/medical-certificates/:id", requireAnyRole(CLINICAL_READ), async (re
     const id = requestId(req, "id");
     const [record] = await db.select().from(medicalCertificate).where(eq(medicalCertificate.id, id)).limit(1);
     if (!record) throw notFound("Medical certificate not found.", "CERTIFICATE_NOT_FOUND");
-    await requireChart(req, record.patientId, null);
+    const encounterRow = await loadEncounter(req, record.encounterId);
+    if (encounterRow.patientId !== record.patientId) {
+      throw notFound("Medical certificate not found.", "CERTIFICATE_NOT_FOUND");
+    }
     await writeAudit(req, {
       action: "READ_RESTRICTED", entityType: "medical_certificate", entityId: id,
-      patientId: record.patientId, orgUnitId: null,
+      patientId: record.patientId, orgUnitId: encounterRow.orgUnitId,
     });
     res.json({ data: record });
   } catch (error) { next(error); }

@@ -26,6 +26,17 @@ describe("clinical safety helpers", () => {
       bands: { mediumMin: 2, highMin: 3 },
     });
 
+    test("rejects numeric observations that fall outside every configured scoring band", () => {
+      assert.throws(() => calculateEws(
+        { pulseBpm: 120 },
+        {
+          parameters: { pulseBpm: [{ max: 100, points: 0 }] },
+          bands: { mediumMin: 1, highMin: 2 },
+        },
+      ), (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "EWS_OBSERVATION_UNSCORED");
+    });
+
     assert.equal(result.success, false);
     if (!result.success) {
       assert.deepEqual(result.error.issues[0]?.path, ["parameters", "pulseBpm", 0, "points"]);

@@ -103,11 +103,20 @@ const fetchWithTimeout = async (url: URL, timeoutMs: number) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
     });
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        throw new ApiError(504, "OPEN_FDA_TIMEOUT", "Timed out while searching medications.");
+      }
+    }
+    return { response, payload };
   } catch {
     if (controller.signal.aborted) {
       throw new ApiError(504, "OPEN_FDA_TIMEOUT", "Timed out while searching medications.");
@@ -129,8 +138,8 @@ export const searchOpenFdaMedications = async (query: string, limit = 8) => {
   const apiKey = (process.env.OPEN_FDA_API_KEY ?? "").trim();
   if (apiKey) upstream.searchParams.set("api_key", apiKey);
 
-  const response = await fetchWithTimeout(upstream, parseOpenFdaTimeoutMs(process.env.OPEN_FDA_API_TIMEOUT_MS));
-  const payload = await response.json().catch(() => null) as OpenFdaNdcResponse | null;
+  const { response, payload: rawPayload } = await fetchWithTimeout(upstream, parseOpenFdaTimeoutMs(process.env.OPEN_FDA_API_TIMEOUT_MS));
+  const payload = rawPayload as OpenFdaNdcResponse | null;
 
   if (response.status === 404) return [];
   if (!response.ok) {

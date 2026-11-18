@@ -1071,7 +1071,7 @@ export const vitalSign = pgTable("vital_sign", {
   admissionId: uuid("admission_id"),
   recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
   recordedByStaffId: uuid("recorded_by_staff_id").notNull(),
-  temperatureC: numeric("temperature_c", { precision: 4, scale: 1 }),
+  temperatureC: numeric("temperature_c", { precision: 5, scale: 2 }),
   pulseBpm: smallint("pulse_bpm"),
   respRate: smallint("resp_rate"),
   systolic: smallint("systolic"),

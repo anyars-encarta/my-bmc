@@ -5,7 +5,9 @@ import {
   buildOpenFdaSearchQuery,
   mapOpenFdaNdcResults,
   parseOpenFdaTimeoutMs,
+  searchOpenFdaMedications,
 } from "../lib/open-fda.js";
+import { ApiError } from "../lib/errors.js";
 
 describe("OpenFDA medication search helpers", () => {
   test("builds a field-scoped prefix search without accepting raw query syntax", () => {
@@ -49,5 +51,29 @@ describe("OpenFDA medication search helpers", () => {
       route: "ORAL",
       dose: "10 mg/1",
     }]);
+  });
+
+  test("keeps the timeout active while consuming the upstream response body", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalTimeout = process.env.OPEN_FDA_API_TIMEOUT_MS;
+    process.env.OPEN_FDA_API_TIMEOUT_MS = "3000";
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const response = new Response(null, { status: 200 });
+      Object.defineProperty(response, "json", {
+        value: () => new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        }),
+      });
+      return response;
+    }) as typeof fetch;
+
+    try {
+      await assert.rejects(searchOpenFdaMedications("example", 1), (error: unknown) =>
+        error instanceof ApiError && error.code === "OPEN_FDA_TIMEOUT");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalTimeout === undefined) delete process.env.OPEN_FDA_API_TIMEOUT_MS;
+      else process.env.OPEN_FDA_API_TIMEOUT_MS = originalTimeout;
+    }
   });
 });

@@ -15,6 +15,10 @@ type IcdSearchResponse = {
   destinationEntities?: unknown;
 };
 
+type IcdCodeInfoResponse = {
+  code?: unknown;
+};
+
 type CachedToken = {
   accessToken: string;
   expiresAt: number;
@@ -101,8 +105,18 @@ const fetchJson = async (url: string | URL, init: RequestInit, timeoutMs: number
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        throw new ApiError(504, "ICD11_UPSTREAM_TIMEOUT", timeoutMessage);
+      }
+    }
+    return { response, payload };
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     if (controller.signal.aborted) {
       throw new ApiError(504, "ICD11_UPSTREAM_TIMEOUT", timeoutMessage);
     }
@@ -128,7 +142,7 @@ const requestAccessToken = async (timeoutMs: number) => {
     }
 
     const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const response = await fetchJson(ICD_TOKEN_ENDPOINT, {
+    const { response, payload: rawPayload } = await fetchJson(ICD_TOKEN_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -138,7 +152,7 @@ const requestAccessToken = async (timeoutMs: number) => {
       cache: "no-store",
     }, timeoutMs, "Timed out while authenticating to the WHO ICD-11 API.");
 
-    const payload = await response.json().catch(() => null) as IcdTokenResponse | null;
+    const payload = rawPayload as IcdTokenResponse | null;
     if (!response.ok || typeof payload?.access_token !== "string" || !payload.access_token) {
       throw new ApiError(502, "ICD11_AUTH_FAILED", "Unable to authenticate with the WHO ICD-11 API.");
     }
@@ -176,7 +190,7 @@ export const searchIcd11 = async (query: string, limit = 8, language?: string) =
   searchUrl.searchParams.set("flatResults", "true");
   searchUrl.searchParams.set("subtreeFilterUsesFoundationDescendants", "false");
 
-  const response = await fetchJson(searchUrl, {
+  const { response, payload: rawPayload } = await fetchJson(searchUrl, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -192,7 +206,7 @@ export const searchIcd11 = async (query: string, limit = 8, language?: string) =
     throw new ApiError(502, "ICD11_SEARCH_FAILED", "Failed to search the WHO ICD-11 API.");
   }
 
-  const payload = await response.json().catch(() => null) as IcdSearchResponse | null;
+  const payload = rawPayload as IcdSearchResponse | null;
   if (!payload || typeof payload !== "object") {
     throw new ApiError(502, "ICD11_RESPONSE_INVALID", "The WHO ICD-11 API returned an invalid search response.");
   }
@@ -200,6 +214,36 @@ export const searchIcd11 = async (query: string, limit = 8, language?: string) =
 };
 
 export const findIcd11Code = async (code: string) => {
+  const config = getIcdConfig();
+  if (!config.releaseVersion) {
+    throw new ApiError(500, "ICD11_RELEASE_MISSING", "ICD_API_RELEASE_VERSION must be configured.");
+  }
+  const token = await requestAccessToken(config.timeoutMs);
+  const codeInfoUrl = new URL(
+    `${ICD_API_BASE}/icd/release/11/${encodeURIComponent(config.releaseVersion)}/mms/codeinfo/${encodeURIComponent(code)}`,
+  );
+  const { response, payload: rawPayload } = await fetchJson(codeInfoUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Accept-Language": config.defaultLanguage,
+      "API-Version": "v2",
+    },
+    cache: "no-store",
+  }, config.timeoutMs, "Timed out while validating the WHO ICD-11 code.");
+
+  if (response.status === 400 || response.status === 404) return null;
+  if (!response.ok) {
+    if (response.status === 401) tokenCache = null;
+    throw new ApiError(502, "ICD11_CODE_LOOKUP_FAILED", "Failed to validate the WHO ICD-11 code.");
+  }
+  const codeInfo = rawPayload as IcdCodeInfoResponse | null;
+  const verifiedCode = typeof codeInfo?.code === "string" ? codeInfo.code : null;
+  if (!verifiedCode || verifiedCode.toUpperCase() !== code.toUpperCase()) {
+    return null;
+  }
+
   const results = await searchIcd11(code, 20);
-  return results.find((result) => result.code === code) ?? null;
+  return results.find((result) => result.code.toUpperCase() === verifiedCode.toUpperCase()) ?? null;
 };
