@@ -17,6 +17,7 @@ import rosterRoutes from "./rosters.js";
 import shiftTypeRoutes from "./shiftTypes.js";
 import staffRoutes from "./staff.js";
 import usersRoutes from "./users.js";
+import clinicalRoutes from "./clinical.js";
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.use("/me", meRoutes);
 router.use("/users", usersRoutes);
 router.use("/patients", patientRoutes);
 router.use("/", appointmentRoutes);
+router.use("/", clinicalRoutes);
 router.use("/merge-tasks", mergeTaskRoutes);
 router.use("/break-glass", breakGlassRoutes);
 router.use("/privacy/break-glass-reviews", breakGlassReviewRoutes);

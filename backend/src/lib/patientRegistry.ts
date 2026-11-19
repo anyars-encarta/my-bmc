@@ -21,6 +21,7 @@ import {
   type Patient,
 } from "../db/schema/index.js";
 import { ApiError, conflict, notFound, validationError } from "./errors.js";
+import { databaseErrorInfo } from "./databaseErrors.js";
 import { nowAtFacility } from "./facilityClock.js";
 import type { ListQuery } from "./listQuery.js";
 import {
@@ -40,6 +41,8 @@ import {
   type PatientSex,
 } from "./patientRules.js";
 
+export { databaseErrorInfo };
+
 /* ------------------------------------------------------------------ */
 /* Shared helpers                                                      */
 /* ------------------------------------------------------------------ */
@@ -48,25 +51,6 @@ export const facilityToday = async () => {
   const clock = await nowAtFacility();
   const todayIso = clock.localDateTime.slice(0, 10);
   return { todayIso, year: todayIso.slice(0, 4) };
-};
-
-/** Finds the SQLSTATE and constraint of a database error, including wrapped driver errors. */
-export const databaseErrorInfo = (error: unknown) => {
-  const visited = new Set<unknown>();
-  let current: unknown = error;
-  while (current && typeof current === "object" && !visited.has(current)) {
-    visited.add(current);
-    const candidate = current as { code?: unknown; constraint?: unknown; message?: unknown; cause?: unknown };
-    if (typeof candidate.code === "string" && /^[0-9A-Z]{5}$/.test(candidate.code)) {
-      return {
-        sqlState: candidate.code,
-        constraint: typeof candidate.constraint === "string" ? candidate.constraint : "",
-        message: typeof candidate.message === "string" ? candidate.message : "",
-      };
-    }
-    current = candidate.cause;
-  }
-  return null;
 };
 
 const isIdentifierConflict = (error: unknown) => {

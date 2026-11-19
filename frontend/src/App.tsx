@@ -84,6 +84,9 @@ import { getPublicApiBase } from "./lib/public-api";
 const HostingRenewalPage = lazy(
   () => import("./pages/hosting-renewal/hosting"),
 );
+const ClinicalPage = lazy(() =>
+  import("./pages/clinical").then((module) => ({ default: module.ClinicalPage })),
+);
 
 const RECORD_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -367,6 +370,7 @@ function App() {
                       </Route>
                       <Route path="patient-duplicates" element={<WorkforceRoleGate allowedRoles={PATIENT_MERGE_ROLES}><PatientDuplicatesPage /></WorkforceRoleGate>} />
                       <Route path="appointments" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"]}><AppointmentsPage /></WorkforceRoleGate>} />
+                      <Route path="clinical" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "doctor", "nurse", "midwife", "pharmacist", "lab_scientist", "radiographer"]}><Suspense fallback={<RouteLoading label="Loading OPD workbench..." />}><ClinicalPage /></Suspense></WorkforceRoleGate>} />
                       <Route path="queue-board" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "unit_manager", "roster_officer", "registrar", "records_officer", "cashier", "billing_officer", "doctor", "nurse", "midwife"]}><QueueBoardPage /></WorkforceRoleGate>} />
                       <Route path="charge-master" element={<WorkforceRoleGate allowedRoles={["super_admin", "hospital_admin", "cashier", "billing_officer"]}><ChargeMasterPage /></WorkforceRoleGate>} />
                       <Route path="break-glass-review" element={<WorkforceRoleGate allowedRoles={BREAK_GLASS_REVIEW_READ_ROLES}><BreakGlassReviewPage /></WorkforceRoleGate>} />

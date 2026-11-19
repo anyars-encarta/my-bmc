@@ -427,6 +427,18 @@ SMS and email delivery are behind notification ports; the Sprint 8 environment u
 while preserving queued/sent/failed status in the notification outbox. The public queue display
 contains ticket number and stage only.
 
+The OPD diagnosis search uses the WHO ICD-11 MMS API. Configure `ICD_API_CLIENT_ID`,
+`ICD_API_CLIENT_SECRET`, and `ICD_API_RELEASE_VERSION`; `ICD_API_LANGUAGE` defaults to `en`,
+and `ICD_API_TIMEOUT_MS` defaults to `8000` and is capped at `30000` ms. Diagnosis records
+retain their coding system (`ICD-10` or `ICD-11`); ICD-11 selections are checked against WHO
+code information before they are saved. Apply migrations `0029_icd11_diagnosis_code_system.sql`
+and `0030_opd_review_hardening.sql` before deploying.
+
+The OPD prescription picker searches the OpenFDA NDC API. `OPEN_FDA_API_KEY` is optional;
+`OPEN_FDA_API_TIMEOUT_MS` defaults to `8000` and is bounded to `3000`–`15000` ms. Results are
+selectable only when their name, dosage form, and strength match an active local drug record,
+so existing allergy and interaction checks continue to use the curated prescribing catalog.
+
 ### 2.5 Encounter / OPD tables (V14)
 
 ```sql
@@ -470,7 +482,7 @@ CREATE TABLE vital_sign (
   patient_id uuid NOT NULL REFERENCES patient(id), visit_id uuid REFERENCES visit(id),
   encounter_id uuid REFERENCES encounter(id), admission_id uuid,            -- FK added in V19
   recorded_at timestamptz NOT NULL DEFAULT now(), recorded_by_staff_id uuid NOT NULL REFERENCES staff(id),
-  temperature_c numeric(4,1) CHECK (temperature_c BETWEEN 25 AND 45),
+  temperature_c numeric(5,2) CHECK (temperature_c BETWEEN 25 AND 45),
   pulse_bpm smallint CHECK (pulse_bpm BETWEEN 0 AND 300),
   resp_rate smallint CHECK (resp_rate BETWEEN 0 AND 100),
   systolic smallint CHECK (systolic BETWEEN 0 AND 300), diastolic smallint CHECK (diastolic BETWEEN 0 AND 200),
@@ -490,7 +502,8 @@ ALTER TABLE triage_assessment ADD CONSTRAINT triage_vital_fk FOREIGN KEY (vital_
 CREATE TABLE diagnosis (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   encounter_id uuid NOT NULL REFERENCES encounter(id), patient_id uuid NOT NULL REFERENCES patient(id),
-  icd10_code varchar(10) NOT NULL REFERENCES icd10_code(code), description varchar(300) NOT NULL,   -- snapshot of title
+  icd10_code varchar(10) NOT NULL, code_system varchar(10) NOT NULL DEFAULT 'ICD-10',
+  description varchar(300) NOT NULL,   -- snapshot of title
   diagnosis_type varchar(12) NOT NULL CHECK (diagnosis_type IN ('PRIMARY','SECONDARY','DIFFERENTIAL')),
   certainty varchar(12) NOT NULL DEFAULT 'PROVISIONAL' CHECK (certainty IN ('PROVISIONAL','CONFIRMED','RULED_OUT')),
   is_new_case boolean NOT NULL DEFAULT true, onset_date date,                -- DHIMS2 morbidity reporting
@@ -541,14 +554,44 @@ CREATE TABLE medical_certificate (
 );
 ```
 
+Sprint 9 adds the versioned early-warning configuration and outpatient escalation worklist:
+
+```sql
+CREATE TABLE ews_policy (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code varchar(30) NOT NULL, name varchar(100) NOT NULL, version int NOT NULL,
+  effective_from date NOT NULL, effective_to date, rules jsonb NOT NULL,
+  active boolean NOT NULL DEFAULT true, approved_by text NOT NULL,
+  approved_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ews_policy_dates_ck CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CONSTRAINT ews_policy_code_version_uq UNIQUE (code, version)
+);
+
+CREATE TABLE outpatient_task (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL REFERENCES patient(id), visit_id uuid NOT NULL REFERENCES visit(id),
+  vital_sign_id uuid NOT NULL UNIQUE REFERENCES vital_sign(id),
+  org_unit_id uuid NOT NULL REFERENCES org_unit(id),
+  task_type varchar(20) NOT NULL CHECK (task_type IN ('EWS_HIGH')),
+  description varchar(300) NOT NULL,
+  priority varchar(9) NOT NULL DEFAULT 'URGENT' CHECK (priority IN ('ROUTINE','URGENT','EMERGENCY')),
+  status varchar(12) NOT NULL DEFAULT 'OPEN'
+    CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED','CANCELLED')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  acknowledged_by_staff_id uuid REFERENCES staff(id), acknowledged_at timestamptz,
+  resolved_at timestamptz, resolved_by_staff_id uuid REFERENCES staff(id)
+);
+```
+
 ### 2.6 Encounter rules (service layer)
-1. **Sign** requires: licensed clinical author (ADR-004a), at least one *active* diagnosis (except `LEFT_WITHOUT_BEING_SEEN`), a disposition on the *last* encounter of the visit.
-2. **Amend**: `POST /encounters/{id}/notes/{noteId}/amend` creates version *n+1* with `amends_id`; previous rows stay visible in history; `ADDENDUM` notes append without editing.
+1. **Sign** requires: licensed clinical author (ADR-004a), at least one *active* diagnosis (except `LEFT_WITHOUT_BEING_SEEN`), a disposition on the *last* encounter of the visit. Discharged visits remain OPEN until all encounters are signed; the closing status change is audited.
+2. **Amend**: `POST /notes/{noteId}/amend` creates a signed version *n+1* with `amends_id` and the current verified licence; previous rows stay visible in history; `ADDENDUM` notes append without editing.
 3. **Ordering safety** (`OrderSafetyService`, synchronous): allergy match (patient allergies × drug/ingredient), duplicate active order, drug-drug interaction (severity ≥ `MAJOR` is a *hard stop with reason*), pregnancy/age/weight dose checks (Sprint 15 for dosing). Each override → `audit_log(action='OVERRIDE')`.
-4. **Early-warning score** is computed on vital-sign save from the facility's configured chart (`ews_policy` table seeded with the approved MEWS/NEWS2 parameters — *clinical governance signs off the numbers*); `HIGH` creates a `NursingTask` + in-app alert to the charge nurse/doctor.
+4. **Early-warning score** is computed on vital-sign save from the facility's configured chart (`ews_policy` table seeded with the approved MEWS/NEWS2 parameters — *clinical governance signs off the numbers*); every supplied numeric observation must match a configured band or the save is rejected; `HIGH` creates a `NursingTask` + in-app alert to the charge nurse/doctor.
+   The policy `rules` JSON has a `parameters` map whose values are arrays of scoring rules (`points` plus numeric `min`/`max` bounds or a categorical `value`), and a `bands` object with integer `mediumMin` and `highMin` (`highMin > mediumMin`). Parameter keys match the observation fields (`temperatureC`, `pulseBpm`, `respRate`, `systolic`, `diastolic`, `spo2`, `weightKg`, `heightCm`, `painScore`, `bloodGlucoseMmol`, `gcs`, `avpu`, `muacCm`). Only governance-approved scoring values should be configured.
 5. **Disposition → ADMITTED** publishes `AdmissionRequested` (creates a `bed_request`, §3); **→ REFERRED_OUT** requires a `referral` row; **→ FOLLOW_UP** offers an appointment.
 6. **Order cancellation** only while `ORDERED`; after work started it is a *request to cancel* routed to the performing department.
-7. **Payment gate:** when `HAMS_PAY_BEFORE_SERVICE_OPD=true`, `payment_required` is set for cash/CASH-priced visits, **except** emergency visits, `priority = STAT`, and inpatients. Gate lifts on `PaymentConfirmed` (or an authorised override) and fires `OrderCleared`.
+7. **Payment gate:** when `HAMS_PAY_BEFORE_SERVICE_OPD=true`, `payment_required` is set for cash/CASH-priced visits, **except** emergency visits, `priority = STAT`, and inpatients. Required orders cannot enter `IN_PROGRESS` or be issued as prescriptions until cleared. An authorized cashier/billing officer can record verified payment through `POST /api/v1/orders/{id}/payment-clearance`; the reason is retained in the audit log.
 
 ### 2.7 Tests (must exist)
 Roster → slot generation (including a night-shift clinician not generating day slots; leave cancelling slots);
