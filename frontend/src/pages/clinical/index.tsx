@@ -86,6 +86,11 @@ type SearchOption = { id: string; label: string; description?: string; route?: s
 type SafetyAlert = { code: string; message: string };
 type SafetyOverride = { code: string; reason: string };
 type SafetyRequest = (overrides: SafetyOverride[]) => Promise<void>;
+type PendingSafetyRequest = {
+  operation: SafetyRequest;
+  originatingVisitId: string;
+  selectionGeneration: number;
+};
 type TaskRow = {
   task: { id: string; description: string; status: string; priority: string; createdAt: string };
   patientName: string;
@@ -290,7 +295,7 @@ export function ClinicalPage() {
   const [referral, setReferral] = useState({ facilityName: "", specialty: "", urgency: "ROUTINE", reason: "" });
   const [certificate, setCertificate] = useState({ certType: "ATTENDANCE", fromDate: new Date().toISOString().slice(0, 10), toDate: "", remarks: "" });
   const [safetyAlerts, setSafetyAlerts] = useState<SafetyAlert[]>([]);
-  const [safetyRequest, setSafetyRequest] = useState<SafetyRequest | null>(null);
+  const [safetyRequest, setSafetyRequest] = useState<PendingSafetyRequest | null>(null);
   const [busy, setBusy] = useState(false);
   const [policyForm, setPolicyForm] = useState({ code: "", name: "", version: "1", effectiveFrom: new Date().toISOString().slice(0, 10), rules: "" });
   const [drugSource, setDrugSource] = useState("EML");
@@ -482,15 +487,19 @@ export function ClinicalPage() {
   }, []);
 
   const runWithSafety = async (operation: SafetyRequest) => {
+    const originatingVisitId = activeVisitIdRef.current;
+    const selectionGeneration = selectionGenerationRef.current;
     try {
       await operation([]);
     } catch (error) {
       if (error instanceof RegistryError && error.code === "ORDER_SAFETY_HARD_STOP") {
+        if (originatingVisitId !== activeVisitIdRef.current ||
+          selectionGeneration !== selectionGenerationRef.current) return;
         const details = error.details as { requiredOverrides?: SafetyAlert[] } | null;
         const alerts = details?.requiredOverrides ?? [];
         if (alerts.length) {
           setSafetyAlerts(alerts);
-          setSafetyRequest(() => operation);
+          setSafetyRequest({ operation, originatingVisitId, selectionGeneration });
           return;
         }
       }
@@ -1114,17 +1123,17 @@ export function ClinicalPage() {
 
       {safetyRequest ? <SafetyOverrideDialog alerts={safetyAlerts} onCancel={() => { setSafetyRequest(null); setSafetyAlerts([]); }}
         onConfirm={(overrides) => {
-          const action = safetyRequest;
-          const originatingVisitId = activeVisitIdRef.current;
-          const selectionGeneration = selectionGenerationRef.current;
+          const pending = safetyRequest;
           setSafetyRequest(null);
           setSafetyAlerts([]);
+          if (pending.originatingVisitId !== activeVisitIdRef.current ||
+            pending.selectionGeneration !== selectionGenerationRef.current) return;
           setBusy(true);
-          void action(overrides).then(async () => {
+          void pending.operation(overrides).then(async () => {
             toast.success("Clinical action recorded with audited safety override.");
             await loadBase();
-            if (encounterId && selectionGeneration === selectionGenerationRef.current) {
-              await loadEncounter(encounterId, originatingVisitId, selectionGeneration);
+            if (encounterId && pending.selectionGeneration === selectionGenerationRef.current) {
+              await loadEncounter(encounterId, pending.originatingVisitId, pending.selectionGeneration);
             }
           }).catch((error: unknown) => toast.error(errorMessage(error, "The overridden action could not be completed.")))
             .finally(() => setBusy(false));

@@ -872,7 +872,7 @@ const signEncounter = async (req: Request, encounterId: string) => {
   const signer = await actorStaff(req);
   const licence = await ensureLicence(signer.id);
   await db.execute(sql`
-    signed_encounter AS (
+    WITH signed_encounter AS (
       UPDATE encounter SET status = 'SIGNED', signed_at = now(),
         signed_by_staff_id = ${signer.id}::uuid, ended_at = now()
       WHERE id = ${encounterId}::uuid AND status = 'OPEN'
