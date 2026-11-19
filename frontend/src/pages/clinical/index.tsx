@@ -298,6 +298,7 @@ export function ClinicalPage() {
   const [interactions, setInteractions] = useState({ genericA: "", genericB: "", severity: "MODERATE", effect: "", management: "", source: "" });
   const encounterRequestRef = useRef(0);
   const triageRequestRef = useRef(0);
+  const selectionGenerationRef = useRef(0);
   const activeVisitIdRef = useRef(visitId);
   activeVisitIdRef.current = visitId;
 
@@ -311,6 +312,14 @@ export function ClinicalPage() {
     value: unit.id, label: `${unit.name} · ${unit.code}`,
   })), [units]);
 
+  const selectVisit = useCallback((id: string) => {
+    if (id !== activeVisitIdRef.current) {
+      selectionGenerationRef.current += 1;
+      activeVisitIdRef.current = id;
+      setVisitId(id);
+    }
+  }, []);
+
   const loadBase = useCallback(async () => {
     try {
       const [visitResult, refs, taskResult] = await Promise.all([
@@ -323,14 +332,18 @@ export function ClinicalPage() {
       setUnits(refs.data.units);
       setPolicies(refs.data.ewsPolicies);
       setTasks(taskResult.data);
-      setVisitId((current) => rows.some((row) => row.visit.id === current) ? current : rows[0]?.visit.id ?? "");
+      const nextVisitId = rows.some((row) => row.visit.id === activeVisitIdRef.current)
+        ? activeVisitIdRef.current
+        : rows[0]?.visit.id ?? "";
+      selectVisit(nextVisitId);
     } catch (error) {
       toast.error(errorMessage(error, "Clinical worklists could not be loaded."));
     }
-  }, []);
+  }, [selectVisit]);
 
-  const loadEncounter = useCallback(async (id: string, originatingVisitId: string) => {
-    if (originatingVisitId !== activeVisitIdRef.current) return;
+  const loadEncounter = useCallback(async (id: string, originatingVisitId: string, selectionGeneration: number) => {
+    if (originatingVisitId !== activeVisitIdRef.current ||
+      selectionGeneration !== selectionGenerationRef.current) return;
     const requestId = ++encounterRequestRef.current;
     if (!id) {
       setEncounterId("");
@@ -341,11 +354,14 @@ export function ClinicalPage() {
       const result = await clinicalRequest<EncounterRecord>(`encounters/${id}`);
       if (requestId !== encounterRequestRef.current ||
         originatingVisitId !== activeVisitIdRef.current ||
+        selectionGeneration !== selectionGenerationRef.current ||
         result.data.visitId !== originatingVisitId) return;
       setEncounterId(id);
       setEncounterData(result.data);
     } catch (error) {
-      if (requestId === encounterRequestRef.current && originatingVisitId === activeVisitIdRef.current) {
+      if (requestId === encounterRequestRef.current &&
+        originatingVisitId === activeVisitIdRef.current &&
+        selectionGeneration === selectionGenerationRef.current) {
         toast.error(errorMessage(error, "Encounter could not be loaded."));
       }
     }
@@ -413,14 +429,19 @@ export function ClinicalPage() {
       return;
     }
     let active = true;
+    const selectionGeneration = selectionGenerationRef.current;
     clinicalRequest<Array<{ id: string; status: string }>>(`visits/${visitId}/encounters`)
       .then(({ data }) => {
-        if (!active) return;
+        if (!active || selectionGeneration !== selectionGenerationRef.current) return;
         const current = data.find((row) => row.status === "OPEN") ?? data[0];
-        if (current) void loadEncounter(current.id, visitId);
+        if (current) void loadEncounter(current.id, visitId, selectionGeneration);
         else { setEncounterId(""); setEncounterData(null); }
       })
-      .catch((error: unknown) => { if (active) toast.error(errorMessage(error, "Visit encounters could not be loaded.")); });
+      .catch((error: unknown) => {
+        if (active && selectionGeneration === selectionGenerationRef.current) {
+          toast.error(errorMessage(error, "Visit encounters could not be loaded."));
+        }
+      });
     return () => { active = false; };
   }, [visitId, loadEncounter]);
 
@@ -477,12 +498,16 @@ export function ClinicalPage() {
     }
   };
   const withBusy = async (operation: () => Promise<void>, success?: string, rethrow = false) => {
+    const originatingVisitId = activeVisitIdRef.current;
+    const selectionGeneration = selectionGenerationRef.current;
     setBusy(true);
     try {
       await operation();
       if (success) toast.success(success);
       await loadBase();
-      if (encounterId) await loadEncounter(encounterId, visitId);
+      if (encounterId && selectionGeneration === selectionGenerationRef.current) {
+        await loadEncounter(encounterId, originatingVisitId, selectionGeneration);
+      }
     } catch (error) {
       if (rethrow) throw error;
       const fieldErrors = error instanceof RegistryError
@@ -500,12 +525,14 @@ export function ClinicalPage() {
   const startEncounter = () => withBusy(async () => {
     if (!visitId) return;
     const originatingVisitId = visitId;
+    const selectionGeneration = selectionGenerationRef.current;
     const result = await clinicalRequest<{ id: string }>(`visits/${originatingVisitId}/encounters`, {
       method: "POST",
       body: { encounterType, chiefComplaint: triage.complaint || null },
     });
-    await loadEncounter(result.data.id, originatingVisitId);
-    if (originatingVisitId === activeVisitIdRef.current) setTab("workbench");
+    await loadEncounter(result.data.id, originatingVisitId, selectionGeneration);
+    if (originatingVisitId === activeVisitIdRef.current &&
+      selectionGeneration === selectionGenerationRef.current) setTab("workbench");
   }, "Encounter opened.");
 
   const saveTriage = () => withBusy(async () => {
@@ -765,7 +792,7 @@ export function ClinicalPage() {
         <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_auto] md:items-end">
           <div className="space-y-2">
             <Label>Open visit</Label>
-            <SearchableSelect options={visitOptions} value={visitId} onValueChange={setVisitId}
+            <SearchableSelect options={visitOptions} value={visitId} onValueChange={selectVisit}
               placeholder="Select a patient visit" searchPlaceholder="Search patient or clinic" />
           </div>
           <div className="text-sm text-muted-foreground">
@@ -1088,13 +1115,17 @@ export function ClinicalPage() {
       {safetyRequest ? <SafetyOverrideDialog alerts={safetyAlerts} onCancel={() => { setSafetyRequest(null); setSafetyAlerts([]); }}
         onConfirm={(overrides) => {
           const action = safetyRequest;
+          const originatingVisitId = activeVisitIdRef.current;
+          const selectionGeneration = selectionGenerationRef.current;
           setSafetyRequest(null);
           setSafetyAlerts([]);
           setBusy(true);
           void action(overrides).then(async () => {
             toast.success("Clinical action recorded with audited safety override.");
             await loadBase();
-            if (encounterId) await loadEncounter(encounterId, visitId);
+            if (encounterId && selectionGeneration === selectionGenerationRef.current) {
+              await loadEncounter(encounterId, originatingVisitId, selectionGeneration);
+            }
           }).catch((error: unknown) => toast.error(errorMessage(error, "The overridden action could not be completed.")))
             .finally(() => setBusy(false));
         }} /> : null}

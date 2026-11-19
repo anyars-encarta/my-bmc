@@ -695,17 +695,29 @@ router.post("/visits/:id/encounters", requireAnyRole(DOCTORS), async (req, res, 
     const visitId = requestId(req, "id");
     const payload = parseBody(encounterCreateSchema, req.body);
     const visitRow = await loadVisit(req, visitId);
-    if (visitRow.status !== "OPEN") throw conflict("The visit is closed.", "VISIT_CLOSED");
     if (!visitRow.currentUnitId) throw validationError("The visit needs a clinical unit.", "VISIT_UNIT_REQUIRED");
     const clinician = await actorStaff(req);
-    const [created] = await db.insert(encounter).values({
-      visitId,
-      patientId: visitRow.patientId,
-      encounterType: payload.encounterType,
-      providerStaffId: clinician.id,
-      orgUnitId: visitRow.currentUnitId,
-      chiefComplaint: payload.chiefComplaint,
-    }).returning();
+    const creation = await db.execute(sql<{ id: string }>`
+      WITH eligible_visit AS (
+        UPDATE visit
+        SET open_encounter_count = open_encounter_count + 1
+        WHERE id = ${visitId}::uuid AND status = 'OPEN'
+        RETURNING id, patient_id, current_unit_id
+      ),
+      created_encounter AS (
+        INSERT INTO encounter (
+          visit_id, patient_id, encounter_type, provider_staff_id, org_unit_id, chief_complaint
+        )
+        SELECT eligible_visit.id, eligible_visit.patient_id, ${payload.encounterType},
+          ${clinician.id}::uuid, eligible_visit.current_unit_id, ${payload.chiefComplaint}
+        FROM eligible_visit
+        RETURNING id
+      )
+      SELECT id FROM created_encounter
+    `);
+    const createdId = creation.rows[0]?.id;
+    if (typeof createdId !== "string") throw conflict("The visit is closed.", "VISIT_CLOSED");
+    const [created] = await db.select().from(encounter).where(eq(encounter.id, createdId)).limit(1);
     if (!created) throw new Error("Encounter was not created.");
     await writeAudit(req, {
       action: "CREATE", entityType: "encounter", entityId: created.id,
@@ -860,7 +872,7 @@ const signEncounter = async (req: Request, encounterId: string) => {
   const signer = await actorStaff(req);
   const licence = await ensureLicence(signer.id);
   await db.execute(sql`
-    WITH signed_encounter AS (
+    signed_encounter AS (
       UPDATE encounter SET status = 'SIGNED', signed_at = now(),
         signed_by_staff_id = ${signer.id}::uuid, ended_at = now()
       WHERE id = ${encounterId}::uuid AND status = 'OPEN'
@@ -872,32 +884,32 @@ const signEncounter = async (req: Request, encounterId: string) => {
       RETURNING id
     ),
     closed_visit AS (
-      UPDATE visit SET status = 'CLOSED', closed_at = now()
-      WHERE status = 'OPEN'
-        AND id IN (
-          SELECT signed_encounter.visit_id FROM signed_encounter
-          INNER JOIN visit AS target_visit ON target_visit.id = signed_encounter.visit_id
-          WHERE target_visit.disposition IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN')
-            AND NOT EXISTS (
-              SELECT 1 FROM encounter AS unsigned_encounter
-              WHERE unsigned_encounter.visit_id = signed_encounter.visit_id
-                AND unsigned_encounter.status <> 'SIGNED'
-                AND unsigned_encounter.id <> signed_encounter.id
-            )
-        )
-      RETURNING id, patient_id, current_unit_id
+      UPDATE visit SET
+        open_encounter_count = open_encounter_count - 1,
+        status = CASE
+          WHEN status = 'OPEN' AND open_encounter_count = 1
+            AND disposition IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN') THEN 'CLOSED'
+          ELSE status
+        END,
+        closed_at = CASE
+          WHEN status = 'OPEN' AND open_encounter_count = 1
+            AND disposition IN ('DISCHARGED_HOME', 'LEFT_WITHOUT_BEING_SEEN') THEN now()
+          ELSE closed_at
+        END
+      WHERE id IN (SELECT visit_id FROM signed_encounter) AND open_encounter_count > 0
+      RETURNING id, patient_id, current_unit_id, status
     ),
     visit_status_audit AS (
       INSERT INTO audit_log (
         actor_user_id, actor_roles, action, entity_type, entity_id, patient_id, org_unit_id,
         request_id, ip, user_agent, reason, before, after
       )
-      SELECT ${req.user?.id ?? null}, ${req.user?.roles ?? []}, 'STATUS_CHANGE', 'visit',
+      SELECT ${req.user?.id ?? null}, ${sql.param(req.user?.roles ?? [], auditLog.actorRoles)}, 'STATUS_CHANGE', 'visit',
         id::text, patient_id, current_unit_id, ${req.requestId ?? null},
         ${req.ip?.replace(/^::ffff:/, "") ?? null}::inet, ${req.get("user-agent") ?? null},
         'Visit closed after its last encounter was signed.',
         jsonb_build_object('status', 'OPEN'), jsonb_build_object('status', 'CLOSED')
-      FROM closed_visit
+      FROM closed_visit WHERE status = 'CLOSED'
       RETURNING entity_id
     )
     SELECT id FROM signed_encounter
@@ -1191,7 +1203,7 @@ router.post("/orders/:id/payment-clearance", requireAnyRole(["super_admin", "hos
           actor_user_id, actor_roles, action, entity_type, entity_id, patient_id,
           request_id, ip, user_agent, reason, before, after
         )
-        SELECT ${req.user?.id ?? null}, ${req.user?.roles ?? []}, 'OVERRIDE', 'clinical_order',
+        SELECT ${req.user?.id ?? null}, ${sql.param(req.user?.roles ?? [], auditLog.actorRoles)}, 'OVERRIDE', 'clinical_order',
           cleared_order.id::text, cleared_order.patient_id, ${req.requestId ?? null},
           ${req.ip?.replace(/^::ffff:/, "") ?? null}::inet, ${req.get("user-agent") ?? null},
           ${payload.reason}, jsonb_build_object('paymentClearedAt', null),
@@ -1478,14 +1490,16 @@ router.patch("/drug-interactions/:id", requireAnyRole(ADMIN), async (req, res, n
     if (!current) throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
     const patch = parseBody(interactionPatchSchema, req.body);
     parseBody(interactionSchema, { ...current, ...patch });
-    const pairChanged = patch.genericA !== undefined || patch.genericB !== undefined;
-    const conditions = [eq(drugInteraction.id, id)];
-    if (pairChanged) {
-      conditions.push(eq(drugInteraction.genericA, current.genericA), eq(drugInteraction.genericB, current.genericB));
-    }
+    const conditions = [
+      eq(drugInteraction.id, id),
+      eq(drugInteraction.genericA, current.genericA),
+      eq(drugInteraction.genericB, current.genericB),
+    ];
     const [updated] = await db.update(drugInteraction).set(patch).where(and(...conditions)).returning();
     if (!updated) {
-      if (pairChanged) throw conflict("The interaction pair changed while it was being updated.", "DRUG_INTERACTION_CHANGED");
+      const [stillExists] = await db.select({ id: drugInteraction.id }).from(drugInteraction)
+        .where(eq(drugInteraction.id, id)).limit(1);
+      if (stillExists) throw conflict("The interaction pair changed while it was being updated.", "DRUG_INTERACTION_CHANGED");
       throw notFound("Drug interaction not found.", "DRUG_INTERACTION_NOT_FOUND");
     }
     res.json({ data: updated });
@@ -1730,23 +1744,27 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
         throw conflict("The medication order can no longer be cancelled.", "ORDER_STATE_CONFLICT");
       }
     }
-    const cancellation = await db.execute(sql<{ id: string }>`
-      WITH locked_prescription AS MATERIALIZED (
-        SELECT id, order_id, status FROM prescription
-        WHERE id = ${id}::uuid
-        FOR UPDATE
-      ),
-      locked_order AS MATERIALIZED (
+    const cancellation = await db.execute(sql<{ id: string; prior_status: string }>`
+      WITH locked_order AS MATERIALIZED (
         SELECT orders.id, orders.status
         FROM clinical_order AS orders
-        INNER JOIN locked_prescription AS rx ON rx.order_id = orders.id
+        WHERE orders.id = ${current.orderId}::uuid
         FOR UPDATE OF orders
       ),
+      locked_prescription AS MATERIALIZED (
+        SELECT rx.id, rx.order_id, rx.status, rx.valid_until
+        FROM prescription AS rx
+        LEFT JOIN locked_order AS orders ON orders.id = rx.order_id
+        WHERE rx.id = ${id}::uuid
+          AND (rx.order_id IS NULL OR orders.id IS NOT NULL)
+        FOR UPDATE OF rx
+      ),
       eligible_prescription AS MATERIALIZED (
-        SELECT rx.id, rx.order_id
+        SELECT rx.id, rx.order_id, rx.status
         FROM locked_prescription AS rx
         LEFT JOIN locked_order AS orders ON orders.id = rx.order_id
         WHERE rx.status IN ('DRAFT', 'ISSUED', 'PARTIALLY_DISPENSED')
+          AND (rx.valid_until IS NULL OR rx.valid_until >= CURRENT_DATE)
           AND (rx.order_id IS NULL OR orders.status IN ('ORDERED', 'IN_PROGRESS'))
       ),
       cancelled_order AS (
@@ -1761,14 +1779,14 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
         FROM eligible_prescription AS eligible
         WHERE rx.id = eligible.id
           AND (rx.order_id IS NULL OR rx.order_id IN (SELECT id FROM cancelled_order))
-        RETURNING rx.id
+        RETURNING rx.id, eligible.status AS prior_status
       ),
       cancelled_items AS (
         UPDATE prescription_item SET status = 'CANCELLED', stopped_reason = ${payload.reason}
         WHERE prescription_id IN (SELECT id FROM cancelled_prescription) AND status = 'ACTIVE'
         RETURNING id
       )
-      SELECT id FROM cancelled_prescription
+      SELECT id, prior_status FROM cancelled_prescription
     `);
     if (!cancellation.rows[0]) {
       throw conflict("The prescription or linked order changed before cancellation.", "PRESCRIPTION_STATE_CONFLICT");
@@ -1778,7 +1796,7 @@ router.post("/prescriptions/:id/cancel", requireAnyRole(PHARMACY_WRITE), async (
     await writeAudit(req, {
       action: "STATUS_CHANGE", entityType: "prescription", entityId: id, patientId: current.patientId,
       orgUnitId: record.orgUnitId, reason: payload.reason,
-      before: { status: current.status }, after: { status: "CANCELLED" },
+      before: { status: cancellation.rows[0].prior_status }, after: { status: "CANCELLED" },
     });
     res.json({ data: updated });
   } catch (error) { next(error); }

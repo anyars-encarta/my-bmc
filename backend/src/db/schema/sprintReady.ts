@@ -910,6 +910,7 @@ export const visit = pgTable("visit", {
   closedAt: timestamp("closed_at", { withTimezone: true }),
   status: varchar("status", { length: 10 }).default('OPEN').notNull(),
   disposition: varchar("disposition", { length: 20 }),
+  openEncounterCount: integer("open_encounter_count").default(0).notNull(),
 });
 
 export type Visit = typeof visit.$inferSelect;
