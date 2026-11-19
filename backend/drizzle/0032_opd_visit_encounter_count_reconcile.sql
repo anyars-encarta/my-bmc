@@ -1,15 +1,15 @@
 DO $$
-DECLARE
-  visit_row record;
 BEGIN
-  FOR visit_row IN SELECT id FROM visit ORDER BY id FOR UPDATE LOOP
-    UPDATE visit
-    SET open_encounter_count = (
-      SELECT count(*)::integer
-      FROM encounter
-      WHERE encounter.visit_id = visit_row.id AND encounter.status <> 'SIGNED'
-    )
-    WHERE id = visit_row.id;
-  END LOOP;
+  LOCK TABLE visit IN SHARE ROW EXCLUSIVE MODE;
+  UPDATE visit AS target
+  SET open_encounter_count = counts.open_count
+  FROM (
+    SELECT visit_row.id,
+      count(encounter_row.id) FILTER (WHERE encounter_row.status <> 'SIGNED')::integer AS open_count
+    FROM visit AS visit_row
+    LEFT JOIN encounter AS encounter_row ON encounter_row.visit_id = visit_row.id
+    GROUP BY visit_row.id
+  ) AS counts
+  WHERE target.id = counts.id;
 END
 $$;

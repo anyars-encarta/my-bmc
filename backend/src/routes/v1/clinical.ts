@@ -871,7 +871,7 @@ const signEncounter = async (req: Request, encounterId: string) => {
   }
   const signer = await actorStaff(req);
   const licence = await ensureLicence(signer.id);
-  await db.execute(sql`
+  const signing = await db.execute(sql<{ id: string }>`
     WITH signed_encounter AS (
       UPDATE encounter SET status = 'SIGNED', signed_at = now(),
         signed_by_staff_id = ${signer.id}::uuid, ended_at = now()
@@ -914,8 +914,11 @@ const signEncounter = async (req: Request, encounterId: string) => {
     )
     SELECT id FROM signed_encounter
   `);
+  if (!signing.rows[0]) {
+    throw conflict("The encounter has already changed.", "CONCURRENT_MODIFICATION");
+  }
   const [updated] = await db.select().from(encounter).where(eq(encounter.id, encounterId)).limit(1);
-  if (!updated || updated.status !== "SIGNED") throw conflict("The encounter has already changed.", "CONCURRENT_MODIFICATION");
+  if (!updated) throw new Error("The signed encounter could not be reloaded.");
   await writeAudit(req, {
     action: "APPROVE", entityType: "encounter", entityId: encounterId,
     patientId: record.patientId, orgUnitId: record.orgUnitId,
@@ -1883,28 +1886,37 @@ router.post("/encounters/:id/disposition", requireAnyRole(DOCTORS), async (req, 
     }
     if (payload.disposition === "ADMITTED") {
       const bedRequestId = randomUUID();
-      await db.execute(sql`
-        WITH new_request AS (
-          INSERT INTO bed_request (
-            id, patient_id, visit_id, requested_unit_id, priority, clinical_summary, requested_by_staff_id
-          ) SELECT
-            ${bedRequestId}::uuid, ${record.patientId}::uuid, ${record.visitId}::uuid,
-            ${payload.requestedUnitId}::uuid, 'ROUTINE', ${payload.clinicalSummary}, ${clinician.id}::uuid
-          FROM encounter WHERE id = ${encounterId}::uuid AND status = 'OPEN'
-          RETURNING id
+      const admission = await db.execute(sql<{ id: string }>`
+        WITH locked_encounter AS MATERIALIZED (
+          SELECT id, patient_id, visit_id
+          FROM encounter
+          WHERE id = ${encounterId}::uuid AND status = 'OPEN'
+          FOR UPDATE
         ),
         updated_encounter AS (
-          UPDATE encounter SET disposition = 'ADMITTED'
-          WHERE id = ${encounterId}::uuid AND status = 'OPEN'
-            AND EXISTS (SELECT 1 FROM new_request)
-          RETURNING visit_id
+          UPDATE encounter AS target SET disposition = 'ADMITTED'
+          FROM locked_encounter
+          WHERE target.id = locked_encounter.id AND target.status = 'OPEN'
+          RETURNING target.patient_id, target.visit_id
+        ),
+        updated_visit AS (
+          UPDATE visit SET status = 'ADMITTED', disposition = 'ADMITTED'
+          WHERE id IN (SELECT visit_id FROM updated_encounter)
+          RETURNING id
+        ),
+        new_request AS (
+          INSERT INTO bed_request (
+            id, patient_id, visit_id, requested_unit_id, priority, clinical_summary, requested_by_staff_id
+          )
+          SELECT ${bedRequestId}::uuid, updated_encounter.patient_id, updated_encounter.visit_id,
+            ${payload.requestedUnitId}::uuid, 'ROUTINE', ${payload.clinicalSummary}, ${clinician.id}::uuid
+          FROM updated_encounter
+          INNER JOIN updated_visit ON updated_visit.id = updated_encounter.visit_id
+          RETURNING id
         )
-        UPDATE visit SET status = 'ADMITTED', disposition = 'ADMITTED'
-        WHERE id IN (SELECT visit_id FROM updated_encounter)
+        SELECT id FROM new_request
       `);
-      const [updated] = await db.select({ id: encounter.id }).from(encounter)
-        .where(and(eq(encounter.id, encounterId), eq(encounter.disposition, "ADMITTED"))).limit(1);
-      if (!updated) throw conflict("The encounter has already changed.", "ENCOUNTER_STATE_CONFLICT");
+      if (!admission.rows[0]) throw conflict("The encounter has already changed.", "ENCOUNTER_STATE_CONFLICT");
       await writeAudit(req, {
         action: "STATUS_CHANGE", entityType: "encounter", entityId: encounterId,
         patientId: record.patientId, orgUnitId: record.orgUnitId,
